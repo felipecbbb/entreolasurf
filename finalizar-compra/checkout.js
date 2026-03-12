@@ -49,17 +49,6 @@ async function init() {
     if (formWrap) formWrap.prepend(msgEl);
   }
 
-  // Render summary
-  const summaryItems = cart.map(i => {
-    const isClass = i.type === 'class_reservation';
-    const label = isClass ? `${i.name} (anticipo)` : `${i.name} × ${i.quantity}`;
-    return `<div class="summary-item"><span class="name">${label}</span><span class="amt">${formatPrice(i.price * i.quantity)}</span></div>`;
-  }).join('');
-  summaryWrap.innerHTML = `
-    <h3>Resumen del pedido</h3>
-    ${summaryItems}
-    <div class="summary-total"><span>Total</span><span>${formatPrice(getCartTotal())}</span></div>`;
-
   // Pre-fill if logged in
   let profile = null;
   if (session) {
@@ -70,6 +59,52 @@ async function init() {
     const bar = document.getElementById('guest-bar');
     if (bar) bar.style.display = 'flex';
   }
+
+  // Credit balance logic
+  const creditBalance = Number(profile?.credit_balance || 0);
+  const cartTotal = getCartTotal();
+  let useCredit = false;
+  let creditApplied = 0;
+  let finalTotal = cartTotal;
+
+  // Render summary
+  const summaryItems = cart.map(i => {
+    const isClass = i.type === 'class_reservation';
+    const label = isClass ? `${i.name} (anticipo)` : `${i.name} × ${i.quantity}`;
+    return `<div class="summary-item"><span class="name">${label}</span><span class="amt">${formatPrice(i.price * i.quantity)}</span></div>`;
+  }).join('');
+
+  function renderSummary() {
+    creditApplied = useCredit ? Math.min(creditBalance, cartTotal) : 0;
+    finalTotal = cartTotal - creditApplied;
+
+    summaryWrap.innerHTML = `
+      <h3>Resumen del pedido</h3>
+      ${summaryItems}
+      <div class="summary-total"><span>Subtotal</span><span>${formatPrice(cartTotal)}</span></div>
+      ${creditBalance > 0 && session ? `
+        <div class="credit-option">
+          <label class="credit-toggle">
+            <input type="checkbox" id="use-credit-cb" ${useCredit ? 'checked' : ''}>
+            <span>Usar saldo a favor <strong>(${formatPrice(creditBalance)})</strong></span>
+          </label>
+          ${useCredit ? `<div class="credit-discount"><span>Saldo aplicado</span><span>-${formatPrice(creditApplied)}</span></div>` : ''}
+        </div>
+      ` : ''}
+      <div class="summary-total summary-final"><span>Total a pagar</span><span>${formatPrice(finalTotal)}</span></div>
+      ${useCredit && finalTotal === 0 ? '<p class="credit-full-msg">El saldo cubre el total. No se realizará cobro adicional.</p>' : ''}`;
+
+    // Bind checkbox
+    const cb = document.getElementById('use-credit-cb');
+    if (cb) {
+      cb.addEventListener('change', () => {
+        useCredit = cb.checked;
+        renderSummary();
+      });
+    }
+  }
+
+  renderSummary();
 
   if (profile) {
     const f = document.getElementById('co-form');
@@ -105,25 +140,38 @@ async function init() {
       return;
     }
 
+    // Recalculate credit at submit time
+    const appliedCredit = useCredit ? Math.min(creditBalance, cartTotal) : 0;
+    const totalToPay = cartTotal - appliedCredit;
+
+    const orderNotes = [
+      f.notas?.value || '',
+      appliedCredit > 0 ? `Saldo aplicado: ${formatPrice(appliedCredit)}` : '',
+    ].filter(Boolean).join(' | ') || null;
+
     const orderData = {
       user_id: session.user.id,
       status: 'paid',
-      total: getCartTotal(),
+      total: cartTotal,
       shipping_address: [f.direccion?.value, f.ciudad?.value, f.cp?.value].filter(Boolean).join(', ') || null,
-      notes: f.notas?.value || null,
+      notes: orderNotes,
     };
 
     try {
       // Save address/phone to profile for future orders
-      if (session) {
-        const profileUpdate = {};
-        if (f.telefono?.value) profileUpdate.phone = f.telefono.value;
-        if (f.direccion?.value) profileUpdate.address = f.direccion.value;
-        if (f.ciudad?.value) profileUpdate.city = f.ciudad.value;
-        if (f.cp?.value) profileUpdate.postal_code = f.cp.value;
-        if (Object.keys(profileUpdate).length) {
-          await supabase.from('profiles').update(profileUpdate).eq('id', session.user.id);
-        }
+      const profileUpdate = {};
+      if (f.telefono?.value) profileUpdate.phone = f.telefono.value;
+      if (f.direccion?.value) profileUpdate.address = f.direccion.value;
+      if (f.ciudad?.value) profileUpdate.city = f.ciudad.value;
+      if (f.cp?.value) profileUpdate.postal_code = f.cp.value;
+
+      // Deduct credit balance if used
+      if (appliedCredit > 0) {
+        profileUpdate.credit_balance = creditBalance - appliedCredit;
+      }
+
+      if (Object.keys(profileUpdate).length) {
+        await supabase.from('profiles').update(profileUpdate).eq('id', session.user.id);
       }
 
       // Create order
