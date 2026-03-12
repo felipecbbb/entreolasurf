@@ -1832,6 +1832,7 @@ export async function renderCalendario(container) {
               enviarConfirmacion,
               contact: { ...contactData },
               persons: persons.map(p => ({...p})),
+              personCredits: JSON.parse(JSON.stringify(personCredits)),
               sessions: Object.keys(sessionQuantities).map(sid => {
                 const s = sameTypeWeek.find(c => c.id === sid) || weekClasses.find(c => c.id === sid);
                 return s ? {...s} : null;
@@ -1839,6 +1840,7 @@ export async function renderCalendario(container) {
               activityType: cls.type,
               activityLabel: label,
               activityColor: color,
+              payments: [],
             };
 
             showToast('Reserva confirmada', 'success');
@@ -1937,6 +1939,55 @@ export async function renderCalendario(container) {
         // Tabs content
         let tabContent = '';
         if (activeTab === 'resumen') {
+          // Build bonos section for linked persons
+          let bonosHtml = '';
+          const linkedPersons = res.persons.filter(p => p.profileId);
+          if (linkedPersons.length > 0 || res.personCredits) {
+            let bonoCards = '';
+            for (const p of res.persons) {
+              const pc = res.personCredits?.[p.id];
+              if (!pc || !pc.allBonos?.length) continue;
+              const name = p.profileName || `${p.nombre} ${p.apellidos}`.trim();
+              bonoCards += pc.allBonos.map(b => {
+                const remaining = b.total_credits - b.used_credits;
+                const isSelected = pc.selectedBonoId === b.id && pc.useCredit;
+                const paidPct = b.expectedPrice > 0 ? Math.min(100, (b.totalPaidReal / b.expectedPrice) * 100) : 0;
+                return `
+                  <div class="rv-bono-card ${isSelected ? 'rv-bono-active' : ''}" data-person-id="${p.id}" data-bono-id="${b.id}">
+                    <div class="rv-bono-header">
+                      <span class="rv-bono-name">${name}</span>
+                      <span class="rv-bono-badge ${isSelected ? 'rv-bono-badge-active' : ''}">${isSelected ? 'En uso' : 'Disponible'}</span>
+                    </div>
+                    <div class="rv-bono-details">
+                      <span>${TYPE_LABELS[b.class_type] || b.class_type} · ${remaining}/${b.total_credits} clases</span>
+                    </div>
+                    <div class="rv-bono-pay-row">
+                      <div class="rv-bono-bar"><div class="rv-bono-bar-fill" style="width:${paidPct}%;background:${b.isFullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
+                      <span class="rv-bono-pay-label">${b.totalPaidReal.toFixed(2)}€ / ${b.expectedPrice.toFixed(2)}€</span>
+                      ${!b.isFullyPaid ? `<button class="rv-bono-pay-btn" data-bono-id="${b.id}" data-pending="${b.pendingAmount.toFixed(2)}" data-person-id="${p.id}">Pagar ${b.pendingAmount.toFixed(2)}€</button>` : '<span style="color:#166534;font-size:.75rem;font-weight:600">PAGADO</span>'}
+                    </div>
+                  </div>`;
+              }).join('');
+            }
+
+            // Credit balance
+            let creditHtml = '';
+            for (const p of res.persons) {
+              if (!p.profileId) continue;
+              // We'll load this async, but show placeholder
+              creditHtml += `<div class="rv-credit-row" data-profile-id="${p.profileId}" data-person-name="${p.profileName || p.nombre}"></div>`;
+            }
+
+            if (bonoCards || creditHtml) {
+              bonosHtml = `
+                <div class="rv-info-card" style="margin-top:16px">
+                  <h3 style="font-family:'Space Grotesk',sans-serif;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e7eb">Bonos y Saldo</h3>
+                  ${bonoCards}
+                  <div id="rv-credit-balances">${creditHtml}</div>
+                </div>`;
+            }
+          }
+
           tabContent = `
             <div class="rv-summary-header">
               <h2 class="rv-title">Resumen de la reserva <span class="rv-status-badge" style="background:${statusColor}15;color:${statusColor}">${statusLabel}</span></h2>
@@ -1956,7 +2007,7 @@ export async function renderCalendario(container) {
                     <label>Pendiente</label>
                     <span class="rv-info-amount" style="color:${pendingColor}">${res.pending.toFixed(2)}€</span>
                   </div>
-                  <button class="rv-add-payment-btn" id="rv-add-payment">Añadir pago</button>
+                  <button class="rv-add-payment-btn" id="rv-add-payment">+ Añadir pago</button>
                 </div>
               </div>
               <div class="rv-info-bottom">
@@ -1987,6 +2038,7 @@ export async function renderCalendario(container) {
                 </div>
               </div>
             </div>
+            ${bonosHtml}
             ${personsHtml}`;
         } else if (activeTab === 'datos_comprador') {
           tabContent = `
@@ -2017,14 +2069,40 @@ export async function renderCalendario(container) {
               </div>
             </div>`;
         } else if (activeTab === 'pagos') {
+          const METHOD_LABELS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', saldo: 'Saldo a favor', online: 'Online' };
+          const allPayments = [...(res.payments || [])];
+          if (res.cobrarAnticipo && res.anticipoAmount > 0) {
+            allPayments.unshift({ amount: res.anticipoAmount, method: res.paymentMethod, date: res.createdAt.toISOString(), creditUsed: 0 });
+          }
+          const totalPaid = allPayments.reduce((s, p) => s + p.amount, 0);
+
+          let paymentsListHtml = '';
+          if (allPayments.length) {
+            paymentsListHtml = allPayments.map(p => {
+              const d = new Date(p.date);
+              const dateLabel = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+              return `
+                <div class="rv-pay-row">
+                  <span>${dateLabel} · ${METHOD_LABELS[p.method] || p.method}${p.creditUsed > 0 ? ` (${p.creditUsed.toFixed(2)}€ saldo)` : ''}</span>
+                  <strong style="color:#166534">+${p.amount.toFixed(2)}€</strong>
+                </div>`;
+            }).join('');
+          } else {
+            paymentsListHtml = '<p style="font-size:.85rem;color:#6b7280">No hay pagos registrados</p>';
+          }
+
           tabContent = `
             <h2 class="rv-title">Pagos</h2>
             <div class="rv-info-card" style="padding:24px">
               <div class="rv-payments-summary">
                 <div class="rv-pay-row"><span>Total reserva</span><strong>${res.totalFinal.toFixed(2)}€</strong></div>
                 ${res.discount > 0 ? `<div class="rv-pay-row"><span>Descuento</span><span style="color:#b91c1c">-${res.discount.toFixed(2)}€</span></div>` : ''}
-                ${res.cobrarAnticipo ? `<div class="rv-pay-row"><span>Anticipo (${res.paymentMethod})</span><span style="color:#166534">${res.totalFinal.toFixed(2)}€</span></div>` : ''}
+                <div class="rv-pay-row" style="border-top:1px solid #e5e7eb;padding-top:8px;margin-top:4px"><span>Total pagado</span><strong style="color:#166534">${totalPaid.toFixed(2)}€</strong></div>
                 <div class="rv-pay-row total"><span>Pendiente</span><strong style="color:${pendingColor}">${res.pending.toFixed(2)}€</strong></div>
+              </div>
+              <div style="margin-top:16px;padding-top:12px;border-top:1px dashed #e5e7eb">
+                <h4 style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:0 0 8px">Historial de pagos</h4>
+                ${paymentsListHtml}
               </div>
               <button class="rv-add-payment-btn" id="rv-add-payment-tab" style="margin-top:16px">+ Añadir pago</button>
             </div>`;
@@ -2188,9 +2266,65 @@ export async function renderCalendario(container) {
           });
         });
 
-        // Add payment button
-        overlay.querySelector('#rv-add-payment')?.addEventListener('click', () => openAddPaymentModal(res));
-        overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res));
+        // Add payment buttons
+        overlay.querySelector('#rv-add-payment')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
+        overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
+
+        // Bono card clicks — toggle selection
+        overlay.querySelectorAll('.rv-bono-card').forEach(card => {
+          card.addEventListener('click', (e) => {
+            if (e.target.closest('.rv-bono-pay-btn')) return; // Don't toggle on pay button click
+            const pid = card.dataset.personId;
+            const bid = card.dataset.bonoId;
+            const pc = res.personCredits?.[pid];
+            if (!pc) return;
+            if (pc.selectedBonoId === bid && pc.useCredit) {
+              pc.useCredit = false;
+              pc.selectedBonoId = null;
+            } else {
+              pc.useCredit = true;
+              pc.selectedBonoId = bid;
+              pc.bono = pc.allBonos?.find(b => b.id === bid) || pc.bono;
+            }
+            renderDetail();
+            bindDetailEvents(overlay, res);
+          });
+        });
+
+        // Bono pay buttons
+        overlay.querySelectorAll('.rv-bono-pay-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const bonoId = btn.dataset.bonoId;
+            const pending = parseFloat(btn.dataset.pending) || 0;
+            const pid = btn.dataset.personId;
+            openBonoPayModal(res, overlay, pid, bonoId, pending);
+          });
+        });
+
+        // Load credit balances for linked persons
+        overlay.querySelectorAll('.rv-credit-row').forEach(async (row) => {
+          const profileId = row.dataset.profileId;
+          const personName = row.dataset.personName;
+          try {
+            const { data } = await supabase.from('profiles').select('credit_balance').eq('id', profileId).single();
+            const balance = Number(data?.credit_balance || 0);
+            if (balance > 0) {
+              row.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px dashed #e5e7eb;margin-top:8px">
+                  <div>
+                    <span style="font-size:.82rem;color:#0f2f39;font-weight:600">${personName}</span>
+                    <span style="font-size:.78rem;color:#6b7280"> — Saldo a favor: </span>
+                    <strong style="color:#166534">${balance.toFixed(2)}€</strong>
+                  </div>
+                  <button class="rv-use-credit-btn rv-add-payment-btn" data-profile-id="${profileId}" data-balance="${balance}" data-person-name="${personName}" style="font-size:.75rem;padding:5px 12px">Usar saldo</button>
+                </div>`;
+              row.querySelector('.rv-use-credit-btn')?.addEventListener('click', () => {
+                openUseCreditModal(res, overlay, profileId, balance, personName);
+              });
+            }
+          } catch {}
+        });
 
         // Cancel reservation
         overlay.querySelector('#rv-cancel')?.addEventListener('click', () => {
@@ -2223,11 +2357,25 @@ export async function renderCalendario(container) {
         });
       }
 
-      function openAddPaymentModal(res) {
+      function openAddPaymentModal(res, overlayRef) {
+        // Check for persons with credit balance
+        const personsWithCredit = res.persons.filter(p => p.profileId);
+        let creditOptionHtml = '';
+        if (personsWithCredit.length) {
+          creditOptionHtml = `
+            <div style="margin-top:8px;padding-top:12px;border-top:1px dashed #e5e7eb">
+              <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
+                <input type="checkbox" id="rv-pay-use-credit" style="width:16px;height:16px;accent-color:#0f2f39" />
+                Usar saldo a favor del cliente
+              </label>
+              <div id="rv-credit-info" style="display:none;margin-top:8px;font-size:.82rem;color:#065f46;background:#ecfdf5;padding:8px 12px;border-radius:6px"></div>
+            </div>`;
+        }
+
         openModal('Añadir Pago', `
           <form id="rv-payment-form" class="trip-form">
             <label>Importe</label>
-            <input type="number" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
+            <input type="number" id="rv-pay-amount" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
             <label>Método de pago</label>
             <select name="method" required>
               <option value="">Seleccionar…</option>
@@ -2235,26 +2383,187 @@ export async function renderCalendario(container) {
               <option value="tarjeta">Tarjeta</option>
               <option value="transferencia">Transferencia</option>
               <option value="voucher">Voucher</option>
+              <option value="saldo">Saldo a favor</option>
             </select>
+            ${creditOptionHtml}
             <label>Notas</label>
             <input type="text" name="notes" placeholder="Opcional" />
             <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago</button>
           </form>
         `);
 
-        document.getElementById('rv-payment-form')?.addEventListener('submit', (e) => {
+        // Load credit balance for "saldo" option
+        let clientCreditBalance = 0;
+        let clientProfileId = null;
+        if (personsWithCredit.length) {
+          const firstLinked = personsWithCredit[0];
+          clientProfileId = firstLinked.profileId;
+          supabase.from('profiles').select('credit_balance').eq('id', clientProfileId).single().then(({ data }) => {
+            clientCreditBalance = Number(data?.credit_balance || 0);
+            const creditInfo = document.getElementById('rv-credit-info');
+            if (creditInfo) creditInfo.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€`;
+          });
+
+          document.getElementById('rv-pay-use-credit')?.addEventListener('change', (e) => {
+            const infoEl = document.getElementById('rv-credit-info');
+            if (infoEl) infoEl.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) {
+              const amountInput = document.getElementById('rv-pay-amount');
+              const currentAmount = parseFloat(amountInput.value) || 0;
+              const creditToUse = Math.min(clientCreditBalance, currentAmount);
+              if (creditToUse > 0) {
+                const infoEl = document.getElementById('rv-credit-info');
+                if (infoEl) infoEl.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€ — Se aplicarán ${creditToUse.toFixed(2)}€`;
+              }
+            }
+          });
+        }
+
+        document.getElementById('rv-payment-form')?.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const amount = parseFloat(fd.get('amount')) || 0;
+          const method = fd.get('method');
+          const useCredit = document.getElementById('rv-pay-use-credit')?.checked;
+
+          if (!method && !useCredit) { showToast('Selecciona un método', 'error'); return; }
+
+          let creditUsed = 0;
+          if (useCredit && clientCreditBalance > 0 && clientProfileId) {
+            creditUsed = Math.min(clientCreditBalance, amount);
+            const newBalance = clientCreditBalance - creditUsed;
+            await supabase.from('profiles').update({ credit_balance: newBalance }).eq('id', clientProfileId);
+          }
+
+          const effectiveMethod = creditUsed >= amount ? 'saldo' : (method || 'saldo');
+          res.pending = Math.max(0, res.pending - amount);
+          if (res.pending <= 0) res.status = 'paid';
+          res.payments.push({ amount, method: effectiveMethod, creditUsed, date: new Date().toISOString() });
+
+          closeModal();
+          showToast(`Pago de ${amount.toFixed(2)}€ registrado${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ de saldo)` : ` (${effectiveMethod})`}`, 'success');
+          renderDetail();
+          if (overlayRef) bindDetailEvents(overlayRef, res);
+        });
+      }
+
+      function openBonoPayModal(res, overlayRef, personId, bonoId, pendingAmount) {
+        const pc = res.personCredits?.[personId];
+        const bono = pc?.allBonos?.find(b => b.id === bonoId);
+        if (!bono) return;
+
+        openModal('Pagar Bono', `
+          <form id="rv-bono-pay-form" class="trip-form">
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:14px">
+              <div style="font-size:.82rem;color:#92400e"><strong>${TYPE_LABELS[bono.class_type] || bono.class_type}</strong> · ${bono.total_credits} clases</div>
+              <div style="font-size:.82rem;color:#92400e;margin-top:4px">Pagado: ${bono.totalPaidReal.toFixed(2)}€ / ${bono.expectedPrice.toFixed(2)}€ · <strong>Debe: ${pendingAmount.toFixed(2)}€</strong></div>
+            </div>
+            <label>Importe</label>
+            <input type="number" name="amount" step="0.01" value="${pendingAmount.toFixed(2)}" required />
+            <label>Método de pago</label>
+            <select name="method" required>
+              <option value="">Seleccionar…</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="voucher">Voucher</option>
+              <option value="saldo">Saldo a favor</option>
+            </select>
+            <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago del Bono</button>
+          </form>
+        `);
+
+        document.getElementById('rv-bono-pay-form')?.addEventListener('submit', async (e) => {
           e.preventDefault();
           const fd = new FormData(e.target);
           const amount = parseFloat(fd.get('amount')) || 0;
           const method = fd.get('method');
           if (!method) { showToast('Selecciona un método', 'error'); return; }
-          res.pending = Math.max(0, res.pending - amount);
-          if (res.pending <= 0) res.status = 'paid';
-          closeModal();
-          showToast(`Pago de ${amount.toFixed(2)}€ registrado (${method})`, 'success');
-          renderDetail();
-          const overlay = document.getElementById('bk-overlay');
-          if (overlay) bindDetailEvents(overlay, res);
+
+          const btn = e.target.querySelector('button[type="submit"]');
+          btn.disabled = true; btn.textContent = 'Procesando…';
+
+          try {
+            // Update bono total_paid in DB
+            const newPaid = bono.totalPaidReal + amount;
+            await supabase.from('bonos').update({
+              total_paid: newPaid,
+              updated_at: new Date().toISOString(),
+            }).eq('id', bonoId);
+
+            // If paying with saldo, deduct from profile
+            if (method === 'saldo') {
+              const person = res.persons.find(p => p.id === personId);
+              if (person?.profileId) {
+                const { data: profile } = await supabase.from('profiles').select('credit_balance').eq('id', person.profileId).single();
+                const currentBalance = Number(profile?.credit_balance || 0);
+                await supabase.from('profiles').update({ credit_balance: Math.max(0, currentBalance - amount) }).eq('id', person.profileId);
+              }
+            }
+
+            // Create payment record
+            await createPayment({
+              reservation_type: 'enrollment',
+              reference_id: bonoId,
+              amount,
+              payment_method: method,
+              concept: `Pago bono ${TYPE_LABELS[bono.class_type] || bono.class_type}`,
+            });
+
+            // Update local bono data
+            bono.totalPaidReal = newPaid;
+            bono.pendingAmount = Math.max(0, bono.expectedPrice - newPaid);
+            bono.isFullyPaid = newPaid >= bono.expectedPrice;
+
+            closeModal();
+            showToast(`Pago de ${amount.toFixed(2)}€ registrado para el bono`, 'success');
+            renderDetail();
+            if (overlayRef) bindDetailEvents(overlayRef, res);
+          } catch (err) {
+            showToast('Error: ' + err.message, 'error');
+            btn.disabled = false; btn.textContent = 'Registrar Pago del Bono';
+          }
+        });
+      }
+
+      function openUseCreditModal(res, overlayRef, profileId, balance, personName) {
+        openModal('Usar Saldo a Favor', `
+          <form id="rv-use-credit-form" class="trip-form">
+            <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:14px">
+              <div style="font-size:.85rem;color:#065f46"><strong>${personName}</strong></div>
+              <div style="font-size:.9rem;color:#065f46;margin-top:4px">Saldo disponible: <strong>${balance.toFixed(2)}€</strong></div>
+            </div>
+            <label>Importe a aplicar</label>
+            <input type="number" name="amount" step="0.01" value="${Math.min(balance, res.pending).toFixed(2)}" max="${balance.toFixed(2)}" required />
+            <p style="font-size:.78rem;color:#6b7280;margin:4px 0 0">Pendiente de la reserva: ${res.pending.toFixed(2)}€</p>
+            <button type="submit" class="btn red" style="margin-top:12px">Aplicar Saldo</button>
+          </form>
+        `);
+
+        document.getElementById('rv-use-credit-form')?.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const amount = parseFloat(new FormData(e.target).get('amount')) || 0;
+          if (amount > balance) { showToast('El importe supera el saldo disponible', 'error'); return; }
+          if (amount <= 0) { showToast('Introduce un importe válido', 'error'); return; }
+
+          const btn = e.target.querySelector('button[type="submit"]');
+          btn.disabled = true; btn.textContent = 'Aplicando…';
+
+          try {
+            await supabase.from('profiles').update({ credit_balance: Math.max(0, balance - amount) }).eq('id', profileId);
+
+            res.pending = Math.max(0, res.pending - amount);
+            if (res.pending <= 0) res.status = 'paid';
+            res.payments.push({ amount, method: 'saldo', creditUsed: amount, date: new Date().toISOString() });
+
+            closeModal();
+            showToast(`${amount.toFixed(2)}€ de saldo aplicados a la reserva`, 'success');
+            renderDetail();
+            if (overlayRef) bindDetailEvents(overlayRef, res);
+          } catch (err) {
+            showToast('Error: ' + err.message, 'error');
+            btn.disabled = false; btn.textContent = 'Aplicar Saldo';
+          }
         });
       }
 

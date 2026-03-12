@@ -2603,6 +2603,90 @@
   border-color: var(--color-navy, #0f2f39);
 }
 
+/* Bono cards in reservation detail */
+.rv-bono-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s;
+}
+.rv-bono-card:hover {
+  border-color: #f3c900;
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.rv-bono-active {
+  border-color: #22c55e;
+  background: #f0fdf4;
+}
+.rv-bono-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.rv-bono-name {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--color-navy, #0f2f39);
+}
+.rv-bono-badge {
+  font-size: .68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+.rv-bono-badge-active {
+  background: #dcfce7;
+  color: #166534;
+}
+.rv-bono-details {
+  font-size: .78rem;
+  color: #6b7280;
+  margin-bottom: 8px;
+}
+.rv-bono-pay-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: .78rem;
+}
+.rv-bono-bar {
+  flex: 1;
+  height: 5px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.rv-bono-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s;
+}
+.rv-bono-pay-label {
+  font-size: .75rem;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.rv-bono-pay-btn {
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 5px;
+  background: #22c55e;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s;
+}
+.rv-bono-pay-btn:hover {
+  background: #16a34a;
+}
+
 .rv-info-bottom {
   display: flex;
   gap: 32px;
