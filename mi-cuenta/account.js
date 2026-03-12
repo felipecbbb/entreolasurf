@@ -30,98 +30,222 @@ function getInitials(name) {
   return name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 }
 
+function hideChrome() {
+  const h = document.querySelector('.site-header');
+  const f = document.querySelector('.site-footer');
+  if (h) h.style.display = 'none';
+  if (f) f.style.display = 'none';
+}
+function showChrome() {
+  const h = document.querySelector('.site-header');
+  const f = document.querySelector('.site-footer');
+  if (h) h.style.display = '';
+  if (f) f.style.display = '';
+}
+
 // ---- Auth view (login + register) ----
 function renderAuth() {
+  hideChrome();
   mainEl.innerHTML = `
-    <section class="section" style="padding-top:120px"><div class="container">
-      <div class="page-intro center"><p class="kicker">Mi cuenta</p><h1 class="title">Accede a tu cuenta</h1></div>
-      <div class="auth-cards">
-        <div class="auth-card">
-          <h2>Iniciar sesión</h2>
-          <form id="login-form">
-            <label>Email <input type="email" name="email" required></label>
-            <label>Contraseña <input type="password" name="password" required></label>
-            <p class="auth-error" id="login-error"></p>
-            <button type="submit" class="btn red" style="width:100%">Entrar</button>
-          </form>
+    <div class="auth-page">
+      <div class="auth-page-left">
+        <div class="auth-page-form">
+          <a class="auth-logo" href="/"><span class="logo-entre">entre</span><span class="logo-olas">olas</span></a>
+          <div id="auth-view-login" class="auth-view active">
+            <h1 class="auth-title">Bienvenido de nuevo</h1>
+            <p class="auth-subtitle">Accede a tu cuenta para gestionar tus reservas y clases</p>
+            <form id="login-form" class="auth-form">
+              <div class="auth-field">
+                <label for="login-email">Email</label>
+                <input type="email" id="login-email" name="email" placeholder="tu@email.com" required>
+              </div>
+              <div class="auth-field">
+                <label for="login-pass">Contraseña</label>
+                <input type="password" id="login-pass" name="password" placeholder="Tu contraseña" required>
+              </div>
+              <p class="auth-error" id="login-error"></p>
+              <button type="submit" class="auth-submit-btn">Iniciar sesión</button>
+            </form>
+            <p class="auth-switch">¿No tienes cuenta? <a href="#" id="switch-to-register">Crear cuenta</a></p>
+          </div>
+          <div id="auth-view-register" class="auth-view">
+            <h1 class="auth-title">Crear cuenta</h1>
+            <p class="auth-subtitle">Regístrate para reservar clases y gestionar tu perfil</p>
+            <form id="register-form" class="auth-form">
+              <div class="auth-field">
+                <label for="reg-name">Nombre completo</label>
+                <input type="text" id="reg-name" name="fullname" placeholder="Tu nombre" required>
+              </div>
+              <div class="auth-field">
+                <label for="reg-email">Email</label>
+                <input type="email" id="reg-email" name="email" placeholder="tu@email.com" required>
+              </div>
+              <div class="auth-field">
+                <label for="reg-pass">Contraseña</label>
+                <input type="password" id="reg-pass" name="password" placeholder="Mínimo 6 caracteres" required minlength="6">
+              </div>
+              <p class="auth-error" id="register-error"></p>
+              <button type="submit" class="auth-submit-btn">Crear cuenta</button>
+            </form>
+            <p class="auth-switch">¿Ya tienes cuenta? <a href="#" id="switch-to-login">Iniciar sesión</a></p>
+          </div>
         </div>
-        <div class="auth-card">
-          <h2>Crear cuenta</h2>
-          <form id="register-form">
-            <label>Nombre completo <input type="text" name="fullname" required></label>
-            <label>Email <input type="email" name="email" required></label>
-            <label>Contraseña <input type="password" name="password" required minlength="6"></label>
-            <label>¿Sabes nadar?
-              <select name="can_swim" required>
+      </div>
+      <div class="auth-page-right">
+        <div class="auth-brand-card">
+          <div class="auth-brand-content">
+            <p class="auth-brand-tagline">Surf · Yoga · Paddle Surf · SurfSkate</p>
+            <h2 class="auth-brand-heading">Tu escuela de surf en Roche, Cádiz</h2>
+            <p class="auth-brand-desc">Reserva clases, gestiona tus bonos y consulta tu historial desde tu cuenta personal.</p>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Toggle login/register
+  document.getElementById('switch-to-register').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('auth-view-login').classList.remove('active');
+    document.getElementById('auth-view-register').classList.add('active');
+  });
+  document.getElementById('switch-to-login').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('auth-view-register').classList.remove('active');
+    document.getElementById('auth-view-login').classList.add('active');
+  });
+
+  // Login
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('login-error');
+    const btn = e.target.querySelector('button[type="submit"]');
+    errEl.textContent = '';
+    btn.disabled = true; btn.textContent = 'Entrando…';
+    try {
+      await signIn(e.target.email.value, e.target.password.value);
+      await checkOnboardingOrDashboard();
+    } catch (err) {
+      errEl.textContent = err.message;
+      btn.disabled = false; btn.textContent = 'Iniciar sesión';
+    }
+  });
+
+  // Register
+  document.getElementById('register-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('register-error');
+    const btn = e.target.querySelector('button[type="submit"]');
+    errEl.textContent = '';
+    btn.disabled = true; btn.textContent = 'Creando cuenta…';
+    try {
+      const result = await signUp(e.target.email.value, e.target.password.value, e.target.fullname.value);
+      if (result?.session || result?.user) {
+        await checkOnboardingOrDashboard();
+      } else {
+        errEl.style.color = '#1b5e20';
+        errEl.textContent = 'Cuenta creada. Inicia sesión para continuar.';
+        btn.disabled = false; btn.textContent = 'Crear cuenta';
+      }
+    } catch (err) {
+      errEl.textContent = err.message;
+      btn.disabled = false; btn.textContent = 'Crear cuenta';
+    }
+  });
+}
+
+// ---- Onboarding step (health & equipment) ----
+async function checkOnboardingOrDashboard() {
+  const profile = await getProfile();
+  if (profile && profile.can_swim == null) {
+    renderOnboarding(profile);
+  } else {
+    renderDashboard();
+  }
+}
+
+function renderOnboarding(profile) {
+  hideChrome();
+  const WETSUIT_SIZES = ['6 años','8 años','10 años','12 años','XS','S','M','L','XL'];
+  mainEl.innerHTML = `
+    <div class="auth-page">
+      <div class="auth-page-left">
+        <div class="auth-page-form">
+          <a class="auth-logo" href="/"><span class="logo-entre">entre</span><span class="logo-olas">olas</span></a>
+          <h1 class="auth-title">Un último paso</h1>
+          <p class="auth-subtitle">Necesitamos algunos datos para tu seguridad y comodidad</p>
+          <form id="onboarding-form" class="auth-form">
+            <div class="auth-field">
+              <label for="ob-swim">¿Sabes nadar?</label>
+              <select id="ob-swim" name="can_swim" required>
                 <option value="">Seleccionar</option>
                 <option value="true">Sí</option>
                 <option value="false">No</option>
               </select>
-            </label>
-            <label>¿Tienes alguna lesión?
-              <select name="has_injury" id="reg-injury-select">
+            </div>
+            <div class="auth-field">
+              <label for="ob-injury">¿Tienes alguna lesión?</label>
+              <select id="ob-injury" name="has_injury">
                 <option value="false">No</option>
                 <option value="true">Sí</option>
               </select>
-            </label>
-            <label id="reg-injury-detail-wrap" style="display:none">Describe tu lesión
-              <input type="text" name="injury_detail" placeholder="Ej: rodilla derecha">
-            </label>
-            <label>Talla de neopreno
-              <select name="wetsuit_size">
+            </div>
+            <div class="auth-field" id="ob-injury-wrap" style="display:none">
+              <label for="ob-injury-detail">Describe tu lesión</label>
+              <input type="text" id="ob-injury-detail" name="injury_detail" placeholder="Ej: rodilla derecha">
+            </div>
+            <div class="auth-field">
+              <label for="ob-wetsuit">Talla de neopreno</label>
+              <select id="ob-wetsuit" name="wetsuit_size">
                 <option value="">Sin definir</option>
-                <option value="6 años">6 años</option>
-                <option value="8 años">8 años</option>
-                <option value="10 años">10 años</option>
-                <option value="12 años">12 años</option>
-                <option value="XS">XS</option>
-                <option value="S">S</option>
-                <option value="M">M</option>
-                <option value="L">L</option>
-                <option value="XL">XL</option>
+                ${WETSUIT_SIZES.map(s => `<option value="${s}">${s}</option>`).join('')}
               </select>
-            </label>
-            <p class="auth-error" id="register-error"></p>
-            <button type="submit" class="btn red" style="width:100%">Registrarse</button>
+            </div>
+            <p class="auth-error" id="onboarding-error"></p>
+            <button type="submit" class="auth-submit-btn">Acceder a mi cuenta</button>
           </form>
+          <p class="auth-switch"><a href="#" id="skip-onboarding">Saltar este paso</a></p>
         </div>
       </div>
-    </div></section>`;
+      <div class="auth-page-right">
+        <div class="auth-brand-card">
+          <div class="auth-brand-content">
+            <p class="auth-brand-tagline">Casi listo</p>
+            <h2 class="auth-brand-heading">Tu seguridad es lo primero</h2>
+            <p class="auth-brand-desc">Estos datos nos ayudan a preparar tu material y adaptar las clases a ti.</p>
+          </div>
+        </div>
+      </div>
+    </div>`;
 
-  document.getElementById('login-form').addEventListener('submit', async (e) => {
+  document.getElementById('ob-injury').addEventListener('change', (e) => {
+    document.getElementById('ob-injury-wrap').style.display = e.target.value === 'true' ? '' : 'none';
+  });
+
+  document.getElementById('skip-onboarding').addEventListener('click', async (e) => {
     e.preventDefault();
-    const errEl = document.getElementById('login-error');
-    errEl.textContent = '';
     try {
-      await signIn(e.target.email.value, e.target.password.value);
+      await updateProfile({ can_swim: false, has_injury: false });
+    } catch {}
+    renderDashboard();
+  });
+
+  document.getElementById('onboarding-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('onboarding-error');
+    const btn = e.target.querySelector('button[type="submit"]');
+    errEl.textContent = '';
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      await updateProfile({
+        can_swim: e.target.can_swim.value === 'true' ? true : e.target.can_swim.value === 'false' ? false : null,
+        has_injury: e.target.has_injury.value === 'true',
+        injury_detail: e.target.injury_detail?.value || null,
+        wetsuit_size: e.target.wetsuit_size?.value || null,
+      });
       renderDashboard();
     } catch (err) {
       errEl.textContent = err.message;
-    }
-  });
-
-  document.getElementById('reg-injury-select')?.addEventListener('change', (e) => {
-    document.getElementById('reg-injury-detail-wrap').style.display = e.target.value === 'true' ? '' : 'none';
-  });
-
-  document.getElementById('register-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errEl = document.getElementById('register-error');
-    errEl.textContent = '';
-    const btn = e.target.querySelector('button[type="submit"]');
-    btn.disabled = true; btn.textContent = 'Creando cuenta…';
-    try {
-      const result = await signUp(e.target.email.value, e.target.password.value, e.target.fullname.value, { can_swim: e.target.can_swim.value === 'true', has_injury: e.target.has_injury.value === 'true', injury_detail: e.target.injury_detail?.value || null, wetsuit_size: e.target.wetsuit_size?.value || null });
-      if (result?.session || result?.user) {
-        renderDashboard();
-      } else {
-        errEl.style.color = '#1b5e20';
-        errEl.textContent = 'Cuenta creada. Inicia sesión para continuar.';
-        btn.disabled = false; btn.textContent = 'Registrarse';
-      }
-    } catch (err) {
-      errEl.textContent = err.message;
-      btn.disabled = false; btn.textContent = 'Registrarse';
+      btn.disabled = false; btn.textContent = 'Acceder a mi cuenta';
     }
   });
 }
@@ -150,6 +274,7 @@ const TAB_TITLES = {
 
 // ---- Dashboard view ----
 async function renderDashboard() {
+  showChrome();
   const session = await getSession();
   if (!session) return renderAuth();
   const profile = await getProfile();
@@ -393,7 +518,11 @@ async function init() {
         window.location.href = '/admin/';
         return;
       }
-      renderDashboard();
+      if (profile && profile.can_swim == null) {
+        renderOnboarding(profile);
+      } else {
+        renderDashboard();
+      }
     } else {
       renderAuth();
     }

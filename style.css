@@ -1644,55 +1644,7 @@ td a {
 }
 .confirmation-card p { color: var(--color-muted); margin-bottom: 6px; }
 
-/* --- Account --- */
-.auth-cards {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-.auth-card {
-  background: #fff;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  padding: 28px 24px;
-  display: grid;
-  gap: 12px;
-}
-.auth-card h2 {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 2rem;
-  color: var(--color-navy);
-}
-.auth-card form { display: grid; gap: 10px; }
-.auth-card label {
-  font-family: 'Space Grotesk', sans-serif;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  font-size: .72rem;
-  color: var(--color-navy);
-  display: grid;
-  gap: 5px;
-}
-.auth-card input {
-  width: 100%;
-  border: 1px solid var(--color-line);
-  border-radius: 12px;
-  padding: 11px 12px;
-  font-family: 'Manrope', sans-serif;
-  font-size: .95rem;
-  color: var(--color-text);
-  background: #fff;
-  outline: none;
-}
-.auth-card input:focus {
-  border-color: var(--color-red);
-  box-shadow: 0 0 0 3px rgba(255, 204, 1, 0.25);
-}
-.auth-error {
-  color: #c0392b;
-  font-size: .85rem;
-  min-height: 1.2em;
-}
+/* --- Account (auth styles now in account.css) --- */
 .account-tabs {
   display: flex;
   gap: 4px;
@@ -2056,7 +2008,7 @@ td a {
   .hp-camp-section .camps-grid { grid-template-columns: 1fr; }
   .hp-reviews-grid { grid-template-columns: 1fr; }
   .ig-activities-grid { grid-template-columns: 1fr; }
-  .auth-cards { grid-template-columns: 1fr; }
+
   .checkout-form .row-2 { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
