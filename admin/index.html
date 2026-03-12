@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Entre Olas Surf</title>
+
+  <!-- Fonts (same as main site) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/admin/admin.css" />
+</head>
+<body>
+
+  <!-- ==================== LOGIN VIEW ==================== -->
+  <div id="login-view" class="admin-login">
+    <div class="admin-login-card">
+      <h1>Entre Olas</h1>
+      <p>Panel de Administración</p>
+
+      <div id="login-error" class="admin-login-error"></div>
+
+      <form id="login-form" class="trip-form">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" placeholder="admin@entreolasurf.com" required />
+
+        <label for="login-password">Contraseña</label>
+        <input type="password" id="login-password" placeholder="••••••••" required />
+
+        <button type="submit" class="btn red" style="margin-top:12px;width:100%">Iniciar Sesión</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== ADMIN APP ==================== -->
+  <div id="admin-app" class="admin-layout" style="display:none">
+
+    <!-- Overlay for mobile sidebar -->
+    <div id="admin-overlay" class="admin-overlay"></div>
+
+    <!-- Sidebar -->
+    <aside id="admin-sidebar" class="admin-sidebar">
+      <div class="admin-sidebar-logo">
+        <h2>Entre Olas</h2>
+        <small>Admin Panel</small>
+      </div>
+
+      <ul class="admin-nav">
+        <li class="admin-nav-item">
+          <a href="#dashboard" data-section="dashboard">
+            <span class="nav-icon">&#9632;</span> Dashboard
+          </a>
+        </li>
+        <li class="admin-nav-item">
+          <a href="#reservas" data-section="reservas">
+            <span class="nav-icon">&#9993;</span> Reservas
+          </a>
+        </li>
+        <li class="admin-nav-item">
+          <a href="#camps" data-section="camps">
+            <span class="nav-icon">&#9978;</span> Surf Camps
+          </a>
+        </li>
+        <li class="admin-nav-item">
+          <a href="#actividades" data-section="actividades">
+            <span class="nav-icon">&#9889;</span> Actividades
+          </a>
+        </li>
+<li class="admin-nav-item">
+          <a href="#calendario" data-section="calendario">
+            <span class="nav-icon">&#128197;</span> Calendario
+          </a>
+        </li>
+        <li class="admin-nav-item">
+          <a href="#material" data-section="material">
+            <span class="nav-icon">&#127944;</span> Material
+          </a>
+        </li>
+        <li class="admin-nav-item">
+          <a href="#productos" data-section="productos">
+            <span class="nav-icon">&#128722;</span> Productos
+          </a>
+        </li>
+        <li class="admin-nav-item">
+          <a href="#pedidos" data-section="pedidos">
+            <span class="nav-icon">&#128230;</span> Pedidos
+          </a>
+        </li>
+        <li class="admin-nav-item">
+          <a href="#clientes" data-section="clientes">
+            <span class="nav-icon">&#128101;</span> Clientes
+          </a>
+        </li>
+      </ul>
+
+      <div class="admin-sidebar-footer">
+        <button id="logout-btn" class="admin-logout-btn">
+          &#8592; Cerrar Sesión
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="admin-main">
+      <header class="admin-topbar">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button id="hamburger-btn" class="admin-hamburger">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+          <h1 id="section-title" class="admin-section-title">Dashboard</h1>
+        </div>
+        <span id="user-display" class="admin-user-info"></span>
+      </header>
+
+      <main id="admin-content" class="admin-content">
+        <!-- Sections render here -->
+      </main>
+    </div>
+  </div>
+
+  <!-- Shared modal -->
+  <div id="admin-modal" class="admin-modal">
+    <div class="admin-modal-dialog">
+      <div class="admin-modal-header">
+        <h2 id="modal-title"></h2>
+        <button id="modal-close" class="admin-modal-close">&times;</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="admin-toast-container"></div>
+
+  <script type="module" src="/admin/admin.js"></script>
+</body>
+</html>
