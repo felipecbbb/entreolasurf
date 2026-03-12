@@ -30,27 +30,22 @@ function getInitials(name) {
   return name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 }
 
-function hideChrome() {
-  const h = document.querySelector('.site-header');
+function hideFooter() {
   const f = document.querySelector('.site-footer');
-  if (h) h.style.display = 'none';
   if (f) f.style.display = 'none';
 }
-function showChrome() {
-  const h = document.querySelector('.site-header');
+function showFooter() {
   const f = document.querySelector('.site-footer');
-  if (h) h.style.display = '';
   if (f) f.style.display = '';
 }
 
 // ---- Auth view (login + register) ----
 function renderAuth() {
-  hideChrome();
+  hideFooter();
   mainEl.innerHTML = `
     <div class="auth-page">
       <div class="auth-page-left">
         <div class="auth-page-form">
-          <a class="auth-logo" href="/"><span class="logo-entre">entre</span><span class="logo-olas">olas</span></a>
           <div id="auth-view-login" class="auth-view active">
             <h1 class="auth-title">Bienvenido de nuevo</h1>
             <p class="auth-subtitle">Accede a tu cuenta para gestionar tus reservas y clases</p>
@@ -164,13 +159,12 @@ async function checkOnboardingOrDashboard() {
 }
 
 function renderOnboarding(profile) {
-  hideChrome();
+  hideFooter();
   const WETSUIT_SIZES = ['6 años','8 años','10 años','12 años','XS','S','M','L','XL'];
   mainEl.innerHTML = `
     <div class="auth-page">
       <div class="auth-page-left">
         <div class="auth-page-form">
-          <a class="auth-logo" href="/"><span class="logo-entre">entre</span><span class="logo-olas">olas</span></a>
           <h1 class="auth-title">Un último paso</h1>
           <p class="auth-subtitle">Necesitamos algunos datos para tu seguridad y comodidad</p>
           <form id="onboarding-form" class="auth-form">
@@ -274,7 +268,7 @@ const TAB_TITLES = {
 
 // ---- Dashboard view ----
 async function renderDashboard() {
-  showChrome();
+  showFooter();
   const session = await getSession();
   if (!session) return renderAuth();
   const profile = await getProfile();
