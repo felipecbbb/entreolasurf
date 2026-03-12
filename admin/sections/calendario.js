@@ -1214,6 +1214,8 @@ export async function renderCalendario(container) {
       let cobrarAnticipo = false;
       let paymentMethod = null;
       let enviarConfirmacion = true;
+      let crearInvitacion = false;
+      let ocultarPrecios = false;
       let anticipoAmount = 0;
 
       // Credit/bono system: maps personId → { useCredit: bool, bono: bonoObj|null }
