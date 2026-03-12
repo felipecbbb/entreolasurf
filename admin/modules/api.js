@@ -224,11 +224,27 @@ export async function fetchClassEnrollments(classId) {
     if (profiles) profiles.forEach(p => { profilesMap[p.id] = p; });
   }
 
-  // Merge profile names into enrollments
+  // Fetch family member names for enrollments with family_member_id
+  const familyIds = [...new Set(data.filter(e => e.family_member_id).map(e => e.family_member_id))];
+  let familyMap = {};
+  if (familyIds.length) {
+    const { data: members } = await supabase
+      .from('family_members')
+      .select('id, full_name')
+      .in('id', familyIds);
+    if (members) members.forEach(m => { familyMap[m.id] = m; });
+  }
+
+  // Merge profile/family names into enrollments
   return data.map(e => ({
     ...e,
-    // Set guest_name from profile if not already set
-    guest_name: e.guest_name || (e.user_id && profilesMap[e.user_id]?.full_name) || null,
+    family_members: e.family_member_id ? familyMap[e.family_member_id] || null : null,
+    profiles: e.user_id ? profilesMap[e.user_id] || null : null,
+    // Set guest_name from family member or profile if not already set
+    guest_name: e.guest_name
+      || (e.family_member_id && familyMap[e.family_member_id]?.full_name)
+      || (e.user_id && profilesMap[e.user_id]?.full_name)
+      || null,
   }));
 }
 

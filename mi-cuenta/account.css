@@ -1,0 +1,851 @@
+/* ============================================================
+   Mi Cuenta — Client Panel Styles
+   Brand: yellow (#FFCC01/#f3c900), navy (#0f2f39), cream (#fffdf7)
+   ============================================================ */
+
+/* --- Dashboard Layout --- */
+.account-dashboard {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 32px;
+  align-items: start;
+  min-height: 60vh;
+}
+
+/* --- Sidebar --- */
+.account-sidebar {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 24px 0;
+  position: sticky;
+  top: 100px;
+}
+
+.account-avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 20px 20px;
+  border-bottom: 1px solid var(--color-line);
+  margin-bottom: 12px;
+}
+
+.account-avatar-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--color-yellow, #f3c900);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.6rem;
+  color: var(--color-navy);
+  margin-bottom: 10px;
+}
+
+.account-avatar-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: .95rem;
+  color: var(--color-navy);
+  text-align: center;
+}
+
+.account-avatar-email {
+  font-size: .78rem;
+  color: var(--color-muted);
+  margin-top: 2px;
+  word-break: break-all;
+  text-align: center;
+}
+
+.account-nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.account-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: color .15s, background .15s;
+  border-left: 3px solid transparent;
+}
+
+.account-nav-item:hover {
+  color: var(--color-navy);
+  background: #f8f6f0;
+}
+
+.account-nav-item.active {
+  color: var(--color-navy);
+  background: #fef9e7;
+  border-left-color: var(--color-yellow, #f3c900);
+}
+
+.account-nav-item svg {
+  flex-shrink: 0;
+  opacity: .6;
+}
+
+.account-nav-item.active svg,
+.account-nav-item:hover svg {
+  opacity: 1;
+}
+
+.account-nav-divider {
+  height: 1px;
+  background: var(--color-line);
+  margin: 8px 0;
+}
+
+.account-nav-item.danger {
+  color: #b91c1c;
+}
+.account-nav-item.danger:hover {
+  background: #fef2f2;
+}
+
+/* --- Content Area --- */
+.account-content {
+  min-width: 0;
+}
+
+.account-content-header {
+  margin-bottom: 24px;
+}
+
+.account-content-header h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2rem;
+  color: var(--color-navy);
+  margin: 0 0 4px;
+}
+
+.account-content-header p {
+  color: var(--color-muted);
+  font-size: .88rem;
+  margin: 0;
+}
+
+/* --- Form Cards --- */
+.account-form-card {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 28px 28px 24px;
+  margin-bottom: 20px;
+}
+
+.account-form-card h3 {
+  font-family: 'Space Grotesk', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: .75rem;
+  font-weight: 700;
+  color: var(--color-muted);
+  margin: 0 0 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.account-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.account-form-grid.single {
+  grid-template-columns: 1fr;
+}
+
+.account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.account-field.full {
+  grid-column: 1 / -1;
+}
+
+.account-field label {
+  font-family: 'Space Grotesk', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--color-navy);
+}
+
+/* --- Custom Select & Input styling --- */
+.account-field input,
+.account-field select,
+.account-field textarea {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-family: 'Manrope', sans-serif;
+  font-size: .92rem;
+  color: var(--color-text);
+  background: #fff;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+.account-field select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364757d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 38px;
+  cursor: pointer;
+}
+
+.account-field input:focus,
+.account-field select:focus,
+.account-field textarea:focus {
+  border-color: var(--color-red, #FFCC01);
+  box-shadow: 0 0 0 3px rgba(255, 204, 1, 0.25);
+}
+
+.account-field input:disabled,
+.account-field input[readonly] {
+  background: #f9fafb;
+  color: var(--color-muted);
+  cursor: default;
+}
+
+.account-field .field-hint {
+  font-size: .75rem;
+  color: var(--color-muted);
+  margin-top: 2px;
+}
+
+/* Red warning select options */
+.account-field select option[value="false"]:checked {
+  color: var(--color-text);
+}
+
+/* --- Auth Cards (login/register) --- */
+.auth-card select {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-family: 'Manrope', sans-serif;
+  font-size: .95rem;
+  color: var(--color-text);
+  background: #fff;
+  outline: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364757d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 38px;
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.auth-card select:focus {
+  border-color: var(--color-red);
+  box-shadow: 0 0 0 3px rgba(255, 204, 1, 0.25);
+}
+
+/* Also style selects in checkout forms */
+.checkout-form select {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-family: 'Manrope', sans-serif;
+  font-size: .95rem;
+  color: var(--color-text);
+  background: #fff;
+  outline: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364757d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 38px;
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.checkout-form select:focus {
+  border-color: var(--color-red);
+  box-shadow: 0 0 0 3px rgba(255, 204, 1, 0.25);
+}
+
+/* --- Family member cards --- */
+.family-member-card {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.family-member-card:hover {
+  border-color: var(--color-yellow, #f3c900);
+  box-shadow: 0 2px 12px rgba(0,0,0,.04);
+}
+
+.family-member-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.family-member-info strong {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .95rem;
+  color: var(--color-navy);
+}
+
+.family-member-info .meta {
+  font-size: .8rem;
+  color: var(--color-muted);
+}
+
+.family-member-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* --- Family form --- */
+.family-form {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  margin-top: 16px;
+}
+
+.family-form h4 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  color: var(--color-navy);
+  margin: 0 0 16px;
+}
+
+.family-form form {
+  display: grid;
+  gap: 12px;
+}
+
+.family-form label {
+  font-family: 'Space Grotesk', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--color-navy);
+  display: grid;
+  gap: 5px;
+}
+
+.family-form input,
+.family-form select {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-family: 'Manrope', sans-serif;
+  font-size: .92rem;
+  color: var(--color-text);
+  background: #fff;
+  outline: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.family-form select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364757d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 38px;
+  cursor: pointer;
+}
+
+.family-form input:focus,
+.family-form select:focus {
+  border-color: var(--color-red, #FFCC01);
+  box-shadow: 0 0 0 3px rgba(255, 204, 1, 0.25);
+}
+
+/* --- Booking calendar in client panel --- */
+.tab-panel select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 10px 14px;
+  padding-right: 38px;
+  font-family: 'Manrope', sans-serif;
+  font-size: .9rem;
+  color: var(--color-text);
+  background: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364757d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  cursor: pointer;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.tab-panel select:focus {
+  border-color: var(--color-red, #FFCC01);
+  box-shadow: 0 0 0 3px rgba(255, 204, 1, 0.25);
+}
+
+/* --- Status badges enhancements --- */
+.status-badge.active { background: #ecfdf5; color: #065f46; }
+.status-badge.exhausted { background: #f3f4f6; color: #6b7280; }
+.status-badge.expired { background: #fef3c7; color: #92400e; }
+.status-badge.paid { background: #ecfdf5; color: #065f46; }
+.status-badge.partial { background: #fff7ed; color: #9a3412; }
+
+/* --- Submit button in forms --- */
+.account-form-card .btn {
+  margin-top: 8px;
+}
+
+.account-msg {
+  font-size: .85rem;
+  min-height: 1.2em;
+  margin-top: 4px;
+}
+
+/* --- Responsive: Tablet --- */
+@media (max-width: 768px) {
+  .account-dashboard {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .account-sidebar {
+    position: static;
+    padding: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+  }
+
+  .account-avatar {
+    flex-direction: row;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-bottom: 0;
+    border-bottom: none;
+  }
+
+  .account-avatar-circle {
+    width: 40px;
+    height: 40px;
+    font-size: 1rem;
+    margin-bottom: 0;
+  }
+
+  .account-avatar-name { text-align: left; font-size: .88rem; }
+  .account-avatar-email { text-align: left; }
+
+  .account-nav {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--color-line);
+    padding: 0 8px;
+  }
+  .account-nav::-webkit-scrollbar { display: none; }
+
+  .account-nav-item {
+    padding: 10px 14px;
+    font-size: .75rem;
+    white-space: nowrap;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+    flex-shrink: 0;
+  }
+  .account-nav-item.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--color-yellow, #f3c900);
+  }
+
+  .account-nav-divider { display: none; }
+  .account-nav-item.danger { border-bottom: none; }
+
+  .account-content {
+    padding: 16px 0;
+  }
+
+  .account-content-header {
+    margin-bottom: 16px;
+    padding: 0 4px;
+  }
+  .account-content-header h2 { font-size: 1.5rem; }
+
+  .account-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-form-card {
+    padding: 18px 14px;
+    border-radius: 10px;
+  }
+
+  .auth-cards {
+    grid-template-columns: 1fr;
+  }
+
+  /* Payments */
+  .pay-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .pay-table-wrap { overflow-x: auto; }
+  .pay-table { font-size: .8rem; }
+  .pay-table th, .pay-table td { padding: 8px 10px; }
+
+  /* Bono cards */
+  .bono-card {
+    padding: 14px;
+  }
+  .bono-pay-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Family */
+  .family-form { padding: 16px; }
+  .family-member-card { padding: 14px; }
+}
+
+/* --- Responsive: Small phone --- */
+@media (max-width: 480px) {
+  .account-content-header h2 { font-size: 1.3rem; }
+  .account-content-header p { font-size: .82rem; }
+
+  .account-form-card {
+    padding: 14px 12px;
+  }
+
+  .account-nav-item {
+    padding: 8px 10px;
+    font-size: .72rem;
+    gap: 6px;
+  }
+  .account-nav-item svg { width: 14px; height: 14px; }
+
+  /* Payment table → stacked cards on very small screens */
+  .pay-table thead { display: none; }
+  .pay-table, .pay-table tbody, .pay-table tr, .pay-table td {
+    display: block;
+    width: 100%;
+  }
+  .pay-table tr {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .pay-table td {
+    padding: 3px 0;
+    border: none;
+    display: flex;
+    justify-content: space-between;
+    font-size: .82rem;
+  }
+  .pay-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: .72rem;
+    text-transform: uppercase;
+    color: var(--color-muted, #888);
+    font-family: 'Space Grotesk', sans-serif;
+    margin-right: 8px;
+  }
+
+  .pay-summary-card { padding: 14px 16px; }
+  .pay-summary-value { font-size: 1.2rem; }
+
+  /* Bono card buttons stack */
+  .bono-card > div:last-child {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .bono-card > div:last-child > div {
+    flex-direction: column !important;
+    width: 100%;
+  }
+  .bono-card > div:last-child > div .btn,
+  .bono-card > div:last-child > div .btn-outline-sm,
+  .bono-card > div:last-child > div .bono-pay-btn {
+    width: 100% !important;
+    text-align: center;
+  }
+
+  /* Bono upgrade modal */
+  .bono-upgrade-modal {
+    margin: 10px !important;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .bono-upgrade-body { padding: 16px !important; }
+  .bono-upgrade-options { gap: 8px !important; }
+
+  /* Family member card */
+  .family-member-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .family-member-actions {
+    justify-content: flex-end;
+  }
+
+  /* Auth cards */
+  .auth-card {
+    padding: 20px 16px !important;
+  }
+}
+
+/* ============================================================
+   Payments Tab (Mis Pagos)
+   ============================================================ */
+.pay-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.pay-summary-card {
+  background: #fff;
+  border: 1px solid var(--color-line, #e5e7eb);
+  border-radius: var(--radius-md, 10px);
+  padding: 18px 20px;
+}
+
+.pay-summary-green {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.pay-summary-yellow {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.pay-summary-neutral {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.pay-summary-label {
+  font-size: .72rem;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--color-muted, #888);
+  margin-bottom: 2px;
+}
+
+.pay-summary-green .pay-summary-label { color: #065f46; }
+.pay-summary-yellow .pay-summary-label { color: #92400e; }
+
+.pay-summary-value {
+  font-size: 1.4rem;
+  font-family: 'Bebas Neue', sans-serif;
+  color: var(--color-navy, #0f2f39);
+}
+
+.pay-summary-green .pay-summary-value { color: #065f46; }
+.pay-summary-yellow .pay-summary-value { color: #92400e; }
+
+.pay-summary-hint {
+  font-size: .76rem;
+  color: #92400e;
+  margin-top: 4px;
+}
+
+.pay-table-wrap {
+  overflow-x: auto;
+}
+
+.pay-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .86rem;
+}
+
+.pay-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-weight: 600;
+  color: var(--color-muted, #888);
+  background: #f9fafb;
+  border-bottom: 1px solid var(--color-line, #e5e7eb);
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.pay-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  color: var(--color-navy, #0f2f39);
+}
+
+.pay-table tbody tr:hover {
+  background: #fafbfc;
+}
+
+.pay-amount {
+  font-weight: 600;
+  color: #065f46 !important;
+}
+
+.pay-source-badge {
+  display: inline-block;
+  font-size: .7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.pay-source-web {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* ============================================================
+   Bono Payment Info
+   ============================================================ */
+.bono-payment-info {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-line, #e5e7eb);
+}
+
+.bono-payment-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: .82rem;
+  color: var(--color-muted, #888);
+  margin-bottom: 6px;
+}
+
+.bono-payment-bar {
+  height: 5px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bono-payment-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s;
+}
+
+.bono-pay-badge {
+  font-size: .66rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.bono-pay-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.bono-pay-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.bono-pay-btn {
+  font-size: .78rem !important;
+  padding: 7px 14px !important;
+  background: #22c55e !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  font-weight: 600 !important;
+}
+
+.bono-pay-btn:hover {
+  background: #16a34a !important;
+}
+
+/* Pay bono modal detail grid */
+.bono-pay-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.bono-pay-detail-item {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.bono-pay-detail-highlight {
+  grid-column: 1 / -1;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.bono-pay-detail-label {
+  display: block;
+  font-size: .72rem;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--color-muted, #888);
+  margin-bottom: 2px;
+}
+
+.bono-pay-detail-highlight .bono-pay-detail-label { color: #92400e; }
+
+.bono-pay-detail-value {
+  font-size: 1.2rem;
+  font-family: 'Bebas Neue', sans-serif;
+  color: var(--color-navy, #0f2f39);
+}
+
+.bono-pay-detail-highlight .bono-pay-detail-value { color: #92400e; }

@@ -3027,3 +3027,29 @@ td a {
     height: 320px;
   }
 }
+
+/* Bono & calendar — mobile */
+@media (max-width: 620px) {
+  .bono-card { padding: 14px; }
+  .bono-counter { font-size: .84rem; }
+
+  .date-strip { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .date-strip::-webkit-scrollbar { display: none; }
+  .date-strip-day { min-width: 44px; padding: 6px 8px; }
+
+  .cal-filters { flex-direction: column; gap: 10px; }
+  .cal-filter-types { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-wrap: nowrap; }
+  .cal-filter-types::-webkit-scrollbar { display: none; }
+  .cal-type-btn { flex-shrink: 0; font-size: .78rem; padding: 5px 10px; }
+}
+
+@media (max-width: 520px) {
+  .bono-upgrade-overlay { padding: 10px; }
+  .bono-upgrade-modal { border-radius: 12px; max-height: 92vh; overflow-y: auto; }
+  .bono-upgrade-header { padding: 14px 16px; }
+  .bono-upgrade-header h3 { font-size: 1.1rem; }
+  .bono-upgrade-body { padding: 16px; }
+  .bono-upgrade-option { padding: 12px 14px; }
+  .bono-upgrade-sessions { font-size: 1rem; }
+  .bono-upgrade-diff { font-size: .8rem; }
+}

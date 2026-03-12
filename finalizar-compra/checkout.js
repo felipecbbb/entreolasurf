@@ -50,9 +50,11 @@ async function init() {
   }
 
   // Render summary
-  const summaryItems = cart.map(i =>
-    `<div class="summary-item"><span class="name">${i.name} × ${i.quantity}</span><span class="amt">${formatPrice(i.price * i.quantity)}</span></div>`
-  ).join('');
+  const summaryItems = cart.map(i => {
+    const isClass = i.type === 'class_reservation';
+    const label = isClass ? `${i.name} (anticipo)` : `${i.name} × ${i.quantity}`;
+    return `<div class="summary-item"><span class="name">${label}</span><span class="amt">${formatPrice(i.price * i.quantity)}</span></div>`;
+  }).join('');
   summaryWrap.innerHTML = `
     <h3>Resumen del pedido</h3>
     ${summaryItems}
@@ -159,6 +161,7 @@ async function init() {
           class_type: classType,
           total_credits: sessions * cls.quantity,
           used_credits: 0,
+          total_paid: cls.price * cls.quantity,
           status: 'active',
           expires_at: getBonoExpiry(classType),
         };

@@ -155,7 +155,7 @@ export async function renderCalendar(panel) {
           const classIds = allClasses.map(c => c.id);
           const { data } = await supabase
             .from('class_enrollments')
-            .select('id, class_id, family_member_id, status')
+            .select('id, class_id, family_member_id, status, family_members(full_name)')
             .eq('user_id', user.id)
             .in('class_id', classIds)
             .eq('status', 'confirmed');
@@ -181,9 +181,10 @@ export async function renderCalendar(panel) {
         let footerAction = '';
         if (isEnrolled) {
           // Show enrolled status + cancel buttons
-          const cancelBtns = myEnrollments.map(e =>
-            `<button class="btn line" data-action="cancel" data-enrollment-id="${e.id}" style="font-size:.78rem;padding:5px 12px;color:#b91c1c;border-color:#b91c1c">${e.family_member_id ? 'Cancelar familiar' : 'Cancelar reserva'}</button>`
-          ).join(' ');
+          const cancelBtns = myEnrollments.map(e => {
+            const label = e.family_member_id ? (e.family_members?.full_name || 'Familiar') : 'Mi reserva';
+            return `<button class="btn line" data-action="cancel" data-enrollment-id="${e.id}" style="font-size:.78rem;padding:5px 12px;color:#b91c1c;border-color:#b91c1c">\u2715 ${label}</button>`;
+          }).join(' ');
           footerAction = `
             <span class="spots-badge" style="background:#dcfce7;color:#15803d">Reservado</span>
             ${cancelBtns}`;
@@ -301,21 +302,52 @@ export async function renderCalendar(panel) {
       panel.querySelector('#confirm-booking').style.display = 'none';
     } else {
       let html = `
-        <label style="display:block;margin-bottom:12px">
-          ¿Para quién es la reserva?
-          <select id="booking-who" style="width:100%;padding:8px;border-radius:var(--radius-sm);border:1px solid var(--color-line);margin-top:4px">
-            <option value="">Yo mismo</option>
-            ${members.map(m => `<option value="${m.id}">${m.full_name}</option>`).join('')}
-          </select>
-        </label>
+        <p style="font-size:.9rem;color:var(--color-muted);margin-bottom:12px">Selecciona quién asistirá a esta clase:</p>
+        <div id="booking-persons" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+          <label class="booking-person-check" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--color-line);border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="person" value="" checked>
+            <div>
+              <strong>Yo mismo</strong>
+            </div>
+          </label>
+          ${members.map(m => `
+            <label class="booking-person-check" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--color-line);border-radius:8px;cursor:pointer">
+              <input type="checkbox" name="person" value="${m.id}">
+              <div>
+                <strong>${m.full_name}</strong>
+                <span style="font-size:.8rem;color:var(--color-muted)">${m.level || ''}${m.wetsuit_size ? ' \u00b7 ' + m.wetsuit_size : ''}</span>
+              </div>
+            </label>
+          `).join('')}
+        </div>
         <label style="display:block">
           Usar bono:
           <select id="booking-bono" style="width:100%;padding:8px;border-radius:var(--radius-sm);border:1px solid var(--color-line);margin-top:4px">
-            ${bonos.map(b => `<option value="${b.id}">${TYPE_LABELS[b.class_type]} — ${b.total_credits - b.used_credits} créditos restantes</option>`).join('')}
+            ${bonos.map(b => `<option value="${b.id}">${TYPE_LABELS[b.class_type]} \u2014 ${b.total_credits - b.used_credits} cr\u00e9ditos restantes</option>`).join('')}
           </select>
-        </label>`;
+        </label>
+        <p id="booking-credits-info" style="font-size:.85rem;margin-top:8px;color:var(--color-muted)"></p>`;
       body.innerHTML = html;
       panel.querySelector('#confirm-booking').style.display = '';
+
+      // Live credits info update
+      function updateCreditsInfo() {
+        const checked = body.querySelectorAll('input[name="person"]:checked').length;
+        const bonoSelect = body.querySelector('#booking-bono');
+        const selectedBono = bonos.find(b => b.id === bonoSelect?.value);
+        const remaining = selectedBono ? (selectedBono.total_credits - selectedBono.used_credits) : 0;
+        const infoEl = body.querySelector('#booking-credits-info');
+        if (infoEl) {
+          if (checked > remaining) {
+            infoEl.innerHTML = `<span style="color:#b91c1c">No tienes suficientes cr\u00e9ditos (${checked} necesarios, ${remaining} disponibles)</span>`;
+          } else {
+            infoEl.textContent = `Se usar\u00e1n ${checked} cr\u00e9dito${checked !== 1 ? 's' : ''} de ${remaining} disponibles`;
+          }
+        }
+      }
+      body.querySelectorAll('input[name="person"]').forEach(cb => cb.addEventListener('change', updateCreditsInfo));
+      body.querySelector('#booking-bono')?.addEventListener('change', updateCreditsInfo);
+      updateCreditsInfo();
     }
 
     modal.style.display = 'flex';
@@ -324,17 +356,27 @@ export async function renderCalendar(panel) {
 
     panel.querySelector('#confirm-booking').onclick = async () => {
       const bonoId = panel.querySelector('#booking-bono')?.value;
-      const familyMemberId = panel.querySelector('#booking-who')?.value || null;
       if (!bonoId) return;
+
+      const checkedPersons = [...body.querySelectorAll('input[name="person"]:checked')].map(cb => cb.value);
+      if (!checkedPersons.length) { alert('Selecciona al menos una persona'); return; }
+
+      // Check credits
+      const selectedBono = bonos.find(b => b.id === bonoId);
+      const remaining = selectedBono ? (selectedBono.total_credits - selectedBono.used_credits) : 0;
+      if (checkedPersons.length > remaining) { alert('No tienes suficientes cr\u00e9ditos'); return; }
 
       const confirmBtn = panel.querySelector('#confirm-booking');
       confirmBtn.disabled = true;
-      confirmBtn.textContent = 'Reservando…';
+      confirmBtn.textContent = 'Reservando\u2026';
 
       try {
-        await bookClass(classId, bonoId, familyMemberId);
+        for (const personValue of checkedPersons) {
+          const familyMemberId = personValue || null; // empty string = self
+          await bookClass(classId, bonoId, familyMemberId);
+        }
         modal.style.display = 'none';
-        showToast('Clase reservada correctamente');
+        showToast(`${checkedPersons.length} plaza${checkedPersons.length > 1 ? 's' : ''} reservada${checkedPersons.length > 1 ? 's' : ''}`);
         render();
       } catch (err) {
         alert('Error al reservar: ' + err.message);

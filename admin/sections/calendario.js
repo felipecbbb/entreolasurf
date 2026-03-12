@@ -11,7 +11,7 @@ import {
   fetchPayments, createPayment, deletePayment,
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
-import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js';
+import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING, DEPOSIT } from '../modules/constants.js';
 import { supabase } from '/lib/supabase.js';
 
 // Get pack price for a person: uses tiered pricing, extra sessions beyond max tier use the per-session rate of max tier
@@ -245,9 +245,10 @@ export async function renderCalendario(container) {
     enrollments.forEach(e => {
       const name = e.guest_name || e.family_members?.full_name || e.profiles?.full_name || 'Sin nombre';
       const isPaid = e.status === 'paid' || e.status === 'completed';
+      const isPartial = e.status === 'partial';
       const isAttended = e.status === 'completed';
       const isNoShow = e.status === 'no_show';
-      const payClass = isPaid ? 'paid' : 'unpaid';
+      const payClass = isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid';
       const attendClass = isAttended ? 'attended' : isNoShow ? 'noshow' : '';
       const statusClass = `${payClass} ${attendClass}`.trim();
 
@@ -261,7 +262,7 @@ export async function renderCalendario(container) {
             <span class="cal-attendance-icon"></span>
           </label>
           <span class="cal-client-name">${name}</span>
-          <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : 'Pendiente de pago'}">
+          <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
           </span>
         </div>`;
@@ -327,7 +328,8 @@ export async function renderCalendario(container) {
     const depositPaid = Number(r.deposit_paid || 0);
     const isAttended = status === 'returned';
     const isPaid = totalAmount > 0 ? depositPaid >= totalAmount : depositPaid > 0;
-    const payClass = isPaid ? 'paid' : 'unpaid';
+    const isPartial = !isPaid && depositPaid > 0;
+    const payClass = isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid';
     const attendClass = isAttended ? 'attended' : '';
     const statusClass = `${payClass} ${attendClass}`.trim();
 
@@ -357,7 +359,7 @@ export async function renderCalendario(container) {
             <span class="cal-client-name">${clientName}</span>
             ${r.size ? `<span class="cal-client-badge blue">Talla: ${r.size}</span>` : ''}
             <span class="cal-client-price">${totalAmount.toFixed(2)}€</span>
-            <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : 'Pendiente de pago'}">
+            <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
             </span>
           </div>
@@ -556,12 +558,39 @@ export async function renderCalendario(container) {
 
         if (itemType === 'enrollment') {
           const eid = cb.dataset.eid;
-          // checked = completed (attended, credit consumed, finalized)
-          // unchecked = no_show (didn't show up, loses credit)
-          const newStatus = checked ? 'completed' : 'no_show';
           try {
-            await updateEnrollmentStatus(eid, newStatus);
-            showToast(checked ? 'Asistencia confirmada — crédito consumido' : 'Marcado como no presentado', 'success');
+            if (checked) {
+              // Prevent marking attendance if class hasn't started
+              const row = cb.closest('.cal-client-row');
+              const classId = row?.dataset.classId;
+              const cls = classes.find(c => c.id === classId);
+              if (cls) {
+                const classStart = new Date(`${cls.date}T${cls.time_start || '00:00'}`);
+                if (classStart > new Date()) {
+                  cb.checked = false;
+                  showToast('No puedes marcar asistencia antes de que empiece la clase', 'error');
+                  return;
+                }
+              }
+              // Mark as attended (completed)
+              await updateEnrollmentStatus(eid, 'completed');
+              showToast('Asistencia confirmada', 'success');
+            } else {
+              // Revert attendance — preserve payment status
+              const payments = await fetchPayments('enrollment', eid);
+              const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+              let newStatus = 'confirmed';
+              if (totalPaid > 0) {
+                // Determine paid vs partial using class price
+                const row = cb.closest('.cal-client-row');
+                const classId = row?.dataset.classId;
+                const cls = classes.find(c => c.id === classId);
+                const expectedPrice = cls ? Number(cls.price) || 0 : 0;
+                newStatus = (expectedPrice > 0 && totalPaid >= expectedPrice) ? 'paid' : 'partial';
+              }
+              await updateEnrollmentStatus(eid, newStatus);
+              showToast('Asistencia revertida', 'success');
+            }
             render();
           } catch (err) { showToast('Error: ' + err.message, 'error'); cb.checked = !checked; }
         } else if (itemType === 'rental') {
@@ -691,20 +720,16 @@ export async function renderCalendario(container) {
     let bookingWeekOffset = 0;
     let sessionQuantities = {}; // classId → quantity
     sessionQuantities[cls.id] = 1;
-    let persons = [{ id: Date.now(), nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, sessions: [cls.id] }];
+    let persons = [{ id: Date.now(), nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, sessions: [cls.id] }];
 
     function getTotalQuantity() {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
     }
 
-    // Calculate total using pack pricing: each person has their own tier
+    // Calculate total using pack pricing: ALL sessions across ALL persons count as one pack
     function getTotalPrice() {
-      let total = 0;
-      for (const p of persons) {
-        const numSessions = p.sessions.length;
-        total += getPackPrice(cls.type, numSessions, price);
-      }
-      return total;
+      const totalSessions = persons.reduce((s, p) => s + p.sessions.length, 0);
+      return getPackPrice(cls.type, totalSessions, price);
     }
 
     // Get unit price label for display
@@ -793,7 +818,7 @@ export async function renderCalendario(container) {
             ${p.profileId
               ? `<div class="bk-linked-client">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
-                  <span>Vinculado: <strong>${p.profileName}</strong></span>
+                  <span>Vinculado: <strong>${p.profileName}</strong>${p.familyMemberId ? ' <small style="color:#0ea5e9">(familiar)</small>' : ''}</span>
                   <button class="bk-unlink-btn" data-pid="${p.id}">×</button>
                 </div>`
               : `<div class="bk-person-fields">
@@ -972,7 +997,7 @@ export async function renderCalendario(container) {
                 nombre: '', apellidos: '', edad: '', sabeNadar: '',
                 lesion: 'no', lesionDetalle: '', tallaNeopreno: '',
                 nivelSurf: 'principiante', profileId: null, profileName: null,
-                sessions: []
+                familyMemberId: null, sessions: []
               });
             }
 
@@ -1004,6 +1029,8 @@ export async function renderCalendario(container) {
                 }
               }
             }
+            // Remove persons that have no sessions left (keep at least 1)
+            persons = persons.filter((p, i) => i === 0 || p.sessions.length > 0);
           }
           renderPanel();
         });
@@ -1044,6 +1071,7 @@ export async function renderCalendario(container) {
           nivelSurf: 'principiante',
           profileId: null,
           profileName: null,
+          familyMemberId: null,
           sessions: selectedSessions.length ? [selectedSessions[0]] : []
         });
         renderPanel();
@@ -1150,6 +1178,7 @@ export async function renderCalendario(container) {
           if (p) {
             p.profileId = null;
             p.profileName = null;
+            p.familyMemberId = null;
             renderPanel();
           }
         });
@@ -1178,37 +1207,38 @@ export async function renderCalendario(container) {
       const subtotal = getTotalPrice();
 
       // Checkout state
-      let discountType = 'percent'; // 'percent' or 'fixed'
+      let discountType = 'percent';
       let discountValue = 0;
-      let contactSource = 'persona_1'; // 'persona_1', 'persona_N', 'otra', or 'buscar'
+      let contactSource = 'persona_1';
       let contactData = { nombre: '', apellidos: '', email: '', telefono: '', pais: '', idioma: 'Español', profileId: null };
       let cobrarAnticipo = false;
-      let paymentMethod = null; // 'efectivo', 'tarjeta', 'transferencia', 'voucher'
-      let crearInvitacion = false;
-      let ocultarPrecios = false;
+      let paymentMethod = null;
       let enviarConfirmacion = true;
-
       let anticipoAmount = 0;
+
+      // Credit/bono system: maps personId → { useCredit: bool, bono: bonoObj|null }
+      let personCredits = {};
 
       // Prefill contact from first person (async if linked to profile)
       async function prefillContactFromPerson(p) {
-        if (p.profileId) {
-          contactData.nombre = p.profileName || '';
-          contactData.profileId = p.profileId;
-          // Fetch full profile data (email, phone, address)
+        // For family members, use the parent profile ID for contact details
+        const profileId = p.profileId;
+        if (profileId) {
+          contactData.profileId = profileId;
           try {
             const { data: profile } = await supabase
               .from('profiles')
               .select('*')
-              .eq('id', p.profileId)
+              .eq('id', profileId)
               .single();
             if (profile) {
-              contactData.nombre = profile.full_name || contactData.nombre;
+              contactData.nombre = (profile.full_name || '').trim();
+              contactData.apellidos = (profile.last_name || '').trim();
               contactData.telefono = profile.phone || '';
-              // Try to get email from auth
+              // Fetch email via RPC
               try {
-                const { data: authData } = await supabase.auth.admin.getUserById(p.profileId);
-                if (authData?.user?.email) contactData.email = authData.user.email;
+                const { data: email } = await supabase.rpc('get_user_email', { p_user_id: profileId });
+                if (email) contactData.email = email;
               } catch {}
             }
           } catch {}
@@ -1219,6 +1249,60 @@ export async function renderCalendario(container) {
       }
       if (persons[0]) {
         await prefillContactFromPerson(persons[0]);
+      }
+
+      // Fetch active bonos for all linked persons
+      async function loadPersonCredits() {
+        for (const p of persons) {
+          if (p.profileId && !personCredits[p.id]) {
+            try {
+              const { data: bonos } = await supabase
+                .from('bonos')
+                .select('*')
+                .eq('user_id', p.profileId)
+                .eq('class_type', cls.type)
+                .eq('status', 'active')
+                .gt('expires_at', new Date().toISOString());
+              // Find bonos with available credits, enrich with expected price
+              const allBonos = (bonos || []).filter(b => b.used_credits < b.total_credits).map(b => {
+                const expectedPrice = getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
+                // If total_paid is 0 but bono was bought online (has order_id), at least the deposit was paid
+                const deposit = DEPOSIT[b.class_type] || 15;
+                const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
+                return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: Math.max(0, expectedPrice - paid), isFullyPaid: paid >= expectedPrice };
+              });
+              const totalRemaining = allBonos.reduce((sum, b) => sum + (b.total_credits - b.used_credits), 0);
+              // Default: pick the first bono with enough credits
+              const bestBono = allBonos.find(b => (b.total_credits - b.used_credits) >= p.sessions.length) || allBonos[0] || null;
+              personCredits[p.id] = {
+                useCredit: totalRemaining >= p.sessions.length,
+                bono: bestBono,
+                selectedBonoId: bestBono?.id || null,
+                allBonos,
+                availableCredits: totalRemaining,
+              };
+            } catch { personCredits[p.id] = { useCredit: false, bono: null, availableCredits: 0 }; }
+          }
+        }
+      }
+      await loadPersonCredits();
+
+      // Count how many sessions are covered by credits
+      function getCreditSessions() {
+        let count = 0;
+        for (const p of persons) {
+          const pc = personCredits[p.id];
+          if (pc?.useCredit && pc.bono) count += p.sessions.length;
+        }
+        return count;
+      }
+
+      function getTotalSessions() {
+        return persons.reduce((s, p) => s + p.sessions.length, 0);
+      }
+
+      function allCoveredByCredits() {
+        return getCreditSessions() > 0 && getCreditSessions() >= getTotalSessions();
       }
 
       function getDiscount() {
@@ -1251,39 +1335,46 @@ export async function renderCalendario(container) {
               <!-- LEFT: Contact Data -->
               <div>
                 <div class="bk-section">
-                  <h3 class="bk-section-title">Datos de Contacto</h3>
                   <div class="bk-contact-card">
-                    <h4>¿Quién es la persona de contacto de la reserva?</h4>
-                    <select class="bk-contact-select" id="bk-contact-source">
-                      ${personOptions}
-                      <option value="otra" ${contactSource === 'otra' ? 'selected' : ''}>Otra persona</option>
-                    </select>
-                    <input type="text" class="bk-contact-search" id="bk-contact-search" placeholder="Busca un cliente…" />
+                    <div class="bk-contact-top">
+                      <h4 style="margin:0">Responsable de la reserva</h4>
+                      <select class="bk-contact-select" id="bk-contact-source" style="margin-top:10px">
+                        ${personOptions}
+                        <option value="otra" ${contactSource === 'otra' ? 'selected' : ''}>Otra persona</option>
+                      </select>
+                    </div>
+                    <div style="position:relative;margin-bottom:16px">
+                      <input type="text" class="bk-contact-search" id="bk-contact-search" placeholder="Buscar cliente existente…" style="width:100%" />
+                    </div>
+                    ${contactData.profileId ? `<div style="padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                      <span style="font-size:.82rem;color:#065f46;font-weight:600">Cliente vinculado</span>
+                    </div>` : ''}
 
                     <div class="bk-contact-fields">
                       <div class="bk-contact-field">
                         <label>Nombre <span class="required">*</span></label>
-                        <input type="text" id="bk-co-nombre" value="${contactData.nombre}" />
+                        <input type="text" id="bk-co-nombre" value="${contactData.nombre}" placeholder="Nombre" />
                       </div>
                       <div class="bk-contact-field">
                         <label>Apellidos <span class="required">*</span></label>
-                        <input type="text" id="bk-co-apellidos" value="${contactData.apellidos}" />
+                        <input type="text" id="bk-co-apellidos" value="${contactData.apellidos}" placeholder="Apellidos" />
                       </div>
-                      <div class="bk-contact-field">
+                      <div class="bk-contact-field full-width">
                         <label>Email <span class="required">*</span></label>
-                        <input type="email" id="bk-co-email" value="${contactData.email}" />
+                        <input type="email" id="bk-co-email" value="${contactData.email}" placeholder="email@ejemplo.com" />
                       </div>
                       <div class="bk-contact-field">
                         <label>Teléfono</label>
                         <div class="bk-phone-row">
                           <input type="text" class="bk-phone-prefix" value="+34" id="bk-co-prefix" />
-                          <input type="tel" id="bk-co-telefono" value="${contactData.telefono}" style="flex:1" />
+                          <input type="tel" id="bk-co-telefono" value="${contactData.telefono}" placeholder="600 000 000" style="flex:1" />
                         </div>
                       </div>
                       <div class="bk-contact-field">
                         <label>País de origen</label>
                         <select id="bk-co-pais">
-                          <option value="">-</option>
+                          <option value="">Seleccionar</option>
                           <option value="ES" ${contactData.pais === 'ES' ? 'selected' : ''}>España</option>
                           <option value="FR" ${contactData.pais === 'FR' ? 'selected' : ''}>Francia</option>
                           <option value="DE" ${contactData.pais === 'DE' ? 'selected' : ''}>Alemania</option>
@@ -1324,48 +1415,70 @@ export async function renderCalendario(container) {
                       </div>
                       ${persons.map((p, i) => {
                         const name = p.profileId ? p.profileName : `${p.nombre} ${p.apellidos}`.trim() || `Persona ${i + 1}`;
-                        const pPrice = getPackPrice(cls.type, p.sessions.length, price);
-                        const singlePrice = PACK_PRICING[cls.type] ? PACK_PRICING[cls.type][1] : price;
-                        const fullPrice = singlePrice * p.sessions.length;
-                        const saved = fullPrice - pPrice;
                         return `<div class="bk-purchase-person-detail">
                           <span>${name}: ${p.sessions.length} sesión(es)</span>
-                          <span>${pPrice.toFixed(2)}€${saved > 0 ? ` <small style="color:#166534">(-${saved.toFixed(2)}€)</small>` : ''}</span>
                         </div>`;
                       }).join('')}
                       <div class="bk-purchase-item-actions">
-                        <a class="bk-link-view" id="bk-back-to-booking">Ver detalles</a>
                         <a class="bk-link-edit" id="bk-edit-booking">Editar</a>
                       </div>
                     </div>
 
-                    <div class="bk-discount-row">
-                      <select class="bk-discount-type" id="bk-discount-type">
-                        <option value="percent" ${discountType === 'percent' ? 'selected' : ''}>Descuento general</option>
-                        <option value="fixed" ${discountType === 'fixed' ? 'selected' : ''}>Descuento fijo (€)</option>
-                      </select>
-                      <input type="number" class="bk-discount-input" id="bk-discount-value" value="${discountValue}" min="0" step="0.01" />
-                      <span class="bk-discount-symbol">${discountType === 'percent' ? '%' : '€'}</span>
-                      <span class="bk-discount-amount">${discount > 0 ? '-' + discount.toFixed(2) + '€' : '0€'}</span>
-                    </div>
+                    ${(() => {
+                      // Credit cards for persons with bonos — show ALL bonos with payment status
+                      const creditSections = persons.map((p, i) => {
+                        const pc = personCredits[p.id];
+                        if (!pc || !pc.allBonos?.length) return '';
+                        const name = p.profileId ? p.profileName : `${p.nombre} ${p.apellidos}`.trim() || `Persona ${i+1}`;
 
-                    <div class="bk-tax-row">
-                      <span>Impuestos y tasas incluidas</span>
-                      <span>${taxIncluded}€</span>
-                    </div>
+                        // Use credit toggle
+                        let html = `<div style="margin-bottom:6px">
+                          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
+                            <input type="checkbox" class="bk-use-credit" data-person-id="${p.id}" ${pc.useCredit ? 'checked' : ''} />
+                            <div style="flex:1">
+                              <div style="font-size:.85rem;font-weight:700;color:var(--color-navy)">${name} — usar crédito</div>
+                            </div>
+                          </label>
+                        </div>`;
+
+                        if (pc.useCredit) {
+                          // Show all bonos to choose from
+                          html += pc.allBonos.map(b => {
+                            const remaining = b.total_credits - b.used_credits;
+                            const paid = b.totalPaidReal;
+                            const isSelected = pc.selectedBonoId === b.id;
+                            const borderColor = isSelected ? (b.isFullyPaid ? '#22c55e' : '#f59e0b') : '#e2e8f0';
+                            const bgColor = isSelected ? (b.isFullyPaid ? '#f0fdf4' : '#fffbeb') : '#fff';
+                            return `
+                            <div class="bk-bono-option" data-person-id="${p.id}" data-bono-id="${b.id}" style="padding:10px 14px;margin-bottom:6px;border:2px solid ${borderColor};background:${bgColor};border-radius:8px;cursor:pointer;transition:all .15s">
+                              <div style="display:flex;justify-content:space-between;align-items:center">
+                                <div>
+                                  <div style="font-size:.85rem;font-weight:700;color:#0f2f39">Bono ${b.total_credits} clases</div>
+                                  <div style="font-size:.75rem;color:var(--color-muted)">${remaining} créditos restantes</div>
+                                </div>
+                                <div style="text-align:right">
+                                  ${b.isFullyPaid
+                                    ? '<span style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:6px;background:#dcfce7;color:#166534">PAGADO</span>'
+                                    : `<span style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:6px;background:#fef3c7;color:#92400e">PENDIENTE ${b.pendingAmount.toFixed(2)}\u20ac</span>`
+                                  }
+                                </div>
+                              </div>
+                              <div style="font-size:.72rem;margin-top:4px;color:var(--color-muted)">Pagado: ${paid.toFixed(2)}\u20ac de ${b.expectedPrice.toFixed(2)}\u20ac</div>
+                            </div>`;
+                          }).join('');
+                        }
+
+                        return html;
+                      }).join('');
+                      return creditSections ? `<div style="margin-bottom:12px"><div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-navy);margin-bottom:8px">Créditos en cuenta</div>${creditSections}</div>` : '';
+                    })()}
+
                     <div class="bk-total-row">
                       <span>Total</span>
                       <span>${total.toFixed(2)}€</span>
                     </div>
 
-                    <div class="bk-coupon-row">
-                      <select class="bk-coupon-select" id="bk-coupon">
-                        <option value="">Selecciona un cupón</option>
-                      </select>
-                      <button class="bk-coupon-apply" id="bk-coupon-apply">Aplicar</button>
-                    </div>
-
-                    <div class="bk-checkout-options">
+                    <div class="bk-checkout-options" ${allCoveredByCredits() ? 'style="display:none"' : ''}>
                       <div class="bk-checkout-option">
                         <input type="checkbox" id="bk-opt-anticipo" ${cobrarAnticipo ? 'checked' : ''} />
                         <div>
@@ -1410,22 +1523,6 @@ export async function renderCalendario(container) {
                       </div>
 
                       <div class="bk-checkout-option">
-                        <input type="checkbox" id="bk-opt-invitacion" ${crearInvitacion ? 'checked' : ''} />
-                        <div>
-                          <span class="bk-checkout-option-text">Crear como invitación</span>
-                          <span class="bk-checkout-option-hint">El cliente podrá completar el proceso a través de un enlace, realizando los pagos necesarios.</span>
-                        </div>
-                      </div>
-
-                      <div class="bk-checkout-option">
-                        <input type="checkbox" id="bk-opt-ocultar" ${ocultarPrecios ? 'checked' : ''} />
-                        <div>
-                          <span class="bk-checkout-option-text">Ocultar detalles de precios, descuentos y suplementos</span>
-                          <span class="bk-checkout-option-hint">Mostrará solo el total de la reserva en emails y enlaces enviados al cliente.</span>
-                        </div>
-                      </div>
-
-                      <div class="bk-checkout-option">
                         <input type="checkbox" id="bk-opt-confirmacion" ${enviarConfirmacion ? 'checked' : ''} />
                         <div>
                           <span class="bk-checkout-option-text">Enviar confirmación de reserva</span>
@@ -1448,7 +1545,16 @@ export async function renderCalendario(container) {
         const panelBody = overlay.querySelector('.bk-panel-body');
         if (panelBody) panelBody.outerHTML = checkoutHtml.trim();
 
-        // Update header button
+        // Update header: add back button and update confirm button
+        const headerLeft = overlay.querySelector('.bk-header-left');
+        if (headerLeft && !overlay.querySelector('#bk-checkout-back')) {
+          const backBtn = document.createElement('button');
+          backBtn.className = 'bk-back-btn';
+          backBtn.id = 'bk-checkout-back';
+          backBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>';
+          backBtn.style.cssText = 'background:none;border:none;color:#fff;cursor:pointer;padding:4px;margin-right:8px;display:flex;align-items:center';
+          headerLeft.prepend(backBtn);
+        }
         const headerConfirmBtn = overlay.querySelector('#bk-confirm');
         if (headerConfirmBtn) {
           headerConfirmBtn.textContent = 'PASO 2';
@@ -1457,6 +1563,10 @@ export async function renderCalendario(container) {
         }
 
         bindCheckoutEvents();
+        // Back button goes to booking panel (step 1)
+        overlay.querySelector('#bk-checkout-back')?.addEventListener('click', () => {
+          renderPanel();
+        });
       }
 
       function bindCheckoutEvents() {
@@ -1479,12 +1589,11 @@ export async function renderCalendario(container) {
           renderCheckout();
         });
 
-        // Contact search (for linking to existing client)
+        // Contact search (for linking to existing client — adults only)
         let searchDebounce = null;
         const searchInput = overlay.querySelector('#bk-contact-search');
         searchInput?.addEventListener('input', () => {
           clearTimeout(searchDebounce);
-          // Remove any existing results dropdown
           overlay.querySelector('.bk-contact-results')?.remove();
           searchDebounce = setTimeout(async () => {
             const term = searchInput.value.trim();
@@ -1492,10 +1601,18 @@ export async function renderCalendario(container) {
             try {
               const profiles = await searchProfiles(term);
               if (!profiles.length) return;
-              // Show results dropdown
+              // Fetch emails for each profile via RPC
+              const enriched = await Promise.all(profiles.map(async (pr) => {
+                let email = '';
+                try {
+                  const { data } = await supabase.rpc('get_user_email', { p_user_id: pr.id });
+                  email = data || '';
+                } catch {}
+                return { ...pr, email };
+              }));
               const resultsEl = document.createElement('div');
               resultsEl.className = 'bk-contact-results';
-              resultsEl.innerHTML = profiles.map(pr => `
+              resultsEl.innerHTML = enriched.map(pr => `
                 <button type="button" class="bk-contact-result" data-id="${pr.id}" data-name="${pr.full_name || ''}" data-email="${pr.email || ''}" data-phone="${pr.phone || ''}">
                   <strong>${pr.full_name || 'Sin nombre'}</strong>
                   <small>${pr.email || ''} ${pr.phone ? '· ' + pr.phone : ''}</small>
@@ -1503,12 +1620,19 @@ export async function renderCalendario(container) {
               `).join('');
               searchInput.parentNode.appendChild(resultsEl);
               resultsEl.querySelectorAll('.bk-contact-result').forEach(btn => {
-                btn.addEventListener('click', () => {
-                  contactData.profileId = btn.dataset.id;
-                  contactData.nombre = btn.dataset.name;
-                  contactData.email = btn.dataset.email;
-                  contactData.telefono = btn.dataset.phone;
-                  contactData.apellidos = '';
+                btn.addEventListener('click', async () => {
+                  const pid = btn.dataset.id;
+                  contactData.profileId = pid;
+                  // Fetch full profile to get all fields
+                  try {
+                    const { data: fullProfile } = await supabase.from('profiles').select('*').eq('id', pid).single();
+                    if (fullProfile) {
+                      contactData.nombre = (fullProfile.full_name || '').trim();
+                      contactData.apellidos = (fullProfile.last_name || '').trim();
+                      contactData.telefono = fullProfile.phone || '';
+                    }
+                  } catch {}
+                  contactData.email = btn.dataset.email || '';
                   searchInput.value = '';
                   resultsEl.remove();
                   renderCheckout();
@@ -1529,14 +1653,33 @@ export async function renderCalendario(container) {
         overlay.querySelector('#bk-co-pais')?.addEventListener('change', (e) => { contactData.pais = e.target.value; });
         overlay.querySelector('#bk-co-idioma')?.addEventListener('change', (e) => { contactData.idioma = e.target.value; });
 
-        // Discount
-        overlay.querySelector('#bk-discount-type')?.addEventListener('change', (e) => {
-          discountType = e.target.value;
-          renderCheckout();
+        // Use credit checkboxes
+        overlay.querySelectorAll('.bk-use-credit').forEach(cb => {
+          cb.addEventListener('change', (e) => {
+            const pid = cb.dataset.personId;
+            if (personCredits[pid]) {
+              personCredits[pid].useCredit = e.target.checked;
+            }
+            // If all covered by credits, disable anticipo
+            if (allCoveredByCredits()) {
+              cobrarAnticipo = false;
+              paymentMethod = null;
+            }
+            renderCheckout();
+          });
         });
-        overlay.querySelector('#bk-discount-value')?.addEventListener('input', (e) => {
-          discountValue = parseFloat(e.target.value) || 0;
-          renderCheckout();
+
+        // Bono selection (choose which bono to use)
+        overlay.querySelectorAll('.bk-bono-option').forEach(opt => {
+          opt.addEventListener('click', () => {
+            const pid = opt.dataset.personId;
+            const bonoId = opt.dataset.bonoId;
+            if (personCredits[pid]) {
+              personCredits[pid].selectedBonoId = bonoId;
+              personCredits[pid].bono = personCredits[pid].allBonos?.find(b => b.id === bonoId) || personCredits[pid].bono;
+            }
+            renderCheckout();
+          });
         });
 
         // Cobrar anticipo toggle
@@ -1572,15 +1715,9 @@ export async function renderCalendario(container) {
         });
 
         // Checkbox options
-        overlay.querySelector('#bk-opt-invitacion')?.addEventListener('change', (e) => { crearInvitacion = e.target.checked; });
-        overlay.querySelector('#bk-opt-ocultar')?.addEventListener('change', (e) => { ocultarPrecios = e.target.checked; });
         overlay.querySelector('#bk-opt-confirmacion')?.addEventListener('change', (e) => { enviarConfirmacion = e.target.checked; });
 
         // Back to booking (edit)
-        overlay.querySelector('#bk-back-to-booking')?.addEventListener('click', (e) => {
-          e.preventDefault();
-          renderPanel();
-        });
         overlay.querySelector('#bk-edit-booking')?.addEventListener('click', (e) => {
           e.preventDefault();
           renderPanel();
@@ -1634,18 +1771,45 @@ export async function renderCalendario(container) {
 
             // Create enrollments — the DB trigger auto-updates enrolled_count
             for (const p of persons) {
+              const pc = personCredits[p.id];
+              const usingCredit = pc?.useCredit && pc.bono;
+
               for (const sid of p.sessions) {
                 const enrollData = {
                   class_id: sid,
-                  status: (cobrarAnticipo && anticipoAmount >= getTotal()) ? 'paid' : 'confirmed',
                   created_at: new Date().toISOString(),
                 };
+
+                if (usingCredit) {
+                  // Credit from bono — use selected bono
+                  const selectedBono = pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono;
+                  enrollData.bono_id = selectedBono.id;
+                  // If bono has pending payment (e.g. only 15€ deposit paid), mark as partial (orange)
+                  enrollData.status = selectedBono.isFullyPaid ? 'paid' : 'partial';
+                } else {
+                  enrollData.status = (cobrarAnticipo && anticipoAmount >= getTotal()) ? 'paid' : (cobrarAnticipo && anticipoAmount > 0) ? 'partial' : 'confirmed';
+                }
+
                 if (p.profileId) {
                   enrollData.user_id = p.profileId;
+                  if (p.familyMemberId) {
+                    enrollData.family_member_id = p.familyMemberId;
+                    enrollData.guest_name = p.profileName;
+                  }
                 } else {
                   enrollData.guest_name = `${p.nombre} ${p.apellidos}`.trim() || 'Invitado';
                 }
                 await createEnrollment(enrollData);
+              }
+
+              // Consume bono credits
+              if (usingCredit) {
+                const selectedBono = pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono;
+                const sessionsUsed = p.sessions.length;
+                await supabase.from('bonos').update({
+                  used_credits: selectedBono.used_credits + sessionsUsed,
+                  updated_at: new Date().toISOString(),
+                }).eq('id', selectedBono.id);
               }
             }
 
@@ -1653,7 +1817,7 @@ export async function renderCalendario(container) {
             const reservationData = {
               id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36),
               createdAt: new Date(),
-              status: cobrarAnticipo ? (anticipoAmount >= total ? 'paid' : 'confirmed') : 'confirmed',
+              status: cobrarAnticipo ? (anticipoAmount >= total ? 'paid' : anticipoAmount > 0 ? 'partial' : 'confirmed') : 'confirmed',
               total: subtotal,
               discount: getDiscount(),
               totalFinal: total,
@@ -2128,20 +2292,80 @@ export async function renderCalendario(container) {
           }
           resultsEl.innerHTML = '<p class="bk-search-hint">Buscando…</p>';
           try {
-            const profiles = await searchProfiles(term);
-            if (!profiles.length) {
+            // Search profiles AND family_members in parallel
+            const safeTerm = term.replace(/[%_\\]/g, '');
+            const [profiles, familyDirectHits] = await Promise.all([
+              searchProfiles(term),
+              supabase.from('family_members').select('id, full_name, birth_date, user_id')
+                .ilike('full_name', `%${safeTerm}%`).limit(10)
+                .then(r => r.data || []).catch(() => []),
+            ]);
+
+            // Fetch family members for each profile found
+            const profileIds = profiles.map(pr => pr.id);
+            const familyPromises = profiles.map(pr =>
+              supabase.from('family_members').select('id, full_name, birth_date').eq('user_id', pr.id).order('created_at')
+                .then(r => ({ userId: pr.id, members: r.data || [] }))
+                .catch(() => ({ userId: pr.id, members: [] }))
+            );
+            const familyResults = await Promise.all(familyPromises);
+            const familyMap = {};
+            familyResults.forEach(r => { familyMap[r.userId] = r.members; });
+
+            // For direct family hits not already under a found profile, fetch their parent
+            const extraParentIds = [...new Set(familyDirectHits.filter(m => !profileIds.includes(m.user_id)).map(m => m.user_id))];
+            let extraParents = {};
+            if (extraParentIds.length) {
+              const { data: parents } = await supabase.from('profiles').select('id, full_name, phone').in('id', extraParentIds);
+              if (parents) parents.forEach(p => { extraParents[p.id] = p; });
+              // Also fetch their family members
+              for (const parentId of extraParentIds) {
+                if (!familyMap[parentId]) {
+                  const { data: members } = await supabase.from('family_members').select('id, full_name, birth_date').eq('user_id', parentId).order('created_at');
+                  familyMap[parentId] = members || [];
+                }
+              }
+            }
+
+            // Build combined results: profiles first, then extra parents from direct family hits
+            const allProfiles = [...profiles];
+            for (const parentId of extraParentIds) {
+              if (extraParents[parentId] && !allProfiles.find(p => p.id === parentId)) {
+                allProfiles.push(extraParents[parentId]);
+              }
+            }
+
+            if (!allProfiles.length) {
               resultsEl.innerHTML = '<p class="bk-search-hint">No se encontraron clientes</p>';
               return;
             }
-            resultsEl.innerHTML = profiles.map(pr => `
-              <button class="bk-search-result" data-id="${pr.id}" data-name="${pr.full_name || pr.email}">
+
+            resultsEl.innerHTML = allProfiles.map(pr => {
+              const members = familyMap[pr.id] || [];
+              let html = `
+              <button class="bk-search-result" data-id="${pr.id}" data-name="${pr.full_name || ''}" data-type="profile">
                 <div>
                   <strong>${pr.full_name || 'Sin nombre'}</strong>
-                  <small style="color:#888;display:block">${pr.email || ''} ${pr.phone ? '· ' + pr.phone : ''}</small>
+                  <small style="color:#888;display:block">${pr.phone ? pr.phone : ''}</small>
                 </div>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
-              </button>
-            `).join('');
+              </button>`;
+              if (members.length) {
+                html += members.map(m => {
+                  const age = m.birth_date ? new Date().getFullYear() - new Date(m.birth_date).getFullYear() : null;
+                  return `
+                  <button class="bk-search-result" data-id="${pr.id}" data-name="${m.full_name}" data-family-id="${m.id}" data-type="family" style="padding-left:36px;border-left:3px solid #0ea5e9">
+                    <div>
+                      <small style="color:#0ea5e9;font-weight:600">↳ Familiar de ${pr.full_name || 'cuenta'}</small>
+                      <strong style="display:block">${m.full_name}</strong>
+                      ${age ? `<small style="color:#888">${age} años</small>` : ''}
+                    </div>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
+                  </button>`;
+                }).join('');
+              }
+              return html;
+            }).join('');
 
             resultsEl.querySelectorAll('.bk-search-result').forEach(btn => {
               btn.addEventListener('click', () => {
@@ -2149,6 +2373,7 @@ export async function renderCalendario(container) {
                 if (p) {
                   p.profileId = btn.dataset.id;
                   p.profileName = btn.dataset.name;
+                  p.familyMemberId = btn.dataset.familyId || null;
                   p.nombre = '';
                   p.apellidos = '';
                 }
@@ -2187,7 +2412,6 @@ export async function renderCalendario(container) {
     }).join('');
 
     const defaultCapacities = { grupal: 6, individual: 1, yoga: 10, paddle: 8, surfskate: 8 };
-    const defaultPrices = { grupal: 35, individual: 69, yoga: 20, paddle: 49, surfskate: 30 };
 
     openModal('Nueva Sesión', `
       <div class="cal-modal-type-selector" style="display:flex;gap:8px;margin-bottom:16px">
@@ -2210,8 +2434,6 @@ export async function renderCalendario(container) {
           <input type="date" name="repeat_until" value="${getEndOfMonthStr(currentDate)}" required />
           <label>Instructor</label>
           <input type="text" name="instructor" placeholder="Opcional" />
-          <label>Precio por sesión (€)</label>
-          <input type="number" name="price" id="ns-price" step="0.01" value="35" required />
           <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
             <input type="checkbox" name="published" style="width:auto" />
             Publicar inmediatamente
@@ -2339,10 +2561,9 @@ export async function renderCalendario(container) {
       summary.innerHTML = `Total: ${total}€${deposit > 0 ? ` · Depósito: ${deposit}€` : ''}`;
     }
 
-    // Auto-update price and capacity when type changes (class form)
+    // Auto-update capacity when type changes (class form)
     document.getElementById('ns-type')?.addEventListener('change', (e) => {
       const t = e.target.value;
-      document.getElementById('ns-price').value = defaultPrices[t] || 35;
       document.getElementById('ns-capacity').value = defaultCapacities[t] || 8;
     });
 
@@ -2355,7 +2576,6 @@ export async function renderCalendario(container) {
       const timeEnd = fd.get('time_end');
       const maxStudents = parseInt(fd.get('max_students'));
       const instructor = fd.get('instructor') || null;
-      const price = parseFloat(fd.get('price'));
       const published = e.target.published.checked;
       const repeatUntil = fd.get('repeat_until');
       const repeatDays = fd.getAll('repeat_days').map(Number);
@@ -2380,7 +2600,7 @@ export async function renderCalendario(container) {
           await upsertClass({
             title: TYPE_LABELS[type], type, level: 'todos', date,
             time_start: timeStart, time_end: timeEnd,
-            max_students: maxStudents, instructor, price, published,
+            max_students: maxStudents, instructor, price: 0, published,
             location: 'Playa de Roche', status: 'scheduled',
           });
         }
@@ -2910,6 +3130,13 @@ export async function renderCalendario(container) {
     // Client history cache
     let clientHistory = null;
 
+    // Available bonos for "Pagar con crédito"
+    let edBonos = null;
+
+    // All user bonos for this class type (for info display)
+    let edUserBonos = null;
+    let edLinkedBono = null;
+
     // Payments tracking
     let edPayments = null;
     function getEdTotalPaid() { return (edPayments || []).reduce((s, p) => s + Number(p.amount || 0), 0); }
@@ -2919,9 +3146,9 @@ export async function renderCalendario(container) {
     overlay.className = 'bk-overlay bk-overlay-fullscreen';
     document.body.appendChild(overlay);
 
-    function getStatusLabel() { return currentStatus === 'paid' ? 'Pagado' : 'Pendiente'; }
-    function getStatusColor() { return currentStatus === 'paid' ? '#166534' : '#b91c1c'; }
-    function getStatusBg() { return currentStatus === 'paid' ? '#dcfce7' : '#fee2e2'; }
+    function getStatusLabel() { return currentStatus === 'paid' ? 'Pagado' : currentStatus === 'partial' ? 'Anticipo' : 'Pendiente'; }
+    function getStatusColor() { return currentStatus === 'paid' ? '#166534' : currentStatus === 'partial' ? '#92400e' : '#b91c1c'; }
+    function getStatusBg() { return currentStatus === 'paid' ? '#dcfce7' : currentStatus === 'partial' ? '#fff7ed' : '#fee2e2'; }
 
     function renderEdPanel() {
       const statusLabel = getStatusLabel();
@@ -2971,7 +3198,64 @@ export async function renderCalendario(container) {
                 </tr>
               </tbody>
             </table>
-          </div>`;
+          </div>
+          ${(() => {
+            // Bono & payment summary
+            if (!userId) return '';
+            if (edUserBonos === null) {
+              loadEdUserBonos();
+              return '<div class="rv-info-card" style="padding:16px;margin-top:16px"><p style="color:var(--color-muted);font-size:.85rem">Cargando información de bonos...</p></div>';
+            }
+            if (!edUserBonos.length) return '';
+
+            const totalPaid = getEdTotalPaid();
+            const linkedBono = edLinkedBono;
+
+            let html = '<div style="margin-top:16px">';
+            html += '<h3 style="font-family:Space Grotesk,sans-serif;font-size:.82rem;text-transform:uppercase;color:var(--color-navy);margin:0 0 10px">Bonos del cliente — ' + label + '</h3>';
+
+            // Show each bono
+            html += edUserBonos.map(b => {
+              const remaining = b.total_credits - b.used_credits;
+              const paid = b.totalPaidReal;
+              const isLinked = enrollment?.bono_id === b.id;
+              const pct = b.total_credits > 0 ? Math.round((b.used_credits / b.total_credits) * 100) : 0;
+              const borderColor = isLinked ? '#0ea5e9' : '#e2e8f0';
+
+              return '<div style="padding:12px 16px;border:' + (isLinked ? '2px' : '1px') + ' solid ' + borderColor + ';border-radius:10px;margin-bottom:8px;background:#fff">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+                  '<div><strong style="font-size:.88rem">Bono ' + b.total_credits + ' clases</strong>' +
+                    (isLinked ? ' <span style="font-size:.7rem;padding:2px 8px;background:#dbeafe;color:#1d4ed8;border-radius:4px;font-weight:700">VINCULADO</span>' : '') +
+                    (b.status === 'active' ? ' <span style="font-size:.7rem;padding:2px 8px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">ACTIVO</span>' : ' <span style="font-size:.7rem;padding:2px 8px;background:#f3f4f6;color:#6b7280;border-radius:4px">' + b.status.toUpperCase() + '</span>') +
+                  '</div>' +
+                  '<div>' + (b.isFullyPaid
+                    ? '<span style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:6px;background:#dcfce7;color:#166534">PAGADO</span>'
+                    : '<span style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:6px;background:#fef3c7;color:#92400e">DEBE ' + b.pendingAmount.toFixed(2) + '\u20ac</span>'
+                  ) + '</div>' +
+                '</div>' +
+                '<div style="display:flex;gap:16px;font-size:.78rem;color:var(--color-muted)">' +
+                  '<span>Cr\u00e9ditos: ' + remaining + '/' + b.total_credits + ' restantes</span>' +
+                  '<span>Pagado: ' + paid.toFixed(2) + '\u20ac de ' + b.expectedPrice.toFixed(2) + '\u20ac</span>' +
+                '</div>' +
+                '<div style="margin-top:6px;height:4px;background:#f1f5f9;border-radius:2px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:' + (b.isFullyPaid ? '#22c55e' : '#f59e0b') + ';border-radius:2px"></div></div>' +
+              '</div>';
+            }).join('');
+
+            // Summary
+            const totalBonosPaid = edUserBonos.reduce((s, b) => s + b.totalPaidReal, 0);
+            const totalBonosExpected = edUserBonos.reduce((s, b) => s + b.expectedPrice, 0);
+            const totalBonoPending = Math.max(0, totalBonosExpected - totalBonosPaid);
+            const totalCreditsRemaining = edUserBonos.filter(b => b.status === 'active').reduce((s, b) => s + (b.total_credits - b.used_credits), 0);
+
+            html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">' +
+              '<div style="padding:10px;background:#f8fafc;border-radius:8px;text-align:center"><div style="font-size:.68rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:2px">Cr\u00e9ditos</div><div style="font-size:1rem;font-weight:700;color:var(--color-navy)">' + totalCreditsRemaining + '</div></div>' +
+              '<div style="padding:10px;background:#f8fafc;border-radius:8px;text-align:center"><div style="font-size:.68rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:2px">Total pagado</div><div style="font-size:1rem;font-weight:700;color:#166534">' + totalBonosPaid.toFixed(2) + '\u20ac</div></div>' +
+              '<div style="padding:10px;background:#f8fafc;border-radius:8px;text-align:center"><div style="font-size:.68rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:2px">Pendiente</div><div style="font-size:1rem;font-weight:700;color:' + (totalBonoPending > 0 ? '#b91c1c' : '#166534') + '">' + totalBonoPending.toFixed(2) + '\u20ac</div></div>' +
+            '</div>';
+
+            html += '</div>';
+            return html;
+          })()}`;
       } else if (edActiveTab === 'datos') {
         if (!userId) {
           tabContent = `
@@ -3065,8 +3349,23 @@ export async function renderCalendario(container) {
               </tbody>
             </table>` : `<div style="padding:24px;text-align:center;color:var(--color-muted)">No hay pagos registrados</div>`}
           </div>
-          <button class="btn ed-add-payment-btn" style="margin-top:16px;background:#22c55e;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600">Añadir pago</button>`;
+          <button class="btn ed-add-payment-btn" style="margin-top:16px;background:#22c55e;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600">Añadir pago</button>
+          ${!enrollment?.bono_id ? (() => {
+            if (edBonos === null) return '<div style="margin-top:16px;padding:16px;background:#f0f9ff;border-radius:8px;color:var(--color-muted);font-size:.85rem">Cargando créditos disponibles...</div>';
+            if (!edBonos.length) return '';
+            const totalCredits = edBonos.reduce((s, b) => s + (b.total_credits - b.used_credits), 0);
+            const bestBono = edBonos.find(b => (b.total_credits - b.used_credits) >= 1) || edBonos[0];
+            const typeLabel = TYPE_LABELS[cls.type] || cls.type;
+            return '<div style="margin-top:20px;padding:16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px">' +
+              '<h4 style="margin:0 0 8px;font-family:Space Grotesk,sans-serif;font-size:.82rem;text-transform:uppercase;color:#166534">Pagar con cr\u00e9dito</h4>' +
+              '<p style="font-size:.82rem;color:#15803d;margin:0 0 12px">El cliente tiene <strong>' + totalCredits + ' cr\u00e9ditos</strong> de ' + typeLabel + ' disponibles.</p>' +
+              '<button class="ed-pay-with-credit" data-bono-id="' + bestBono.id + '" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:#fff;border:1px solid #86efac;border-radius:8px;cursor:pointer;font-family:inherit;transition:background .15s">' +
+                '<div style="text-align:left"><div style="font-weight:600;font-size:.9rem;color:#0f2f39">' + typeLabel + '</div><div style="font-size:.78rem;color:var(--color-muted)">' + totalCredits + ' cr\u00e9ditos disponibles en total</div></div>' +
+                '<span style="background:#22c55e;color:#fff;padding:6px 14px;border-radius:6px;font-size:.8rem;font-weight:600;white-space:nowrap">Usar 1 cr\u00e9dito</span></button>' +
+            '</div>';
+          })() : '<div style="margin-top:16px;padding:12px 16px;background:#f0fdf4;border-radius:8px;font-size:.85rem;color:#166534"><strong>Pagado con cr\u00e9dito</strong> — Bono vinculado: ' + (enrollment.bono_id?.slice(0, 8) || '') + '...</div>'}`;
         if (!edPayments) loadEdPayments();
+        if (edBonos === null && !enrollment?.bono_id) loadEdBonos();
       } else if (edActiveTab === 'historico') {
         const timeline = [];
         if (enrollment?.created_at) timeline.push({ date: enrollment.created_at, label: 'Inscripción creada', color: '#22c55e' });
@@ -3187,9 +3486,51 @@ export async function renderCalendario(container) {
         if (totalPaid >= packPrice && currentStatus !== 'paid') {
           currentStatus = 'paid';
           await updateEnrollmentStatus(enrollmentId, 'paid').catch(() => {});
+        } else if (totalPaid > 0 && totalPaid < packPrice && currentStatus !== 'partial') {
+          currentStatus = 'partial';
+          await updateEnrollmentStatus(enrollmentId, 'partial').catch(() => {});
         }
         renderEdPanel();
       } catch (err) { console.warn('Error loading enrollment payments:', err); }
+    }
+
+    async function loadEdBonos() {
+      if (!userId) { edBonos = []; return; }
+      try {
+        const { data } = await supabase
+          .from('bonos')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .eq('class_type', cls.type)
+          .gt('expires_at', new Date().toISOString());
+        edBonos = (data || []).filter(b => b.used_credits < b.total_credits);
+        renderEdPanel();
+      } catch (err) { console.warn('Error loading bonos:', err); edBonos = []; }
+    }
+
+    async function loadEdUserBonos() {
+      if (!userId) { edUserBonos = []; return; }
+      try {
+        const { data } = await supabase
+          .from('bonos')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('class_type', cls.type)
+          .order('created_at', { ascending: false });
+        edUserBonos = (data || []).map(b => {
+          const expectedPrice = getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
+          // If total_paid is 0 but bono was bought online (has order_id), at least the deposit was paid
+          const deposit = DEPOSIT[b.class_type] || 15;
+          const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
+          return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: Math.max(0, expectedPrice - paid), isFullyPaid: paid >= expectedPrice };
+        });
+        // If enrollment is linked to a bono, cache it
+        if (enrollment?.bono_id) {
+          edLinkedBono = edUserBonos.find(b => b.id === enrollment.bono_id) || null;
+        }
+        renderEdPanel();
+      } catch (err) { console.warn('Error loading user bonos:', err); edUserBonos = []; }
     }
 
     function openEdAddPaymentModal() {
@@ -3260,11 +3601,25 @@ export async function renderCalendario(container) {
           edPayments = null; // force reload
           modal.remove();
           showToast('Pago registrado', 'success');
-          // Auto-mark as paid if total covered
+          // Update bono total_paid if enrollment is linked to a bono
+          if (enrollment?.bono_id) {
+            try {
+              const { data: bono } = await supabase.from('bonos').select('total_paid').eq('id', enrollment.bono_id).single();
+              const bonoCurrentPaid = Number(bono?.total_paid || 0);
+              await supabase.from('bonos').update({
+                total_paid: bonoCurrentPaid + amount,
+                updated_at: new Date().toISOString(),
+              }).eq('id', enrollment.bono_id);
+            } catch (err) { console.warn('Error updating bono total_paid:', err); }
+          }
+          // Auto-mark status based on total paid
           const newTotalPaid = getEdTotalPaid() + amount;
           if (newTotalPaid >= packPrice && currentStatus !== 'paid') {
             currentStatus = 'paid';
             await updateEnrollmentStatus(enrollmentId, 'paid').catch(() => {});
+          } else if (newTotalPaid > 0 && newTotalPaid < packPrice) {
+            currentStatus = 'partial';
+            await updateEnrollmentStatus(enrollmentId, 'partial').catch(() => {});
           }
           await loadEdPayments();
         } catch (err) {
@@ -3317,6 +3672,51 @@ export async function renderCalendario(container) {
         btn.addEventListener('click', (e) => { e.preventDefault(); openEdAddPaymentModal(); });
       });
 
+      // Pay with credit buttons
+      overlay.querySelectorAll('.ed-pay-with-credit').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const bonoId = btn.dataset.bonoId;
+          if (!confirm('¿Usar 1 crédito de bono para pagar esta clase?')) return;
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+          try {
+            // 1. Check bono payment status to determine enrollment status
+            const { data: bonoData } = await supabase.from('bonos').select('*').eq('id', bonoId).single();
+            const bonoExpectedPrice = getPackPrice(cls.type, bonoData?.total_credits || 1, Number(cls.price) || 0);
+            const deposit = DEPOSIT[cls.type] || 15;
+            const bonoPaid = Number(bonoData?.total_paid || 0) || (bonoData?.order_id ? deposit : 0);
+            const bonoFullyPaid = bonoPaid >= bonoExpectedPrice;
+            const newStatus = bonoFullyPaid ? 'paid' : 'partial';
+
+            await supabase.from('class_enrollments').update({
+              bono_id: bonoId,
+              status: newStatus,
+              updated_at: new Date().toISOString(),
+            }).eq('id', enrollmentId);
+            // Update local enrollment ref
+            if (enrollment) { enrollment.bono_id = bonoId; enrollment.status = newStatus; }
+            currentStatus = newStatus;
+
+            // 2. Increment used_credits on the bono
+            const { data: bono } = await supabase.from('bonos').select('used_credits').eq('id', bonoId).single();
+            const newUsed = (Number(bono?.used_credits) || 0) + 1;
+            await supabase.from('bonos').update({
+              used_credits: newUsed,
+              updated_at: new Date().toISOString(),
+            }).eq('id', bonoId);
+
+            showToast('Clase pagada con crédito de bono', 'success');
+            edBonos = null;
+            edUserBonos = null; // force reload
+            renderEdPanel();
+          } catch (err) {
+            showToast('Error: ' + err.message, 'error');
+            btn.disabled = false;
+            btn.style.opacity = '1';
+          }
+        });
+      });
+
       // Delete payment buttons
       overlay.querySelectorAll('.ed-delete-payment').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -3326,11 +3726,23 @@ export async function renderCalendario(container) {
             const payment = edPayments?.find(p => p.id === pid);
             await deletePayment(pid);
             if (payment) {
+              const removedAmount = Number(payment.amount || 0);
               // If removing this payment makes total < packPrice, revert to confirmed
-              const remainingPaid = getEdTotalPaid() - Number(payment.amount || 0);
+              const remainingPaid = getEdTotalPaid() - removedAmount;
               if (remainingPaid < packPrice && currentStatus === 'paid') {
                 currentStatus = 'confirmed';
                 await updateEnrollmentStatus(enrollmentId, 'confirmed').catch(() => {});
+              }
+              // Update bono total_paid
+              if (enrollment?.bono_id) {
+                try {
+                  const { data: bono } = await supabase.from('bonos').select('total_paid').eq('id', enrollment.bono_id).single();
+                  const bonoCurrentPaid = Number(bono?.total_paid || 0);
+                  await supabase.from('bonos').update({
+                    total_paid: Math.max(0, bonoCurrentPaid - removedAmount),
+                    updated_at: new Date().toISOString(),
+                  }).eq('id', enrollment.bono_id);
+                } catch (err) { console.warn('Error updating bono total_paid:', err); }
               }
             }
             edPayments = null;

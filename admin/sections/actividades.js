@@ -559,6 +559,13 @@ export async function renderActividades(container) {
           <small class="act-form-hint">El resto se paga en la primera clase.</small>
         </div>
         <div class="act-form-field">
+          <label class="act-form-label">PRECIO CLASE EXTRA (despues del pack maximo)</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" class="act-form-input" id="f-extra-class-price" value="${a.extra_class_price||0}" step="0.01" style="width:100px" /> <span>€ / clase</span>
+          </div>
+          <small class="act-form-hint">Precio por cada clase adicional cuando el cliente ya tiene el pack mas grande. Pon 0 para desactivar.</small>
+        </div>
+        <div class="act-form-field">
           <label class="act-form-label">VALIDEZ DE PACKS (dias)</label>
           <input type="number" class="act-form-input" id="f-validity" value="${a.pack_validity||180}" style="width:120px" />
         </div>
@@ -826,6 +833,7 @@ export async function renderActividades(container) {
 
     if (activeTab === 'pagos') {
       updates.deposit = parseFloat(container.querySelector('#f-deposit')?.value) || a.deposit;
+      updates.extra_class_price = parseFloat(container.querySelector('#f-extra-class-price')?.value) || 0;
       updates.pack_validity = parseInt(container.querySelector('#f-validity')?.value) || a.pack_validity;
       updates.meta_title = container.querySelector('#f-meta-title')?.value.trim() || null;
       updates.meta_description = container.querySelector('#f-meta-desc')?.value.trim() || null;

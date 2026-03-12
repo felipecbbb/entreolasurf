@@ -1,9 +1,21 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin } from '../modules/api.js';
+import { fetchProfiles, createClientFromAdmin, createPayment } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
+import { PACK_PRICING, DEPOSIT } from '../modules/constants.js';
+
+function getPackPrice(type, sessionCount, fallbackPrice = 0) {
+  if (sessionCount <= 0) return 0;
+  const tiers = PACK_PRICING[type];
+  if (!tiers) return fallbackPrice * sessionCount;
+  if (sessionCount < tiers.length) return tiers[sessionCount];
+  const maxTier = tiers.length - 1;
+  const maxPrice = tiers[maxTier];
+  const perSession = maxPrice / maxTier;
+  return maxPrice + (sessionCount - maxTier) * perSession;
+}
 
 // ---- API helpers (client-specific) ----
 
@@ -102,6 +114,13 @@ async function fetchClientEquipmentReservations(userId) {
   }));
 }
 
+async function fetchClientPayments(userId) {
+  // Fetch all payments across enrollments + rentals for this user via RPC
+  const { data, error } = await supabase.rpc('get_user_payments', { p_user_id: userId });
+  if (error) { console.warn('fetchClientPayments:', error.message); return []; }
+  return data || [];
+}
+
 async function fetchClientFamilyMembers(userId) {
   const { data, error } = await supabase
     .from('family_members')
@@ -192,12 +211,24 @@ export async function renderClientes(container) {
     selectedClient = null;
     const profiles = await fetchProfiles(searchTerm || undefined);
 
-    // Batch-fetch emails for all listed profiles
+    // Batch-fetch emails and family members for all listed profiles
+    const profileIds = profiles.map(p => p.id);
+    const [, familyRes] = await Promise.all([
+      (async () => {
+        for (const p of profiles) {
+          if (emailCache[p.id] === undefined) {
+            emailCache[p.id] = await getAuthEmail(p.id);
+          }
+          p._email = emailCache[p.id];
+        }
+      })(),
+      profileIds.length
+        ? supabase.from('family_members').select('id, user_id, full_name, last_name').in('user_id', profileIds).order('created_at', { ascending: true })
+        : { data: [] },
+    ]);
+    const allFamilyMembers = familyRes.data || [];
     for (const p of profiles) {
-      if (emailCache[p.id] === undefined) {
-        emailCache[p.id] = await getAuthEmail(p.id);
-      }
-      p._email = emailCache[p.id];
+      p._family = allFamilyMembers.filter(m => m.user_id === p.id);
     }
 
     const toolbar = `
@@ -207,26 +238,47 @@ export async function renderClientes(container) {
         <button class="btn red" id="new-client-btn">+ Nuevo Cliente</button>
       </div>`;
 
-    const table = renderTable(
-      [
-        { label: 'Nombre', key: 'full_name' },
-        { label: 'Email', render: r => r._email || '—' },
-        { label: 'Teléfono', render: r => r.phone || '—' },
-        { label: 'Rol', render: r => statusBadge(r.role) },
-        { label: 'Registrado', render: r => formatDate(r.created_at) }
-      ],
-      profiles,
-      (row) => `
-        <button class="admin-action-btn" data-id="${row.id}" data-action="email" title="Enviar email">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        </button>
-        <button class="admin-action-btn danger" data-id="${row.id}" data-action="delete" title="Eliminar cliente">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-        </button>
-      `
-    );
+    const listHtml = !profiles.length
+      ? '<div class="admin-empty"><p>No hay clientes</p></div>'
+      : `<div class="cli-list">${profiles.map(r => {
+        const fullName = esc(r.full_name) + (r.last_name ? ' ' + esc(r.last_name) : '');
+        const familyHtml = (r._family || []).map(m =>
+          `<div class="cli-family-tag" data-client-id="${r.id}" data-member-id="${m.id}">` +
+            `<div class="cli-family-tag-left">` +
+              `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` +
+              `<span>${esc(m.full_name)}${m.last_name ? ' ' + esc(m.last_name) : ''}</span>` +
+            `</div>` +
+            `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>` +
+          `</div>`
+        ).join('');
 
-    container.innerHTML = toolbar + table;
+        return `<div class="cli-list-card" data-id="${r.id}">
+          <div class="cli-list-card-main">
+            <div class="cli-list-avatar" style="background:${r.role === 'admin' ? '#0f2f39' : '#0ea5e9'}">${(r.full_name || '?')[0].toUpperCase()}</div>
+            <div class="cli-list-info">
+              <div class="cli-list-name">${fullName}</div>
+              <div class="cli-list-meta">
+                ${r._email ? `<span>${esc(r._email)}</span>` : ''}
+                ${r.phone ? `<span>${esc(r.phone)}</span>` : ''}
+              </div>
+            </div>
+            <div class="cli-list-right">
+              <span class="act-status-badge ${r.role === 'admin' ? 'active' : ''}" style="font-size:.68rem">${r.role === 'admin' ? 'Admin' : 'Cliente'}</span>
+              <div class="cli-list-actions">
+                <button class="admin-action-btn" data-id="${r.id}" data-action="email" title="Enviar email">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                </button>
+                <button class="admin-action-btn danger" data-id="${r.id}" data-action="delete" title="Eliminar cliente">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          ${familyHtml ? `<div class="cli-list-family">${familyHtml}</div>` : ''}
+        </div>`;
+      }).join('')}</div>`;
+
+    container.innerHTML = toolbar + listHtml;
 
     // Search
     const searchInput = container.querySelector('#clientes-search');
@@ -245,14 +297,35 @@ export async function renderClientes(container) {
     // New client
     container.querySelector('#new-client-btn').addEventListener('click', () => openNewClientModal());
 
-    // Row click → open ficha
-    container.querySelectorAll('tbody tr').forEach((row, idx) => {
-      row.style.cursor = 'pointer';
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('.admin-action-btn')) return;
-        selectedClient = profiles[idx];
-        activeTab = 'datos';
-        renderDetail();
+    // Family member tag click → open client detail then member ficha
+    container.querySelectorAll('.cli-family-tag').forEach(tag => {
+      tag.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const clientId = tag.dataset.clientId;
+        const memberId = tag.dataset.memberId;
+        const client = profiles.find(p => p.id === clientId);
+        if (!client) return;
+        // Enter detail view first so #cli-tab-content exists
+        selectedClient = client;
+        activeTab = 'familia';
+        await renderDetail();
+        // Now fetch and open member ficha
+        const members = await fetchClientFamilyMembers(clientId);
+        const member = members.find(m => m.id === memberId);
+        if (member) openMemberFicha(client, member);
+      });
+    });
+
+    // Card click → open client ficha
+    container.querySelectorAll('.cli-list-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.admin-action-btn') || e.target.closest('.cli-family-tag')) return;
+        const client = profiles.find(p => p.id === card.dataset.id);
+        if (client) {
+          selectedClient = client;
+          activeTab = 'datos';
+          renderDetail();
+        }
       });
     });
 
@@ -286,11 +359,12 @@ export async function renderClientes(container) {
     });
   }
 
-  // ---- Helper: get email from auth (best-effort) ----
+  // ---- Helper: get email from auth via RPC ----
   async function getAuthEmail(userId) {
     try {
-      const { data } = await supabase.auth.admin.getUserById(userId);
-      return data?.user?.email || null;
+      const { data, error } = await supabase.rpc('get_user_email', { p_user_id: userId });
+      if (error) { console.warn('getAuthEmail RPC error:', error.message); return null; }
+      return data || null;
     } catch {
       return null;
     }
@@ -342,6 +416,7 @@ export async function renderClientes(container) {
         { id: 'bonos', label: 'Bonos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>' },
       ]},
       { group: 'COMERCIAL', items: [
+        { id: 'pagos', label: 'Historial pagos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>' },
         { id: 'reservas', label: 'Reservas', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
         { id: 'alquileres', label: 'Alquileres', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 00-8 0v2"/></svg>' },
         { id: 'pedidos', label: 'Pedidos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>' },
@@ -443,10 +518,17 @@ export async function renderClientes(container) {
       }
     });
 
+    // Injury toggle in datos tab
+    container.querySelector('#cli-has-injury')?.addEventListener('change', (e) => {
+      const row = container.querySelector('#cli-injury-detail-row');
+      if (row) row.style.display = e.target.value === 'true' ? '' : 'none';
+    });
+
     // Load async tab content
     if (activeTab === 'familia') loadFamiliaTab(c);
     else if (activeTab === 'clases') loadClasesTab(c);
     else if (activeTab === 'bonos') loadBonosTab(c);
+    else if (activeTab === 'pagos') loadPagosTab(c);
     else if (activeTab === 'reservas') loadReservasTab(c);
     else if (activeTab === 'alquileres') loadAlquileresTab(c);
     else if (activeTab === 'pedidos') loadPedidosTab(c);
@@ -460,18 +542,20 @@ export async function renderClientes(container) {
       <div class="act-form-card">
         <div class="cli-form-row">
           <div class="act-form-field">
-            <label class="act-form-label">NOMBRE COMPLETO</label>
+            <label class="act-form-label">NOMBRE</label>
             <input type="text" class="act-form-input" id="cli-fullname" value="${esc(c.full_name)}" />
           </div>
+          <div class="act-form-field">
+            <label class="act-form-label">APELLIDOS</label>
+            <input type="text" class="act-form-input" id="cli-lastname" value="${esc(c.last_name || '')}" placeholder="Apellidos" />
+          </div>
         </div>
-        ${c._email ? `
         <div class="cli-form-row">
           <div class="act-form-field">
             <label class="act-form-label">EMAIL</label>
-            <input type="email" class="act-form-input" value="${esc(c._email)}" readonly style="background:#f9fafb;color:var(--color-muted);cursor:default" />
-            <small class="act-form-hint">El email está vinculado a la cuenta de autenticación y no se puede modificar aquí.</small>
+            <input type="email" class="act-form-input" value="${esc(c._email || '')}" readonly style="background:#f9fafb;cursor:default" placeholder="${c._email ? '' : 'No disponible'}" />
           </div>
-        </div>` : ''}
+        </div>
         <div class="cli-form-row">
           <div class="act-form-field">
             <label class="act-form-label">TELÉFONO</label>
@@ -482,6 +566,48 @@ export async function renderClientes(container) {
             <select class="act-form-input" id="cli-role" style="cursor:pointer">
               <option value="client" ${c.role === 'client' ? 'selected' : ''}>Cliente</option>
               <option value="admin" ${c.role === 'admin' ? 'selected' : ''}>Admin</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="act-detail-section-title" style="margin-top:24px">Salud y equipamiento</h3>
+      <div class="act-form-card">
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">¿SABE NADAR?</label>
+            <select class="act-form-input" id="cli-can-swim">
+              <option value="" ${c.can_swim == null ? 'selected' : ''}>Sin definir</option>
+              <option value="true" ${c.can_swim === true ? 'selected' : ''}>Sí</option>
+              <option value="false" ${c.can_swim === false ? 'selected' : ''}>No</option>
+            </select>
+          </div>
+          <div class="act-form-field">
+            <label class="act-form-label">¿TIENE LESIÓN?</label>
+            <select class="act-form-input" id="cli-has-injury">
+              <option value="false" ${!c.has_injury ? 'selected' : ''}>No</option>
+              <option value="true" ${c.has_injury ? 'selected' : ''}>Sí</option>
+            </select>
+          </div>
+        </div>
+        <div class="cli-form-row" id="cli-injury-detail-row" style="${c.has_injury ? '' : 'display:none'}">
+          <div class="act-form-field">
+            <label class="act-form-label">DETALLE LESIÓN</label>
+            <input type="text" class="act-form-input" id="cli-injury-detail" value="${esc(c.injury_detail)}" placeholder="Describe la lesión…" />
+          </div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">TALLA NEOPRENO</label>
+            <select class="act-form-input" id="cli-wetsuit-size">
+              <option value="" ${!c.wetsuit_size ? 'selected' : ''}>Sin definir</option>
+              <option value="XXS" ${c.wetsuit_size === 'XXS' ? 'selected' : ''}>XXS</option>
+              <option value="XS" ${c.wetsuit_size === 'XS' ? 'selected' : ''}>XS</option>
+              <option value="S" ${c.wetsuit_size === 'S' ? 'selected' : ''}>S</option>
+              <option value="M" ${c.wetsuit_size === 'M' ? 'selected' : ''}>M</option>
+              <option value="L" ${c.wetsuit_size === 'L' ? 'selected' : ''}>L</option>
+              <option value="XL" ${c.wetsuit_size === 'XL' ? 'selected' : ''}>XL</option>
+              <option value="XXL" ${c.wetsuit_size === 'XXL' ? 'selected' : ''}>XXL</option>
             </select>
           </div>
         </div>
@@ -541,6 +667,9 @@ export async function renderClientes(container) {
               <div class="cli-family-card-body">
                 ${m.birth_date ? `<div class="cli-family-field"><span class="cli-family-field-label">Nacimiento</span><span>${formatDate(m.birth_date)}</span></div>` : ''}
                 ${m.level ? `<div class="cli-family-field"><span class="cli-family-field-label">Nivel</span><span>${LEVEL_LABELS[m.level] || m.level}</span></div>` : ''}
+                ${m.wetsuit_size ? `<div class="cli-family-field"><span class="cli-family-field-label">Neopreno</span><span>${m.wetsuit_size}</span></div>` : ''}
+                ${m.can_swim === false ? `<div class="cli-family-field"><span class="cli-family-field-label" style="color:#b91c1c">⚠ No sabe nadar</span></div>` : ''}
+                ${m.has_injury ? `<div class="cli-family-field"><span class="cli-family-field-label" style="color:#b91c1c">⚠ Lesión</span><span>${esc(m.injury_detail) || 'Sí'}</span></div>` : ''}
                 ${m.notes ? `<div class="cli-family-field"><span class="cli-family-field-label">Notas</span><span>${esc(m.notes)}</span></div>` : ''}
               </div>
               <div class="cli-family-card-actions">
@@ -616,6 +745,30 @@ export async function renderClientes(container) {
           <option value="intermedio" ${member?.level === 'intermedio' ? 'selected' : ''}>Intermedio</option>
           <option value="avanzado" ${member?.level === 'avanzado' ? 'selected' : ''}>Avanzado</option>
         </select>
+        <label>¿Sabe nadar?</label>
+        <select name="can_swim">
+          <option value="" ${member?.can_swim == null ? 'selected' : ''}>Sin definir</option>
+          <option value="true" ${member?.can_swim === true ? 'selected' : ''}>Sí</option>
+          <option value="false" ${member?.can_swim === false ? 'selected' : ''}>No</option>
+        </select>
+        <label>¿Tiene lesión?</label>
+        <select name="has_injury">
+          <option value="false" ${!member?.has_injury ? 'selected' : ''}>No</option>
+          <option value="true" ${member?.has_injury ? 'selected' : ''}>Sí</option>
+        </select>
+        <label>Detalle lesión</label>
+        <input type="text" name="injury_detail" value="${esc(member?.injury_detail)}" placeholder="Describe la lesión…" />
+        <label>Talla neopreno</label>
+        <select name="wetsuit_size">
+          <option value="" ${!member?.wetsuit_size ? 'selected' : ''}>Sin definir</option>
+          <option value="XXS" ${member?.wetsuit_size === 'XXS' ? 'selected' : ''}>XXS</option>
+          <option value="XS" ${member?.wetsuit_size === 'XS' ? 'selected' : ''}>XS</option>
+          <option value="S" ${member?.wetsuit_size === 'S' ? 'selected' : ''}>S</option>
+          <option value="M" ${member?.wetsuit_size === 'M' ? 'selected' : ''}>M</option>
+          <option value="L" ${member?.wetsuit_size === 'L' ? 'selected' : ''}>L</option>
+          <option value="XL" ${member?.wetsuit_size === 'XL' ? 'selected' : ''}>XL</option>
+          <option value="XXL" ${member?.wetsuit_size === 'XXL' ? 'selected' : ''}>XXL</option>
+        </select>
         <label>Notas</label>
         <input type="text" name="notes" value="${esc(member?.notes)}" placeholder="Alergias, observaciones…" />
         <button type="submit" class="btn red" style="margin-top:12px">${isEdit ? 'Guardar cambios' : 'Añadir miembro'}</button>
@@ -628,6 +781,10 @@ export async function renderClientes(container) {
       if (!fields.birth_date) fields.birth_date = null;
       if (!fields.level) fields.level = null;
       if (!fields.notes) fields.notes = null;
+      fields.can_swim = fields.can_swim === 'true' ? true : fields.can_swim === 'false' ? false : null;
+      fields.has_injury = fields.has_injury === 'true';
+      if (!fields.injury_detail) fields.injury_detail = null;
+      if (!fields.wetsuit_size) fields.wetsuit_size = null;
       try {
         if (isEdit) {
           await updateFamilyMemberAdmin(member.id, fields);
@@ -648,47 +805,108 @@ export async function renderClientes(container) {
     const el = container.querySelector('#cli-tab-content');
     const age = member.birth_date ? calcAge(member.birth_date) : null;
 
-    // Fetch enrollments for this family member
+    // Fetch enrollments and parent's rentals for this family member
     let enrollments = [];
+    let rentals = [];
     try {
-      enrollments = await fetchFamilyMemberEnrollments(member.id);
+      const [enrRes, rentalRes] = await Promise.all([
+        fetchFamilyMemberEnrollments(member.id),
+        supabase.from('equipment_reservations').select('*, rental_equipment(name, type)').eq('user_id', client.id).order('created_at', { ascending: false }).limit(20).then(r => r.data || []).catch(() => []),
+      ]);
+      enrollments = enrRes;
+      rentals = rentalRes;
     } catch {}
 
+    const memberFullName = `${esc(member.full_name)}${member.last_name ? ' ' + esc(member.last_name) : ''}`;
+
     let html = `
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
-        <button class="act-back-btn" id="member-back" style="position:static">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <h3 class="act-detail-section-title" style="margin:0">Ficha de ${esc(member.full_name)}</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="act-back-btn" id="member-back" style="position:static">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <div>
+            <h3 class="act-detail-section-title" style="margin:0">Ficha de ${memberFullName}</h3>
+            <div style="font-size:.78rem;color:var(--color-muted);margin-top:2px">Familiar de <strong>${esc(client.full_name)}${client.last_name ? ' ' + esc(client.last_name) : ''}</strong>${age !== null ? ' · ' + age + ' años' : ''}</div>
+          </div>
+        </div>
+        <button class="btn red" id="member-save" style="font-size:.82rem;padding:8px 18px">Guardar cambios</button>
       </div>
 
       <div class="act-form-card">
         <div class="cli-form-row">
           <div class="act-form-field">
-            <label class="act-form-label">NOMBRE COMPLETO</label>
-            <input type="text" class="act-form-input" value="${esc(member.full_name)}" readonly style="background:#f9fafb" />
+            <label class="act-form-label">NOMBRE</label>
+            <input type="text" class="act-form-input" id="mf-fullname" value="${esc(member.full_name)}" />
           </div>
           <div class="act-form-field">
-            <label class="act-form-label">RELACIÓN CON</label>
-            <input type="text" class="act-form-input" value="${esc(client.full_name)} (titular)" readonly style="background:#f9fafb" />
+            <label class="act-form-label">APELLIDOS</label>
+            <input type="text" class="act-form-input" id="mf-lastname" value="${esc(member.last_name || '')}" placeholder="Apellidos" />
           </div>
         </div>
         <div class="cli-form-row">
-          ${member.birth_date ? `<div class="act-form-field">
-            <label class="act-form-label">FECHA DE NACIMIENTO</label>
-            <input type="text" class="act-form-input" value="${formatDate(member.birth_date)}${age !== null ? ` (${age} años)` : ''}" readonly style="background:#f9fafb" />
-          </div>` : ''}
-          ${member.level ? `<div class="act-form-field">
-            <label class="act-form-label">NIVEL</label>
-            <input type="text" class="act-form-input" value="${LEVEL_LABELS[member.level] || member.level}" readonly style="background:#f9fafb" />
-          </div>` : ''}
+          <div class="act-form-field">
+            <label class="act-form-label">RESPONSABLE</label>
+            <input type="text" class="act-form-input" value="${esc(client.full_name)}${client.last_name ? ' ' + esc(client.last_name) : ''} (titular)" readonly style="background:#f9fafb" />
+          </div>
         </div>
-        ${member.notes ? `<div class="cli-form-row">
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">FECHA DE NACIMIENTO</label>
+            <input type="date" class="act-form-input" id="mf-birthdate" value="${member.birth_date || ''}" />
+          </div>
+          <div class="act-form-field">
+            <label class="act-form-label">NIVEL</label>
+            <select class="act-form-input" id="mf-level">
+              <option value="">Sin definir</option>
+              <option value="principiante" ${member.level === 'principiante' ? 'selected' : ''}>Principiante</option>
+              <option value="intermedio" ${member.level === 'intermedio' ? 'selected' : ''}>Intermedio</option>
+              <option value="avanzado" ${member.level === 'avanzado' ? 'selected' : ''}>Avanzado</option>
+            </select>
+          </div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">¿SABE NADAR?</label>
+            <select class="act-form-input" id="mf-swim">
+              <option value="" ${member.can_swim == null ? 'selected' : ''}>Sin definir</option>
+              <option value="true" ${member.can_swim === true ? 'selected' : ''}>Sí</option>
+              <option value="false" ${member.can_swim === false ? 'selected' : ''}>No</option>
+            </select>
+          </div>
+          <div class="act-form-field">
+            <label class="act-form-label">TALLA NEOPRENO</label>
+            <select class="act-form-input" id="mf-wetsuit">
+              <option value="" ${!member.wetsuit_size ? 'selected' : ''}>Sin definir</option>
+              <option value="XXS" ${member.wetsuit_size === 'XXS' ? 'selected' : ''}>XXS</option>
+              <option value="XS" ${member.wetsuit_size === 'XS' ? 'selected' : ''}>XS</option>
+              <option value="S" ${member.wetsuit_size === 'S' ? 'selected' : ''}>S</option>
+              <option value="M" ${member.wetsuit_size === 'M' ? 'selected' : ''}>M</option>
+              <option value="L" ${member.wetsuit_size === 'L' ? 'selected' : ''}>L</option>
+              <option value="XL" ${member.wetsuit_size === 'XL' ? 'selected' : ''}>XL</option>
+              <option value="XXL" ${member.wetsuit_size === 'XXL' ? 'selected' : ''}>XXL</option>
+            </select>
+          </div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">¿TIENE LESIÓN?</label>
+            <select class="act-form-input" id="mf-injury">
+              <option value="false" ${!member.has_injury ? 'selected' : ''}>No</option>
+              <option value="true" ${member.has_injury ? 'selected' : ''}>Sí</option>
+            </select>
+          </div>
+          <div class="act-form-field" id="mf-injury-detail-wrap" style="${member.has_injury ? '' : 'display:none'}">
+            <label class="act-form-label">DETALLE LESIÓN</label>
+            <input type="text" class="act-form-input" id="mf-injury-detail" value="${esc(member.injury_detail)}" placeholder="Describe la lesión…" />
+          </div>
+        </div>
+        <div class="cli-form-row">
           <div class="act-form-field">
             <label class="act-form-label">NOTAS</label>
-            <input type="text" class="act-form-input" value="${esc(member.notes)}" readonly style="background:#f9fafb" />
+            <input type="text" class="act-form-input" id="mf-notes" value="${esc(member.notes)}" placeholder="Alergias, observaciones…" />
           </div>
-        </div>` : ''}
+        </div>
       </div>
 
       <h3 class="act-detail-section-title" style="margin-top:24px">Historial de clases (${enrollments.length})</h3>`;
@@ -719,9 +937,57 @@ export async function renderClientes(container) {
       </div>`;
     }
 
+    // Equipment rentals (from parent account)
+    if (rentals.length) {
+      html += `<h3 class="act-detail-section-title" style="margin-top:24px">Alquiler de material — cuenta de ${esc(client.full_name)} (${rentals.length})</h3>`;
+      const rentalRows = rentals.map(r => `<tr>
+        <td>${r.rental_equipment?.name || '—'}</td>
+        <td>${r.rental_equipment?.type || '—'}</td>
+        <td>${r.date_start || '—'} — ${r.date_end || '—'}</td>
+        <td>${r.size || '—'}</td>
+        <td>${statusBadge(r.status || 'pending')}</td>
+      </tr>`).join('');
+      html += `<div class="act-form-card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Material</th><th>Tipo</th><th>Periodo</th><th>Talla</th><th>Estado</th></tr></thead>
+            <tbody>${rentalRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
     el.innerHTML = html;
 
     el.querySelector('#member-back')?.addEventListener('click', () => loadFamiliaTab(client));
+
+    // Injury toggle
+    el.querySelector('#mf-injury')?.addEventListener('change', (e) => {
+      const wrap = el.querySelector('#mf-injury-detail-wrap');
+      if (wrap) wrap.style.display = e.target.value === 'true' ? '' : 'none';
+    });
+
+    // Save member
+    el.querySelector('#member-save')?.addEventListener('click', async () => {
+      const fields = {
+        full_name: el.querySelector('#mf-fullname')?.value?.trim() || member.full_name,
+        last_name: el.querySelector('#mf-lastname')?.value?.trim() || '',
+        birth_date: el.querySelector('#mf-birthdate')?.value || null,
+        level: el.querySelector('#mf-level')?.value || null,
+        can_swim: el.querySelector('#mf-swim')?.value === 'true' ? true : el.querySelector('#mf-swim')?.value === 'false' ? false : null,
+        has_injury: el.querySelector('#mf-injury')?.value === 'true',
+        injury_detail: el.querySelector('#mf-injury-detail')?.value?.trim() || null,
+        wetsuit_size: el.querySelector('#mf-wetsuit')?.value || null,
+        notes: el.querySelector('#mf-notes')?.value?.trim() || null,
+      };
+      try {
+        await updateFamilyMemberAdmin(member.id, fields);
+        Object.assign(member, fields);
+        showToast('Miembro actualizado', 'success');
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
+    });
   }
 
   function calcAge(birthDate) {
@@ -793,31 +1059,138 @@ export async function renderClientes(container) {
       const cards = bonos.map(b => {
         const remaining = b.total_credits - b.used_credits;
         const pct = b.total_credits > 0 ? Math.round((b.used_credits / b.total_credits) * 100) : 0;
+        const expectedPrice = getPackPrice(b.class_type, b.total_credits);
+        const deposit = DEPOSIT[b.class_type] || 15;
+        const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
+        const pending = Math.max(0, expectedPrice - paid);
+        const isFullyPaid = paid >= expectedPrice;
         return `
-          <div class="cli-bono-card">
+          <div class="cli-bono-card" data-bono-id="${b.id}">
             <div class="cli-bono-header">
-              <strong>${TYPE_LABELS[b.class_type] || b.class_type}</strong>
-              ${statusBadge(b.status)}
+              <strong>${TYPE_LABELS[b.class_type] || b.class_type} — ${b.total_credits} clases</strong>
+              <div style="display:flex;gap:6px;align-items:center">
+                ${statusBadge(b.status)}
+                ${isFullyPaid
+                  ? '<span style="font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:4px;background:#dcfce7;color:#166534">PAGADO</span>'
+                  : '<span style="font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e">DEBE ' + formatCurrency(pending) + '</span>'
+                }
+              </div>
             </div>
             <div class="cli-bono-credits">
               <span>${b.used_credits} / ${b.total_credits} sesiones usadas</span>
               <span class="cli-bono-remaining">${remaining} restantes</span>
             </div>
             <div class="cli-bono-bar">
-              <div class="cli-bono-bar-fill" style="width:${pct}%"></div>
+              <div class="cli-bono-bar-fill" style="width:${pct}%;background:${isFullyPaid ? '#22c55e' : '#f59e0b'}"></div>
             </div>
             <div class="cli-bono-meta">
+              <span>Pagado: ${formatCurrency(paid)} de ${formatCurrency(expectedPrice)}</span>
               <span>Caduca: ${formatDate(b.expires_at)}</span>
-              <span>Creado: ${formatDate(b.created_at)}</span>
             </div>
+            ${!isFullyPaid && b.status === 'active' ? `<button class="btn cli-bono-pay-btn" data-bono-id="${b.id}" data-pending="${pending.toFixed(2)}" style="margin-top:8px;font-size:.78rem;padding:6px 14px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;width:100%">Añadir pago al bono</button>` : ''}
           </div>`;
       }).join('');
 
       el.innerHTML = `
         <h3 class="act-detail-section-title">Bonos (${bonos.length})</h3>
         <div class="cli-bonos-grid">${cards}</div>`;
+
+      // Bind add payment to bono
+      el.querySelectorAll('.cli-bono-pay-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openAddPaymentModal(c, 'bono', btn.dataset.bonoId, Number(btn.dataset.pending));
+        });
+      });
     } catch (err) {
       el.innerHTML = `<div class="act-form-card"><p style="color:#b91c1c">Error cargando bonos: ${esc(err.message)}</p></div>`;
+    }
+  }
+
+  async function loadPagosTab(c) {
+    const el = container.querySelector('#cli-tab-content');
+    try {
+      // Fetch payments from DB + online orders
+      const [payments, orders] = await Promise.all([
+        fetchClientPayments(c.id),
+        fetchClientOrders(c.id),
+      ]);
+
+      // Merge into unified timeline
+      const timeline = [];
+
+      // Manual/admin payments
+      const RES_TYPE_LABELS = { enrollment: 'Clase', rental: 'Alquiler', custom: 'Saldo a favor' };
+      for (const p of payments) {
+        timeline.push({
+          date: p.payment_date || p.created_at,
+          type: RES_TYPE_LABELS[p.reservation_type] || p.reservation_type,
+          concept: p.concept || (p.reservation_type === 'enrollment' ? 'Pago clase' : p.reservation_type === 'custom' ? 'Saldo a favor' : 'Pago alquiler'),
+          amount: Number(p.amount),
+          method: p.payment_method || '—',
+          source: 'admin',
+        });
+      }
+
+      // Online orders (checkout)
+      for (const o of orders) {
+        timeline.push({
+          date: o.created_at,
+          type: 'Pedido online',
+          concept: `Pedido #${o.id.substring(0, 8)}`,
+          amount: Number(o.total),
+          method: 'online',
+          source: 'web',
+        });
+      }
+
+      // Sort by date descending
+      timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      const totalPaid = timeline.reduce((s, t) => s + t.amount, 0);
+      const creditBalance = Number(c.credit_balance || 0);
+
+      const METHOD_LABELS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', online: 'Online', saldo: 'Saldo' };
+
+      const rows = timeline.map(t => `<tr>
+        <td>${formatDate(t.date)}</td>
+        <td>${esc(t.type)}</td>
+        <td>${esc(t.concept)}</td>
+        <td style="font-weight:600;color:#065f46">+${formatCurrency(t.amount)}</td>
+        <td>${METHOD_LABELS[t.method] || t.method}</td>
+        <td><span class="status-badge ${t.source === 'web' ? 'active' : ''}">${t.source === 'web' ? 'Web' : 'Manual'}</span></td>
+      </tr>`).join('');
+
+      el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+          <h3 class="act-detail-section-title" style="margin:0">Historial de pagos (${timeline.length})</h3>
+          <button class="btn red" id="cli-add-payment" style="font-size:.82rem;padding:6px 14px">+ Añadir pago</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px">
+          <div class="act-form-card" style="padding:14px 18px;margin:0;background:#f0fdf4;border-color:#bbf7d0">
+            <div style="font-size:.72rem;text-transform:uppercase;color:#065f46;font-weight:600;margin-bottom:2px">Total pagado</div>
+            <div style="font-size:1.3rem;font-family:'Bebas Neue',sans-serif;color:#065f46">${formatCurrency(totalPaid)}</div>
+          </div>
+          <div class="act-form-card" style="padding:14px 18px;margin:0;background:${creditBalance > 0 ? '#fffbeb' : '#f8fafc'};border-color:${creditBalance > 0 ? '#fde68a' : '#e2e8f0'}">
+            <div style="font-size:.72rem;text-transform:uppercase;color:${creditBalance > 0 ? '#92400e' : 'var(--color-muted)'};font-weight:600;margin-bottom:2px">Saldo a favor</div>
+            <div style="font-size:1.3rem;font-family:'Bebas Neue',sans-serif;color:${creditBalance > 0 ? '#92400e' : 'var(--color-muted)'}">${formatCurrency(creditBalance)}</div>
+          </div>
+        </div>
+        ${timeline.length ? `<div class="act-form-card" style="padding:0;overflow:hidden">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Metodo</th><th>Origen</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>` : '<div class="act-form-card"><div class="admin-empty"><p>No hay pagos registrados</p></div></div>'}`;
+
+      // Bind add payment button
+      el.querySelector('#cli-add-payment')?.addEventListener('click', () => openAddPaymentModal(c));
+    } catch (err) {
+      el.innerHTML = `<div class="act-form-card"><p style="color:#b91c1c">Error cargando pagos: ${esc(err.message)}</p></div>`;
     }
   }
 
@@ -943,11 +1316,16 @@ export async function renderClientes(container) {
   // ===================== SAVE =====================
   async function saveClientData(c) {
     const fullnameEl = container.querySelector('#cli-fullname');
+    const lastnameEl = container.querySelector('#cli-lastname');
     const phoneEl = container.querySelector('#cli-phone');
     const roleEl = container.querySelector('#cli-role');
     const addressEl = container.querySelector('#cli-address');
     const cityEl = container.querySelector('#cli-city');
     const postalEl = container.querySelector('#cli-postal');
+    const canSwimEl = container.querySelector('#cli-can-swim');
+    const hasInjuryEl = container.querySelector('#cli-has-injury');
+    const injuryDetailEl = container.querySelector('#cli-injury-detail');
+    const wetsuitSizeEl = container.querySelector('#cli-wetsuit-size');
 
     if (!fullnameEl) {
       showToast('Ve a la pestaña "Datos personales" para editar', 'error');
@@ -955,11 +1333,16 @@ export async function renderClientes(container) {
     }
 
     const fullname = fullnameEl.value.trim();
+    const lastname = lastnameEl?.value?.trim() || '';
     const phone = phoneEl?.value?.trim() || null;
     const role = roleEl?.value || 'client';
     const address = addressEl?.value?.trim() || null;
     const city = cityEl?.value?.trim() || null;
     const postal_code = postalEl?.value?.trim() || null;
+    const can_swim = canSwimEl?.value === 'true' ? true : canSwimEl?.value === 'false' ? false : null;
+    const has_injury = hasInjuryEl?.value === 'true';
+    const injury_detail = injuryDetailEl?.value?.trim() || null;
+    const wetsuit_size = wetsuitSizeEl?.value || null;
 
     if (!fullname) {
       showToast('El nombre es obligatorio', 'error');
@@ -969,24 +1352,263 @@ export async function renderClientes(container) {
     try {
       await updateProfile(c.id, {
         full_name: fullname,
+        last_name: lastname,
         phone: phone,
         role: role,
         address: address,
         city: city,
         postal_code: postal_code,
+        can_swim,
+        has_injury,
+        injury_detail,
+        wetsuit_size,
       });
       // Update local copy
       c.full_name = fullname;
+      c.last_name = lastname;
       c.phone = phone;
       c.role = role;
       c.address = address;
       c.city = city;
       c.postal_code = postal_code;
+      c.can_swim = can_swim;
+      c.has_injury = has_injury;
+      c.injury_detail = injury_detail;
+      c.wetsuit_size = wetsuit_size;
       showToast('Cliente actualizado', 'success');
       renderDetail();
     } catch (err) {
       showToast('Error al guardar: ' + err.message, 'error');
     }
+  }
+
+  // ===================== ADD PAYMENT MODAL =====================
+  async function openAddPaymentModal(c, preselectedType, preselectedId, suggestedAmount) {
+    // Fetch bonos & enrollments in parallel for dropdowns
+    const [bonos, enrollments] = await Promise.all([
+      fetchClientBonos(c.id),
+      fetchClientEnrollments(c.id),
+    ]);
+
+    // Enrich bonos with pricing info
+    const enrichedBonos = bonos.map(b => {
+      const expectedPrice = getPackPrice(b.class_type, b.total_credits);
+      const deposit = DEPOSIT[b.class_type] || 15;
+      const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
+      const pending = Math.max(0, expectedPrice - paid);
+      return { ...b, expectedPrice, totalPaidReal: paid, pending, isFullyPaid: paid >= expectedPrice };
+    });
+
+    const activeBonos = enrichedBonos.filter(b => b.status === 'active' && !b.isFullyPaid);
+    const activeEnrollments = enrollments.filter(e => ['confirmed', 'partial'].includes(e.status));
+
+    const selectedType = preselectedType || 'bono';
+
+    const bonoOptions = activeBonos.map(b =>
+      `<option value="${b.id}" ${preselectedId === b.id ? 'selected' : ''}>${TYPE_LABELS[b.class_type] || b.class_type} — ${b.total_credits} clases (debe ${formatCurrency(b.pending)})</option>`
+    ).join('');
+
+    const enrollOptions = activeEnrollments.map(e => {
+      const cls = e.surf_class || {};
+      const label = `${cls.date || '—'} · ${TYPE_LABELS[cls.type] || cls.type || '—'} · ${esc(cls.title) || 'Clase'}`;
+      return `<option value="${e.id}">${label}</option>`;
+    }).join('');
+
+    const defaultAmount = suggestedAmount || '';
+
+    openModal('Añadir pago', `
+      <form id="add-payment-form" class="trip-form" style="min-width:340px">
+        <label style="font-weight:600;margin-bottom:4px">Tipo de pago</label>
+        <div id="pay-type-tabs" style="display:flex;gap:6px;margin-bottom:16px">
+          <button type="button" class="btn pay-type-tab ${selectedType === 'bono' ? 'red' : 'line'}" data-type="bono" style="flex:1;font-size:.78rem;padding:8px 6px">Pago bono</button>
+          <button type="button" class="btn pay-type-tab ${selectedType === 'clase' ? 'red' : 'line'}" data-type="clase" style="flex:1;font-size:.78rem;padding:8px 6px">Pago clase</button>
+          <button type="button" class="btn pay-type-tab ${selectedType === 'custom' ? 'red' : 'line'}" data-type="custom" style="flex:1;font-size:.78rem;padding:8px 6px">Personalizado</button>
+        </div>
+
+        <div id="pay-section-bono" style="${selectedType === 'bono' ? '' : 'display:none'}">
+          <label>Seleccionar bono</label>
+          <select id="pay-bono-select" class="act-form-input" style="margin-bottom:10px">
+            ${bonoOptions || '<option value="">No hay bonos pendientes</option>'}
+          </select>
+        </div>
+
+        <div id="pay-section-clase" style="${selectedType === 'clase' ? '' : 'display:none'}">
+          <label>Seleccionar clase</label>
+          <select id="pay-clase-select" class="act-form-input" style="margin-bottom:10px">
+            ${enrollOptions || '<option value="">No hay clases pendientes</option>'}
+          </select>
+        </div>
+
+        <div id="pay-section-custom" style="${selectedType === 'custom' ? '' : 'display:none'}">
+          <label>Concepto</label>
+          <input type="text" id="pay-concept" class="act-form-input" placeholder="Ej: Recarga saldo, Devolución…" style="margin-bottom:10px" />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label>Importe (€)</label>
+            <input type="number" id="pay-amount" class="act-form-input" step="0.01" min="0.01" value="${defaultAmount}" required placeholder="0.00" />
+          </div>
+          <div>
+            <label>Método de pago</label>
+            <select id="pay-method" class="act-form-input">
+              <option value="efectivo">Efectivo</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="voucher">Voucher</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" class="btn red" style="margin-top:16px;width:100%;padding:10px;font-size:.9rem" id="pay-submit-btn">Registrar pago</button>
+      </form>
+    `);
+
+    const form = document.getElementById('add-payment-form');
+    let currentType = selectedType;
+
+    // Update suggested amount when bono changes
+    const updateBonoAmount = () => {
+      const sel = document.getElementById('pay-bono-select');
+      if (sel?.value) {
+        const b = enrichedBonos.find(x => x.id === sel.value);
+        if (b) document.getElementById('pay-amount').value = b.pending.toFixed(2);
+      }
+    };
+
+    // Tab switching
+    form.querySelectorAll('.pay-type-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        currentType = tab.dataset.type;
+        form.querySelectorAll('.pay-type-tab').forEach(t => {
+          t.classList.toggle('red', t.dataset.type === currentType);
+          t.classList.toggle('line', t.dataset.type !== currentType);
+        });
+        document.getElementById('pay-section-bono').style.display = currentType === 'bono' ? '' : 'none';
+        document.getElementById('pay-section-clase').style.display = currentType === 'clase' ? '' : 'none';
+        document.getElementById('pay-section-custom').style.display = currentType === 'custom' ? '' : 'none';
+
+        // Reset amount based on type
+        if (currentType === 'bono') updateBonoAmount();
+        else document.getElementById('pay-amount').value = '';
+      });
+    });
+
+    document.getElementById('pay-bono-select')?.addEventListener('change', updateBonoAmount);
+
+    // If bono preselected, set amount
+    if (selectedType === 'bono' && !suggestedAmount) updateBonoAmount();
+
+    // Submit
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const amount = Number(document.getElementById('pay-amount').value);
+      const method = document.getElementById('pay-method').value;
+
+      if (!amount || amount <= 0) {
+        showToast('El importe debe ser mayor que 0', 'error');
+        return;
+      }
+
+      const submitBtn = document.getElementById('pay-submit-btn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Guardando…';
+
+      try {
+        if (currentType === 'bono') {
+          const bonoId = document.getElementById('pay-bono-select')?.value;
+          if (!bonoId) { showToast('Selecciona un bono', 'error'); submitBtn.disabled = false; submitBtn.textContent = 'Registrar pago'; return; }
+
+          const bono = enrichedBonos.find(b => b.id === bonoId);
+          const newTotalPaid = (bono?.totalPaidReal || 0) + amount;
+
+          // Update bonos.total_paid
+          const { error } = await supabase
+            .from('bonos')
+            .update({ total_paid: newTotalPaid })
+            .eq('id', bonoId);
+          if (error) throw error;
+
+          // Also create payment record linked to first enrollment using this bono (if any)
+          const linkedEnrollment = enrollments.find(en => en.bono_id === bonoId);
+          if (linkedEnrollment) {
+            await createPayment({
+              reservation_type: 'enrollment',
+              reference_id: linkedEnrollment.id,
+              amount,
+              payment_method: method,
+              concept: `Pago bono ${TYPE_LABELS[bono?.class_type] || ''} (${bono?.total_credits} clases)`,
+            });
+          }
+
+          // If fully paid now, update enrollment statuses
+          if (newTotalPaid >= (bono?.expectedPrice || 0)) {
+            const bonoEnrollments = enrollments.filter(en => en.bono_id === bonoId && en.status === 'partial');
+            for (const en of bonoEnrollments) {
+              await supabase.from('class_enrollments').update({ status: 'paid' }).eq('id', en.id);
+            }
+          }
+
+          showToast(`Pago de ${formatCurrency(amount)} registrado en bono`, 'success');
+
+        } else if (currentType === 'clase') {
+          const enrollId = document.getElementById('pay-clase-select')?.value;
+          if (!enrollId) { showToast('Selecciona una clase', 'error'); submitBtn.disabled = false; submitBtn.textContent = 'Registrar pago'; return; }
+
+          await createPayment({
+            reservation_type: 'enrollment',
+            reference_id: enrollId,
+            amount,
+            payment_method: method,
+            concept: 'Pago clase',
+          });
+
+          showToast(`Pago de ${formatCurrency(amount)} registrado`, 'success');
+
+        } else if (currentType === 'custom') {
+          const concept = document.getElementById('pay-concept')?.value?.trim();
+          if (!concept) {
+            showToast('Escribe un concepto', 'error');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Registrar pago';
+            return;
+          }
+
+          // Add to credit_balance
+          const currentBalance = Number(c.credit_balance || 0);
+          const newBalance = currentBalance + amount;
+          const { error } = await supabase
+            .from('profiles')
+            .update({ credit_balance: newBalance })
+            .eq('id', c.id);
+          if (error) throw error;
+          c.credit_balance = newBalance;
+
+          // Create payment record so it shows in history
+          await createPayment({
+            reservation_type: 'custom',
+            reference_id: c.id,
+            amount,
+            payment_method: method,
+            concept,
+          });
+
+          showToast(`${formatCurrency(amount)} añadido al saldo a favor (total: ${formatCurrency(newBalance)})`, 'success');
+        }
+
+        closeModal();
+
+        // Refresh current tab
+        if (activeTab === 'bonos') loadBonosTab(c);
+        else if (activeTab === 'pagos') loadPagosTab(c);
+        else renderDetail();
+
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Registrar pago';
+      }
+    });
   }
 
   // ===================== HELPERS =====================
