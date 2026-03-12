@@ -1,16 +1,5 @@
 import { fetchUserEnrollments, cancelEnrollment } from '/lib/booking.js';
-
-const TYPE_LABELS = {
-  grupal: 'Surf Grupal',
-  individual: 'Surf Individual',
-  yoga: 'Yoga',
-  paddle: 'Paddle Surf',
-  surfskate: 'SurfSkate',
-};
-
-function formatDate(d) {
-  return new Date(d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
-}
+import { formatDate, TYPE_LABELS } from '/lib/utils.js';
 
 function formatTime(t) { return t?.slice(0, 5) || ''; }
 

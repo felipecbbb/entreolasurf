@@ -2260,8 +2260,7 @@ export async function renderCalendario(container) {
             const tab = item.dataset.tab;
             if (tab) {
               activeTab = tab;
-              renderDetail();
-              bindDetailEvents(overlay, res);
+              renderDetail(); // renderDetail() already calls bindDetailEvents()
             }
           });
         });
@@ -2286,8 +2285,7 @@ export async function renderCalendario(container) {
               pc.selectedBonoId = bid;
               pc.bono = pc.allBonos?.find(b => b.id === bid) || pc.bono;
             }
-            renderDetail();
-            bindDetailEvents(overlay, res);
+            renderDetail(); // renderDetail() already calls bindDetailEvents()
           });
         });
 
@@ -2365,32 +2363,49 @@ export async function renderCalendario(container) {
           creditOptionHtml = `
             <div style="margin-top:8px;padding-top:12px;border-top:1px dashed #e5e7eb">
               <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
-                <input type="checkbox" id="rv-pay-use-credit" style="width:16px;height:16px;accent-color:#0f2f39" />
+                <input type="checkbox" class="rv-pay-use-credit-cb" style="width:16px;height:16px;accent-color:#0f2f39" />
                 Usar saldo a favor del cliente
               </label>
-              <div id="rv-credit-info" style="display:none;margin-top:8px;font-size:.82rem;color:#065f46;background:#ecfdf5;padding:8px 12px;border-radius:6px"></div>
+              <div class="rv-credit-info-el" style="display:none;margin-top:8px;font-size:.82rem;color:#065f46;background:#ecfdf5;padding:8px 12px;border-radius:6px"></div>
             </div>`;
         }
 
-        openModal('Añadir Pago', `
-          <form id="rv-payment-form" class="trip-form">
-            <label>Importe</label>
-            <input type="number" id="rv-pay-amount" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
-            <label>Método de pago</label>
-            <select name="method" required>
-              <option value="">Seleccionar…</option>
-              <option value="efectivo">Efectivo</option>
-              <option value="tarjeta">Tarjeta</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="voucher">Voucher</option>
-              <option value="saldo">Saldo a favor</option>
-            </select>
-            ${creditOptionHtml}
-            <label>Notas</label>
-            <input type="text" name="notes" placeholder="Opcional" />
-            <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago</button>
-          </form>
-        `);
+        // Create a high z-index modal instead of using openModal (which renders behind the overlay)
+        const modal = document.createElement('div');
+        modal.className = 'bk-overlay';
+        modal.style.zIndex = '10001';
+        modal.innerHTML = `
+          <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:12px;overflow:hidden">
+            <div class="bk-panel-header" style="background:#0f2f39;padding:16px 20px">
+              <button class="bk-close-btn rv-pay-modal-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <div class="bk-header-left"><span class="bk-header-title" style="font-size:1rem">Añadir Pago</span></div>
+            </div>
+            <div style="padding:24px">
+              <form class="rv-payment-form-el trip-form">
+                <label>Importe</label>
+                <input type="number" class="rv-pay-amount-el" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
+                <label>Método de pago</label>
+                <select name="method" required>
+                  <option value="">Seleccionar…</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="voucher">Voucher</option>
+                  <option value="saldo">Saldo a favor</option>
+                </select>
+                ${creditOptionHtml}
+                <label>Notas</label>
+                <input type="text" name="notes" placeholder="Opcional" />
+                <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago</button>
+              </form>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+
+        modal.querySelector('.rv-pay-modal-close')?.addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
         // Load credit balance for "saldo" option
         let clientCreditBalance = 0;
@@ -2400,31 +2415,31 @@ export async function renderCalendario(container) {
           clientProfileId = firstLinked.profileId;
           supabase.from('profiles').select('credit_balance').eq('id', clientProfileId).single().then(({ data }) => {
             clientCreditBalance = Number(data?.credit_balance || 0);
-            const creditInfo = document.getElementById('rv-credit-info');
+            const creditInfo = modal.querySelector('.rv-credit-info-el');
             if (creditInfo) creditInfo.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€`;
           });
 
-          document.getElementById('rv-pay-use-credit')?.addEventListener('change', (e) => {
-            const infoEl = document.getElementById('rv-credit-info');
+          modal.querySelector('.rv-pay-use-credit-cb')?.addEventListener('change', (e) => {
+            const infoEl = modal.querySelector('.rv-credit-info-el');
             if (infoEl) infoEl.style.display = e.target.checked ? 'block' : 'none';
             if (e.target.checked) {
-              const amountInput = document.getElementById('rv-pay-amount');
+              const amountInput = modal.querySelector('.rv-pay-amount-el');
               const currentAmount = parseFloat(amountInput.value) || 0;
               const creditToUse = Math.min(clientCreditBalance, currentAmount);
               if (creditToUse > 0) {
-                const infoEl = document.getElementById('rv-credit-info');
-                if (infoEl) infoEl.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€ — Se aplicarán ${creditToUse.toFixed(2)}€`;
+                const infoEl2 = modal.querySelector('.rv-credit-info-el');
+                if (infoEl2) infoEl2.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€ — Se aplicarán ${creditToUse.toFixed(2)}€`;
               }
             }
           });
         }
 
-        document.getElementById('rv-payment-form')?.addEventListener('submit', async (e) => {
+        modal.querySelector('.rv-payment-form-el')?.addEventListener('submit', async (e) => {
           e.preventDefault();
           const fd = new FormData(e.target);
           const amount = parseFloat(fd.get('amount')) || 0;
           const method = fd.get('method');
-          const useCredit = document.getElementById('rv-pay-use-credit')?.checked;
+          const useCredit = modal.querySelector('.rv-pay-use-credit-cb')?.checked;
 
           if (!method && !useCredit) { showToast('Selecciona un método', 'error'); return; }
 
@@ -2440,10 +2455,9 @@ export async function renderCalendario(container) {
           if (res.pending <= 0) res.status = 'paid';
           res.payments.push({ amount, method: effectiveMethod, creditUsed, date: new Date().toISOString() });
 
-          closeModal();
+          modal.remove();
           showToast(`Pago de ${amount.toFixed(2)}€ registrado${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ de saldo)` : ` (${effectiveMethod})`}`, 'success');
-          renderDetail();
-          if (overlayRef) bindDetailEvents(overlayRef, res);
+          renderDetail(); // renderDetail() already calls bindDetailEvents()
         });
       }
 
@@ -2452,28 +2466,45 @@ export async function renderCalendario(container) {
         const bono = pc?.allBonos?.find(b => b.id === bonoId);
         if (!bono) return;
 
-        openModal('Pagar Bono', `
-          <form id="rv-bono-pay-form" class="trip-form">
-            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:14px">
-              <div style="font-size:.82rem;color:#92400e"><strong>${TYPE_LABELS[bono.class_type] || bono.class_type}</strong> · ${bono.total_credits} clases</div>
-              <div style="font-size:.82rem;color:#92400e;margin-top:4px">Pagado: ${bono.totalPaidReal.toFixed(2)}€ / ${bono.expectedPrice.toFixed(2)}€ · <strong>Debe: ${pendingAmount.toFixed(2)}€</strong></div>
+        // Create a high z-index modal instead of using openModal (which renders behind the overlay)
+        const modal = document.createElement('div');
+        modal.className = 'bk-overlay';
+        modal.style.zIndex = '10001';
+        modal.innerHTML = `
+          <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:12px;overflow:hidden">
+            <div class="bk-panel-header" style="background:#f59e0b;padding:16px 20px">
+              <button class="bk-close-btn rv-bono-modal-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <div class="bk-header-left"><span class="bk-header-title" style="font-size:1rem">Pagar Bono</span></div>
             </div>
-            <label>Importe</label>
-            <input type="number" name="amount" step="0.01" value="${pendingAmount.toFixed(2)}" required />
-            <label>Método de pago</label>
-            <select name="method" required>
-              <option value="">Seleccionar…</option>
-              <option value="efectivo">Efectivo</option>
-              <option value="tarjeta">Tarjeta</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="voucher">Voucher</option>
-              <option value="saldo">Saldo a favor</option>
-            </select>
-            <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago del Bono</button>
-          </form>
-        `);
+            <div style="padding:24px">
+              <form class="rv-bono-pay-form-el trip-form">
+                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:14px">
+                  <div style="font-size:.82rem;color:#92400e"><strong>${TYPE_LABELS[bono.class_type] || bono.class_type}</strong> · ${bono.total_credits} clases</div>
+                  <div style="font-size:.82rem;color:#92400e;margin-top:4px">Pagado: ${bono.totalPaidReal.toFixed(2)}€ / ${bono.expectedPrice.toFixed(2)}€ · <strong>Debe: ${pendingAmount.toFixed(2)}€</strong></div>
+                </div>
+                <label>Importe</label>
+                <input type="number" name="amount" step="0.01" value="${pendingAmount.toFixed(2)}" required />
+                <label>Método de pago</label>
+                <select name="method" required>
+                  <option value="">Seleccionar…</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="voucher">Voucher</option>
+                  <option value="saldo">Saldo a favor</option>
+                </select>
+                <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago del Bono</button>
+              </form>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
 
-        document.getElementById('rv-bono-pay-form')?.addEventListener('submit', async (e) => {
+        modal.querySelector('.rv-bono-modal-close')?.addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+        modal.querySelector('.rv-bono-pay-form-el')?.addEventListener('submit', async (e) => {
           e.preventDefault();
           const fd = new FormData(e.target);
           const amount = parseFloat(fd.get('amount')) || 0;
@@ -2515,7 +2546,7 @@ export async function renderCalendario(container) {
             bono.pendingAmount = Math.max(0, bono.expectedPrice - newPaid);
             bono.isFullyPaid = newPaid >= bono.expectedPrice;
 
-            closeModal();
+            modal.remove();
             showToast(`Pago de ${amount.toFixed(2)}€ registrado para el bono`, 'success');
             renderDetail();
             if (overlayRef) bindDetailEvents(overlayRef, res);
@@ -2527,20 +2558,37 @@ export async function renderCalendario(container) {
       }
 
       function openUseCreditModal(res, overlayRef, profileId, balance, personName) {
-        openModal('Usar Saldo a Favor', `
-          <form id="rv-use-credit-form" class="trip-form">
-            <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:14px">
-              <div style="font-size:.85rem;color:#065f46"><strong>${personName}</strong></div>
-              <div style="font-size:.9rem;color:#065f46;margin-top:4px">Saldo disponible: <strong>${balance.toFixed(2)}€</strong></div>
+        // Create a high z-index modal instead of using openModal (which renders behind the overlay)
+        const modal = document.createElement('div');
+        modal.className = 'bk-overlay';
+        modal.style.zIndex = '10001';
+        modal.innerHTML = `
+          <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:12px;overflow:hidden">
+            <div class="bk-panel-header" style="background:#166534;padding:16px 20px">
+              <button class="bk-close-btn rv-credit-modal-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <div class="bk-header-left"><span class="bk-header-title" style="font-size:1rem">Usar Saldo a Favor</span></div>
             </div>
-            <label>Importe a aplicar</label>
-            <input type="number" name="amount" step="0.01" value="${Math.min(balance, res.pending).toFixed(2)}" max="${balance.toFixed(2)}" required />
-            <p style="font-size:.78rem;color:#6b7280;margin:4px 0 0">Pendiente de la reserva: ${res.pending.toFixed(2)}€</p>
-            <button type="submit" class="btn red" style="margin-top:12px">Aplicar Saldo</button>
-          </form>
-        `);
+            <div style="padding:24px">
+              <form class="rv-use-credit-form-el trip-form">
+                <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:14px">
+                  <div style="font-size:.85rem;color:#065f46"><strong>${personName}</strong></div>
+                  <div style="font-size:.9rem;color:#065f46;margin-top:4px">Saldo disponible: <strong>${balance.toFixed(2)}€</strong></div>
+                </div>
+                <label>Importe a aplicar</label>
+                <input type="number" name="amount" step="0.01" value="${Math.min(balance, res.pending).toFixed(2)}" max="${balance.toFixed(2)}" required />
+                <p style="font-size:.78rem;color:#6b7280;margin:4px 0 0">Pendiente de la reserva: ${res.pending.toFixed(2)}€</p>
+                <button type="submit" class="btn red" style="margin-top:12px">Aplicar Saldo</button>
+              </form>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
 
-        document.getElementById('rv-use-credit-form')?.addEventListener('submit', async (e) => {
+        modal.querySelector('.rv-credit-modal-close')?.addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+        modal.querySelector('.rv-use-credit-form-el')?.addEventListener('submit', async (e) => {
           e.preventDefault();
           const amount = parseFloat(new FormData(e.target).get('amount')) || 0;
           if (amount > balance) { showToast('El importe supera el saldo disponible', 'error'); return; }
@@ -2556,7 +2604,7 @@ export async function renderCalendario(container) {
             if (res.pending <= 0) res.status = 'paid';
             res.payments.push({ amount, method: 'saldo', creditUsed: amount, date: new Date().toISOString() });
 
-            closeModal();
+            modal.remove();
             showToast(`${amount.toFixed(2)}€ de saldo aplicados a la reserva`, 'success');
             renderDetail();
             if (overlayRef) bindDetailEvents(overlayRef, res);

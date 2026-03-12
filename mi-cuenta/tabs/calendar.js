@@ -2,14 +2,7 @@ import { fetchPublishedClasses, bookClass, cancelEnrollment } from '/lib/booking
 import { fetchActiveBonos, fetchUserBonos } from '/lib/bonos.js';
 import { fetchFamilyMembers } from '/lib/family.js';
 import { supabase } from '/lib/supabase.js';
-
-const TYPE_LABELS = {
-  grupal: 'Surf Grupal',
-  individual: 'Surf Individual',
-  yoga: 'Yoga',
-  paddle: 'Paddle Surf',
-  surfskate: 'SurfSkate',
-};
+import { TYPE_LABELS, showToast } from '/lib/utils.js';
 
 const TYPE_COLORS = {
   grupal: '#0ea5e9',
@@ -161,7 +154,9 @@ export async function renderCalendar(panel) {
             .eq('status', 'confirmed');
           userEnrollments = data || [];
         }
-      } catch {}
+      } catch (err) {
+        console.error('Error fetching user enrollments:', err);
+      }
     }
 
     if (allClasses.length) {
@@ -290,10 +285,17 @@ export async function renderCalendar(panel) {
     const modal = panel.querySelector('#booking-modal');
     const body = panel.querySelector('#booking-modal-body');
 
-    const [bonos, members] = await Promise.all([
-      fetchActiveBonos(classType),
-      fetchFamilyMembers(),
-    ]);
+    let bonos, members;
+    try {
+      [bonos, members] = await Promise.all([
+        fetchActiveBonos(classType),
+        fetchFamilyMembers(),
+      ]);
+    } catch (err) {
+      console.error('Error loading booking data:', err);
+      bonos = [];
+      members = [];
+    }
 
     if (!bonos.length) {
       body.innerHTML = `
@@ -387,15 +389,4 @@ export async function renderCalendar(panel) {
   }
 
   await render();
-}
-
-function showToast(msg) {
-  const existing = document.querySelector('.account-toast');
-  if (existing) existing.remove();
-  const toast = document.createElement('div');
-  toast.className = 'account-toast';
-  toast.textContent = msg;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.classList.add('visible'), 10);
-  setTimeout(() => { toast.classList.remove('visible'); setTimeout(() => toast.remove(), 300); }, 3000);
 }

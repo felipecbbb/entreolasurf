@@ -155,6 +155,13 @@ export async function renderFamily(panel) {
       const id = obj.id;
       delete obj.id;
 
+      const fullName = (obj.full_name || '').trim();
+      if (!fullName) {
+        alert('El nombre es obligatorio.');
+        return;
+      }
+      obj.full_name = fullName;
+
       try {
         if (id) {
           await updateFamilyMember(id, obj);

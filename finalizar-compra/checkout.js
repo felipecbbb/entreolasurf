@@ -10,6 +10,12 @@ function formatPrice(n) {
   return n.toFixed(2).replace('.', ',') + '€';
 }
 
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 // Expiry rules: surf classes = 180 days, other activities = 365 days
 function getBonoExpiry(classType) {
   const days = ['grupal', 'individual'].includes(classType) ? 180 : 365;
@@ -55,11 +61,6 @@ async function init() {
     profile = await getProfile();
   }
 
-  if (!session) {
-    const bar = document.getElementById('guest-bar');
-    if (bar) bar.style.display = 'flex';
-  }
-
   // Credit balance logic
   const creditBalance = Number(profile?.credit_balance || 0);
   const cartTotal = getCartTotal();
@@ -70,7 +71,8 @@ async function init() {
   // Render summary
   const summaryItems = cart.map(i => {
     const isClass = i.type === 'class_reservation';
-    const label = isClass ? `${i.name} (anticipo)` : `${i.name} × ${i.quantity}`;
+    const name = esc(i.name);
+    const label = isClass ? `${name} (anticipo)` : `${name} × ${i.quantity}`;
     return `<div class="summary-item"><span class="name">${label}</span><span class="amt">${formatPrice(i.price * i.quantity)}</span></div>`;
   }).join('');
 
@@ -152,7 +154,7 @@ async function init() {
     const orderData = {
       user_id: session.user.id,
       status: 'paid',
-      total: cartTotal,
+      total: totalToPay,
       shipping_address: [f.direccion?.value, f.ciudad?.value, f.cp?.value].filter(Boolean).join(', ') || null,
       notes: orderNotes,
     };
@@ -171,7 +173,8 @@ async function init() {
       }
 
       if (Object.keys(profileUpdate).length) {
-        await supabase.from('profiles').update(profileUpdate).eq('id', session.user.id);
+        const { error: profileErr } = await supabase.from('profiles').update(profileUpdate).eq('id', session.user.id);
+        if (profileErr) throw profileErr;
       }
 
       // Create order
@@ -213,7 +216,20 @@ async function init() {
           status: 'active',
           expires_at: getBonoExpiry(classType),
         };
-        await supabase.from('bonos').insert(bono);
+        const { error: bonoErr } = await supabase.from('bonos').insert(bono);
+        if (bonoErr) throw bonoErr;
+      }
+
+      // Create payment record when credit is applied
+      if (appliedCredit > 0) {
+        const { error: payErr } = await supabase.from('payments').insert({
+          order_id: order.id,
+          user_id: session.user.id,
+          amount: appliedCredit,
+          method: 'credit_balance',
+          status: 'completed',
+        });
+        if (payErr) throw payErr;
       }
 
       clearCart();

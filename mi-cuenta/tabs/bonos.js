@@ -1,13 +1,6 @@
 import { fetchUserBonos, fetchPacksForType, upgradeBono } from '/lib/bonos.js';
 import { supabase } from '/lib/supabase.js';
-
-const TYPE_LABELS = {
-  grupal: 'Surf Grupal',
-  individual: 'Surf Individual',
-  yoga: 'Yoga',
-  paddle: 'Paddle Surf',
-  surfskate: 'SurfSkate',
-};
+import { formatDate, formatPrice, TYPE_LABELS } from '/lib/utils.js';
 
 const PACK_PRICING = {
   grupal:     [0, 35, 65, 90, 115, 135, 155, 165],
@@ -28,14 +21,6 @@ function getPackPrice(type, sessionCount) {
   const maxPrice = tiers[maxTier];
   const perSession = maxPrice / maxTier;
   return maxPrice + (sessionCount - maxTier) * perSession;
-}
-
-function formatDate(d) {
-  return new Date(d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function formatPrice(n) {
-  return Number(n).toFixed(2).replace('.', ',') + '€';
 }
 
 export async function renderBonos(panel, switchTab) {
@@ -260,6 +245,12 @@ async function openUpgradeModal(panel, switchTab, bonos, bonoId, classType, curr
       opt.style.opacity = '0.5';
       try {
         await upgradeBono(bonoId, newSessions, Number(diff));
+        // Verify the upgrade succeeded before refreshing
+        const updatedBonos = await fetchUserBonos();
+        const updatedBono = updatedBonos.find(b => b.id === bonoId);
+        if (!updatedBono || updatedBono.total_credits !== newSessions) {
+          throw new Error('La ampliación no se aplicó correctamente. Inténtalo de nuevo.');
+        }
         overlay.remove();
         await refreshBonosPanel(panel, switchTab);
       } catch (err) {

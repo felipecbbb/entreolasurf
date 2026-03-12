@@ -1,5 +1,6 @@
 import { getSession, getProfile, signIn, signUp, signOut, updateProfile } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
+import { esc, formatDate, formatPrice } from '/lib/utils.js';
 import { renderFamily } from '/mi-cuenta/tabs/family.js';
 import { renderBonos } from '/mi-cuenta/tabs/bonos.js';
 import { renderCalendar } from '/mi-cuenta/tabs/calendar.js';
@@ -8,21 +9,8 @@ import { renderPayments } from '/mi-cuenta/tabs/payments.js';
 
 const mainEl = document.querySelector('main');
 
-function formatPrice(n) {
-  return Number(n).toFixed(2).replace('.', ',') + '€';
-}
-
-function formatDate(d) {
-  return new Date(d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
 function statusBadge(status) {
   return `<span class="status-badge ${status || 'pending'}">${status || 'pendiente'}</span>`;
-}
-
-function esc(str) {
-  if (str == null) return '';
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function getInitials(name) {

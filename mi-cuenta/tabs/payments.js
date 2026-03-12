@@ -1,22 +1,5 @@
 import { supabase } from '/lib/supabase.js';
-
-const TYPE_LABELS = {
-  grupal: 'Surf Grupal', individual: 'Surf Individual',
-  yoga: 'Yoga', paddle: 'Paddle Surf', surfskate: 'SurfSkate',
-};
-
-const METHOD_LABELS = {
-  efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia',
-  voucher: 'Voucher', online: 'Online', saldo: 'Saldo',
-};
-
-function formatDate(d) {
-  return new Date(d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function formatPrice(n) {
-  return Number(n).toFixed(2).replace('.', ',') + '€';
-}
+import { formatDate, formatPrice, METHOD_LABELS } from '/lib/utils.js';
 
 export async function renderPayments(panel) {
   const { data: { user } } = await supabase.auth.getUser();
