@@ -118,7 +118,7 @@ function renderAuth() {
     btn.disabled = true; btn.textContent = 'Entrando…';
     try {
       await signIn(e.target.email.value, e.target.password.value);
-      await checkOnboardingOrDashboard();
+      renderDashboard();
     } catch (err) {
       errEl.textContent = err.message;
       btn.disabled = false; btn.textContent = 'Iniciar sesión';
@@ -148,9 +148,13 @@ function renderAuth() {
   });
 }
 
-// ---- Onboarding step (health & equipment) ----
+// ---- Onboarding step (health & equipment, only after register) ----
 async function checkOnboardingOrDashboard() {
   const profile = await getProfile();
+  if (profile?.role === 'admin') {
+    window.location.href = '/admin/';
+    return;
+  }
   if (profile && profile.can_swim == null) {
     renderOnboarding(profile);
   } else {
