@@ -246,10 +246,24 @@
 /* ============================================================
    Auth Page — Full-screen login/register layout
    ============================================================ */
+/* Force header to have white bg + dark text on auth pages */
+body.no-hero:has(.auth-page) .site-header {
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+}
+body.no-hero:has(.auth-page) .site-header a,
+body.no-hero:has(.auth-page) .site-header .nav-item > a {
+  color: var(--color-navy, #0f2f39);
+}
+body.no-hero:has(.auth-page) .site-header .menu-btn {
+  color: var(--color-navy, #0f2f39);
+}
+
 .auth-page {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  min-height: calc(100vh - 80px);
+  min-height: 100vh;
+  padding-top: 80px;
 }
 
 .auth-page-left {
@@ -411,6 +425,8 @@
   background: var(--color-navy, #0f2f39);
   position: relative;
   overflow: hidden;
+  margin-top: -80px;
+  padding-top: 120px;
 }
 
 .auth-page-right::before {
@@ -718,13 +734,14 @@
   /* Auth page responsive */
   .auth-page {
     grid-template-columns: 1fr;
+    padding-top: 70px;
   }
   .auth-page-right {
     display: none;
   }
   .auth-page-left {
     padding: 24px 20px;
-    min-height: 100vh;
+    min-height: calc(100vh - 70px);
   }
   .auth-title { font-size: 2rem; }
   .auth-page-form { max-width: 100%; }
