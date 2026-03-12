@@ -385,15 +385,20 @@ async function renderPedidos(session) {
 
 // ---- Init ----
 async function init() {
-  const session = await getSession();
-  if (session) {
-    const profile = await getProfile();
-    if (profile?.role === 'admin') {
-      window.location.href = '/admin/';
-      return;
+  try {
+    const session = await getSession();
+    if (session) {
+      const profile = await getProfile();
+      if (profile?.role === 'admin') {
+        window.location.href = '/admin/';
+        return;
+      }
+      renderDashboard();
+    } else {
+      renderAuth();
     }
-    renderDashboard();
-  } else {
+  } catch (err) {
+    console.error('Init error:', err);
     renderAuth();
   }
 }
