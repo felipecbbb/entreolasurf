@@ -617,7 +617,101 @@ export async function renderCalendario(container) {
           const eid = row.dataset.enrollmentId;
           const classId = row.dataset.classId;
           const cls = classes.find(c => c.id === classId);
-          if (cls && eid) openEnrollmentDetail(cls, eid, clientName, row.classList.contains('paid'));
+          if (cls && eid) {
+            (async () => {
+              try {
+                const classEnrollments = enrollmentsCache[classId] || [];
+                const enrollment = classEnrollments.find(en => en.id === eid);
+                const userId = enrollment?.user_id || null;
+                let profile = null;
+                if (userId) {
+                  const { data: p } = await supabase.from('profiles').select('*').eq('id', userId).single();
+                  profile = p;
+                }
+                let familyMember = null;
+                if (enrollment?.family_member_id) {
+                  const { data: fm } = await supabase.from('family_members').select('*').eq('id', enrollment.family_member_id).single();
+                  familyMember = fm;
+                }
+                const payments = await fetchPayments('enrollment', eid);
+                const isPaid = row.classList.contains('paid');
+
+                // Check if enrollment is linked to a bono
+                const linkedBonoId = enrollment?.bono_id || null;
+
+                // Load bonos for this user
+                const personCredits = {};
+                let linkedBono = null;
+                if (userId) {
+                  const { data: bonos } = await supabase.from('bonos').select('*').eq('user_id', userId).eq('class_type', cls.type).eq('status', 'active');
+                  if (bonos?.length) {
+                    const enrichedBonos = await Promise.all(bonos.map(async (b) => {
+                      const bPayments = await fetchPayments('enrollment', b.id);
+                      const totalPaidReal = bPayments.reduce((s, p) => s + Number(p.amount || 0), 0) || Number(b.total_paid || 0);
+                      const expectedPrice = getPackPrice(cls.type, b.total_credits, Number(cls.price || 0));
+                      const pending = Math.max(0, Math.round((expectedPrice - totalPaidReal) * 100) / 100);
+                      return { ...b, totalPaidReal, expectedPrice, pendingAmount: pending, isFullyPaid: pending <= 0 };
+                    }));
+
+                    // If enrollment is linked to a bono, pre-select it
+                    linkedBono = linkedBonoId ? enrichedBonos.find(b => b.id === linkedBonoId) : null;
+                    personCredits['p1'] = {
+                      allBonos: enrichedBonos,
+                      useCredit: !!linkedBono,
+                      selectedBonoId: linkedBono?.id || null,
+                      bono: linkedBono || null,
+                    };
+                  }
+                }
+
+                // If linked to a bono, the session cost is covered by the bono — pending is bono's pending
+                // If not linked to a bono, pending is based on pack price minus payments
+                const packPrice = getPackPrice(cls.type, 1, Number(cls.price) || 0);
+                let totalFinal, pendingAmount;
+                if (linkedBono) {
+                  totalFinal = linkedBono.expectedPrice;
+                  pendingAmount = linkedBono.pendingAmount;
+                } else {
+                  totalFinal = packPrice;
+                  const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+                  pendingAmount = Math.max(0, Math.round((packPrice - totalPaid) * 100) / 100);
+                }
+
+                const res = {
+                  id: eid,
+                  persons: [{ id: 'p1', nombre: clientName.split(' ')[0], apellidos: clientName.split(' ').slice(1).join(' '), profileId: userId, profileName: clientName, familyMemberId: enrollment?.family_member_id || null, sessions: [cls.id] }],
+                  sessions: [{ id: cls.id, date: cls.date, time_start: cls.time_start, time_end: cls.time_end, type: cls.type, title: cls.title }],
+                  contact: { nombre: clientName.split(' ')[0] || '', apellidos: clientName.split(' ').slice(1).join(' ') || '', email: profile?.email || '', telefono: profile?.phone || '', pais: '', idioma: '' },
+                  profile: profile,
+                  familyMember: familyMember,
+                  activityColor: TYPE_COLORS[cls.type] || '#0f2f39',
+                  activityLabel: TYPE_LABELS[cls.type] || cls.title,
+                  activityType: cls.type,
+                  totalFinal: totalFinal,
+                  pending: pendingAmount,
+                  payments: payments,
+                  personCredits: personCredits,
+                  linkedBonoId: linkedBonoId,
+                  status: isPaid ? 'paid' : (pendingAmount <= 0 ? 'paid' : 'confirmed'),
+                  createdAt: new Date(enrollment?.created_at || Date.now()),
+                  discount: 0,
+                  cobrarAnticipo: false,
+                  anticipoAmount: 0,
+                  paymentMethod: '',
+                };
+
+                const overlay = document.createElement('div');
+                overlay.className = 'bk-overlay bk-overlay-fullscreen';
+                overlay.innerHTML = `<div class="bk-panel bk-panel-fullscreen"><div class="bk-panel-header"></div><div class="bk-panel-body"></div></div>`;
+                document.body.appendChild(overlay);
+
+                openReservationDetail(res, overlay);
+              } catch (err) {
+                console.error('Error opening enrollment detail:', err);
+                showToast('Error al abrir detalle: ' + err.message, 'error');
+              }
+            })();
+          }
         } else if (itemType === 'rental') {
           const rid = row.dataset.rentalId;
           const reservation = rentalReservations.find(r => r.id === rid);
@@ -1271,7 +1365,8 @@ export async function renderCalendario(container) {
                 // If total_paid is 0 but bono was bought online (has order_id), at least the deposit was paid
                 const deposit = DEPOSIT[b.class_type] || 15;
                 const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
-                return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: Math.max(0, expectedPrice - paid), isFullyPaid: paid >= expectedPrice };
+                const bPending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
+                return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: bPending, isFullyPaid: bPending <= 0 };
               });
               const totalRemaining = allBonos.reduce((sum, b) => sum + (b.total_credits - b.used_credits), 0);
               // Default: pick the first bono with enough credits
@@ -1856,767 +1951,6 @@ export async function renderCalendario(container) {
       renderCheckout();
     }
 
-    // ======== RESERVATION DETAIL VIEW ========
-    function openReservationDetail(res, overlay) {
-      const now = res.createdAt;
-      const dateStr = `${DAY_NAMES_FULL[now.getDay()].toLowerCase()}, ${now.getDate()} de ${MONTH_NAMES[now.getMonth()].toLowerCase().replace('.', '')} de ${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const shortId = res.id.slice(0, 24);
-      const statusLabel = res.status === 'paid' ? 'Pagado' : 'Confirmado';
-      const statusColor = res.status === 'paid' ? '#166534' : '#0ea5e9';
-      const pendingColor = res.pending > 0 ? '#b91c1c' : '#166534';
-      let activeTab = 'resumen';
-
-      // Session dates for check-in/out
-      const sessionDates = res.sessions.map(s => s.date).sort();
-      const checkIn = sessionDates[0] || '';
-      const checkOut = sessionDates[sessionDates.length - 1] || '';
-
-      function getInitial(name) {
-        return (name || '?')[0].toUpperCase();
-      }
-
-      function formatDetailDate(ds) {
-        if (!ds) return '';
-        const d = new Date(ds + 'T00:00:00');
-        return `${DAY_NAMES_SHORT[d.getDay()].toLowerCase()}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()].toLowerCase()}`;
-      }
-
-      function renderDetail() {
-        // Build persons + sessions table
-        let personsHtml = '';
-        res.persons.forEach(p => {
-          const name = p.profileId ? p.profileName : `${p.nombre} ${p.apellidos}`.trim();
-          const initial = getInitial(name);
-
-          // Get sessions for this person
-          const personSessions = p.sessions.map(sid => {
-            return res.sessions.find(s => s.id === sid);
-          }).filter(Boolean);
-
-          personsHtml += `
-            <div class="rv-person-card">
-              <div class="rv-person-header">
-                <div class="rv-person-avatar" style="background:${res.activityColor}">${initial}</div>
-                <div class="rv-person-info">
-                  <span class="rv-person-name">${name}</span>
-                  <span class="rv-lang-badge">${res.contact.idioma || 'Español'}</span>
-                </div>
-                <button class="rv-person-menu-btn" title="Opciones">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                </button>
-              </div>
-              <div class="rv-person-actions">
-                <button class="rv-icon-btn" title="WhatsApp"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg></button>
-                <button class="rv-icon-btn" title="Llamar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></button>
-                <button class="rv-icon-btn" title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></button>
-                <button class="rv-icon-btn" title="Añadir sesión"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/></svg></button>
-              </div>
-              <table class="rv-sessions-table">
-                <thead>
-                  <tr><th>Fechas</th><th>Producto</th><th></th></tr>
-                </thead>
-                <tbody>
-                  ${personSessions.map(s => `
-                    <tr>
-                      <td>${formatDetailDate(s.date)} / ${s.time_start?.slice(0,5)} a ${s.time_end?.slice(0,5)}</td>
-                      <td>
-                        <span class="rv-product-icon">⚡</span>
-                        <span class="rv-product-qty">1</span>
-                        <span class="rv-product-name">${TYPE_LABELS[s.type] || s.title}</span>
-                      </td>
-                      <td class="rv-session-row-actions">
-                        <button class="rv-icon-btn small" title="Eliminar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
-                        <button class="rv-icon-btn small" title="Editar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-                        <button class="rv-icon-btn small" title="Expandir"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>`;
-        });
-
-        // Tabs content
-        let tabContent = '';
-        if (activeTab === 'resumen') {
-          // Build bonos section for linked persons
-          let bonosHtml = '';
-          const linkedPersons = res.persons.filter(p => p.profileId);
-          if (linkedPersons.length > 0 || res.personCredits) {
-            let bonoCards = '';
-            for (const p of res.persons) {
-              const pc = res.personCredits?.[p.id];
-              if (!pc || !pc.allBonos?.length) continue;
-              const name = p.profileName || `${p.nombre} ${p.apellidos}`.trim();
-              bonoCards += pc.allBonos.map(b => {
-                const remaining = b.total_credits - b.used_credits;
-                const isSelected = pc.selectedBonoId === b.id && pc.useCredit;
-                const paidPct = b.expectedPrice > 0 ? Math.min(100, (b.totalPaidReal / b.expectedPrice) * 100) : 0;
-                return `
-                  <div class="rv-bono-card ${isSelected ? 'rv-bono-active' : ''}" data-person-id="${p.id}" data-bono-id="${b.id}">
-                    <div class="rv-bono-header">
-                      <span class="rv-bono-name">${name}</span>
-                      <span class="rv-bono-badge ${isSelected ? 'rv-bono-badge-active' : ''}">${isSelected ? 'En uso' : 'Disponible'}</span>
-                    </div>
-                    <div class="rv-bono-details">
-                      <span>${TYPE_LABELS[b.class_type] || b.class_type} · ${remaining}/${b.total_credits} clases</span>
-                    </div>
-                    <div class="rv-bono-pay-row">
-                      <div class="rv-bono-bar"><div class="rv-bono-bar-fill" style="width:${paidPct}%;background:${b.isFullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
-                      <span class="rv-bono-pay-label">${b.totalPaidReal.toFixed(2)}€ / ${b.expectedPrice.toFixed(2)}€</span>
-                      ${!b.isFullyPaid ? `<button class="rv-bono-pay-btn" data-bono-id="${b.id}" data-pending="${b.pendingAmount.toFixed(2)}" data-person-id="${p.id}">Pagar ${b.pendingAmount.toFixed(2)}€</button>` : '<span style="color:#166534;font-size:.75rem;font-weight:600">PAGADO</span>'}
-                    </div>
-                  </div>`;
-              }).join('');
-            }
-
-            // Credit balance
-            let creditHtml = '';
-            for (const p of res.persons) {
-              if (!p.profileId) continue;
-              // We'll load this async, but show placeholder
-              creditHtml += `<div class="rv-credit-row" data-profile-id="${p.profileId}" data-person-name="${p.profileName || p.nombre}"></div>`;
-            }
-
-            if (bonoCards || creditHtml) {
-              bonosHtml = `
-                <div class="rv-info-card" style="margin-top:16px">
-                  <h3 style="font-family:'Space Grotesk',sans-serif;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e7eb">Bonos y Saldo</h3>
-                  ${bonoCards}
-                  <div id="rv-credit-balances">${creditHtml}</div>
-                </div>`;
-            }
-          }
-
-          tabContent = `
-            <div class="rv-summary-header">
-              <h2 class="rv-title">Resumen de la reserva <span class="rv-status-badge" style="background:${statusColor}15;color:${statusColor}">${statusLabel}</span></h2>
-            </div>
-            <div class="rv-info-card">
-              <div class="rv-info-top">
-                <div class="rv-info-top-left">
-                  <div class="rv-info-id">Reserva ${shortId}</div>
-                  <div class="rv-info-created">Creada el ${dateStr} · Por ADMIN</div>
-                </div>
-                <div class="rv-info-top-right">
-                  <div class="rv-info-stat">
-                    <label>Total</label>
-                    <span class="rv-info-amount">${res.totalFinal.toFixed(2)}€</span>
-                  </div>
-                  <div class="rv-info-stat">
-                    <label>Pendiente</label>
-                    <span class="rv-info-amount" style="color:${pendingColor}">${res.pending.toFixed(2)}€</span>
-                  </div>
-                  <button class="rv-add-payment-btn" id="rv-add-payment">+ Añadir pago</button>
-                </div>
-              </div>
-              <div class="rv-info-bottom">
-                <div class="rv-info-detail">
-                  <label>Reservado por</label>
-                  <div>
-                    <strong>${res.contact.nombre} ${res.contact.apellidos}</strong>
-                    <span class="rv-lang-badge">${res.contact.idioma || 'Español'}</span>
-                  </div>
-                  <div class="rv-contact-links">
-                    ${res.contact.telefono ? `<span class="rv-contact-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg> +34${res.contact.telefono}</span>` : ''}
-                    ${res.contact.email ? `<span class="rv-contact-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> ${res.contact.email}</span>` : ''}
-                  </div>
-                </div>
-                <div class="rv-info-detail">
-                  <label>Check in / Check out</label>
-                  <div class="rv-check-dates">
-                    <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ${formatDetailDate(checkIn)}</span>
-                    <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ${formatDetailDate(checkOut)}</span>
-                  </div>
-                </div>
-                <div class="rv-info-detail">
-                  <label>Personas</label>
-                  <div class="rv-persons-count">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg>
-                    ${res.persons.length}
-                  </div>
-                </div>
-              </div>
-            </div>
-            ${bonosHtml}
-            ${personsHtml}`;
-        } else if (activeTab === 'datos_comprador') {
-          tabContent = `
-            <h2 class="rv-title">Datos del Comprador</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <div class="bk-contact-fields">
-                <div class="bk-contact-field"><label>Nombre</label><input type="text" value="${res.contact.nombre}" readonly /></div>
-                <div class="bk-contact-field"><label>Apellidos</label><input type="text" value="${res.contact.apellidos}" readonly /></div>
-                <div class="bk-contact-field"><label>Email</label><input type="email" value="${res.contact.email}" readonly /></div>
-                <div class="bk-contact-field"><label>Teléfono</label><input type="tel" value="${res.contact.telefono}" readonly /></div>
-                <div class="bk-contact-field"><label>País</label><input type="text" value="${res.contact.pais}" readonly /></div>
-                <div class="bk-contact-field"><label>Idioma</label><input type="text" value="${res.contact.idioma}" readonly /></div>
-              </div>
-            </div>`;
-        } else if (activeTab === 'datos_internos') {
-          tabContent = `
-            <h2 class="rv-title">Datos Internos</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <div class="bk-contact-fields">
-                <div class="bk-contact-field"><label>ID Reserva</label><input type="text" value="${res.id}" readonly /></div>
-                <div class="bk-contact-field"><label>Creada</label><input type="text" value="${dateStr}" readonly /></div>
-                <div class="bk-contact-field"><label>Estado</label><input type="text" value="${statusLabel}" readonly /></div>
-                <div class="bk-contact-field"><label>Origen</label><input type="text" value="Manual (Admin)" readonly /></div>
-                <div class="bk-contact-field full-width">
-                  <label>Notas internas</label>
-                  <textarea class="rv-notes-textarea" id="rv-notes" rows="4" placeholder="Añadir notas internas sobre esta reserva…"></textarea>
-                </div>
-              </div>
-            </div>`;
-        } else if (activeTab === 'pagos') {
-          const METHOD_LABELS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', saldo: 'Saldo a favor', online: 'Online' };
-          const allPayments = [...(res.payments || [])];
-          if (res.cobrarAnticipo && res.anticipoAmount > 0) {
-            allPayments.unshift({ amount: res.anticipoAmount, method: res.paymentMethod, date: res.createdAt.toISOString(), creditUsed: 0 });
-          }
-          const totalPaid = allPayments.reduce((s, p) => s + p.amount, 0);
-
-          let paymentsListHtml = '';
-          if (allPayments.length) {
-            paymentsListHtml = allPayments.map(p => {
-              const d = new Date(p.date);
-              const dateLabel = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-              return `
-                <div class="rv-pay-row">
-                  <span>${dateLabel} · ${METHOD_LABELS[p.method] || p.method}${p.creditUsed > 0 ? ` (${p.creditUsed.toFixed(2)}€ saldo)` : ''}</span>
-                  <strong style="color:#166534">+${p.amount.toFixed(2)}€</strong>
-                </div>`;
-            }).join('');
-          } else {
-            paymentsListHtml = '<p style="font-size:.85rem;color:#6b7280">No hay pagos registrados</p>';
-          }
-
-          tabContent = `
-            <h2 class="rv-title">Pagos</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <div class="rv-payments-summary">
-                <div class="rv-pay-row"><span>Total reserva</span><strong>${res.totalFinal.toFixed(2)}€</strong></div>
-                ${res.discount > 0 ? `<div class="rv-pay-row"><span>Descuento</span><span style="color:#b91c1c">-${res.discount.toFixed(2)}€</span></div>` : ''}
-                <div class="rv-pay-row" style="border-top:1px solid #e5e7eb;padding-top:8px;margin-top:4px"><span>Total pagado</span><strong style="color:#166534">${totalPaid.toFixed(2)}€</strong></div>
-                <div class="rv-pay-row total"><span>Pendiente</span><strong style="color:${pendingColor}">${res.pending.toFixed(2)}€</strong></div>
-              </div>
-              <div style="margin-top:16px;padding-top:12px;border-top:1px dashed #e5e7eb">
-                <h4 style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:0 0 8px">Historial de pagos</h4>
-                ${paymentsListHtml}
-              </div>
-              <button class="rv-add-payment-btn" id="rv-add-payment-tab" style="margin-top:16px">+ Añadir pago</button>
-            </div>`;
-        } else if (activeTab === 'mensajes') {
-          tabContent = `
-            <h2 class="rv-title">Mensajes</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <div class="rv-empty-state">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-                <p>No hay mensajes enviados</p>
-                <button class="rv-add-payment-btn" style="margin-top:8px">Enviar mensaje</button>
-              </div>
-            </div>`;
-        } else if (activeTab === 'historico') {
-          tabContent = `
-            <h2 class="rv-title">Histórico</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <div class="rv-timeline">
-                <div class="rv-timeline-item">
-                  <div class="rv-timeline-dot" style="background:#22c55e"></div>
-                  <div class="rv-timeline-content">
-                    <strong>Reserva creada</strong>
-                    <span>${dateStr}</span>
-                    <small>Por ADMIN · Manual</small>
-                  </div>
-                </div>
-                ${res.cobrarAnticipo ? `
-                <div class="rv-timeline-item">
-                  <div class="rv-timeline-dot" style="background:#0ea5e9"></div>
-                  <div class="rv-timeline-content">
-                    <strong>Pago registrado (${res.paymentMethod})</strong>
-                    <span>${dateStr}</span>
-                    <small>${res.totalFinal.toFixed(2)}€</small>
-                  </div>
-                </div>` : ''}
-              </div>
-            </div>`;
-        }
-
-        const detailHtml = `
-          <div class="rv-layout">
-            <nav class="rv-sidebar">
-              <a class="rv-nav-item ${activeTab === 'resumen' ? 'active' : ''}" data-tab="resumen">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                Resumen
-              </a>
-              <div class="rv-nav-group">Cliente</div>
-              <a class="rv-nav-item ${activeTab === 'datos_comprador' ? 'active' : ''}" data-tab="datos_comprador">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4-4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                Datos del comprador
-              </a>
-              <div class="rv-nav-group">Gestión</div>
-              <a class="rv-nav-item ${activeTab === 'datos_internos' ? 'active' : ''}" data-tab="datos_internos">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                Datos internos
-              </a>
-              <a class="rv-nav-item ${activeTab === 'pagos' ? 'active' : ''}" data-tab="pagos">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                Pagos
-              </a>
-              <a class="rv-nav-item" data-tab="agencia">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-                Agencia
-              </a>
-              <a class="rv-nav-item ${activeTab === 'mensajes' ? 'active' : ''}" data-tab="mensajes">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                Mensajes
-              </a>
-              <a class="rv-nav-item ${activeTab === 'historico' ? 'active' : ''}" data-tab="historico">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Histórico
-              </a>
-            </nav>
-
-            <main class="rv-main">
-              ${tabContent}
-            </main>
-
-            <aside class="rv-actions">
-              <button class="rv-action-link danger" id="rv-cancel">
-                <span>Cancelar</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              </button>
-              <button class="rv-action-link" id="rv-ampliar">
-                <span>Ampliar</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              </button>
-              <button class="rv-action-link" id="rv-send-email">
-                <span>Enviar Email</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </button>
-              <button class="rv-action-link" id="rv-share">
-                <span>Compartir</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-              </button>
-              <button class="rv-action-link" id="rv-download">
-                <span>Descargar</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              </button>
-              <div class="rv-actions-separator"></div>
-              <div class="rv-other-details">
-                <div class="rv-other-title">Otros Detalles</div>
-                <div class="rv-other-item">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                  Manual
-                </div>
-              </div>
-            </aside>
-          </div>`;
-
-        // Replace panel content
-        const panel = overlay.querySelector('.bk-panel');
-        if (!panel) return;
-
-        // Update header
-        const panelHeader = panel.querySelector('.bk-panel-header');
-        if (panelHeader) {
-          panelHeader.innerHTML = `
-            <button class="bk-close-btn" id="rv-close">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-            <div class="bk-header-left">
-              <span class="bk-header-title">Ficha de Reserva</span>
-            </div>`;
-          panelHeader.style.background = res.activityColor;
-          // Remove confirm button area
-          const headerRight = panelHeader.querySelector('.bk-header-right');
-          if (headerRight) headerRight.remove();
-        }
-
-        // Replace body
-        const panelBody = panel.querySelector('.bk-panel-body');
-        if (panelBody) {
-          panelBody.outerHTML = `<div class="bk-panel-body" style="padding:0">${detailHtml}</div>`;
-        }
-
-        // Make panel fullscreen for reservation detail
-        panel.classList.add('bk-panel-fullscreen');
-        overlay.classList.add('bk-overlay-fullscreen');
-
-        bindDetailEvents(overlay, res);
-      }
-
-      function bindDetailEvents(overlay, res) {
-        // Close
-        overlay.querySelector('#rv-close')?.addEventListener('click', () => {
-          overlay.remove();
-          render();
-        });
-
-        // Tab navigation
-        overlay.querySelectorAll('.rv-nav-item').forEach(item => {
-          item.addEventListener('click', (e) => {
-            e.preventDefault();
-            const tab = item.dataset.tab;
-            if (tab) {
-              activeTab = tab;
-              renderDetail(); // renderDetail() already calls bindDetailEvents()
-            }
-          });
-        });
-
-        // Add payment buttons
-        overlay.querySelector('#rv-add-payment')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
-        overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
-
-        // Bono card clicks — toggle selection
-        overlay.querySelectorAll('.rv-bono-card').forEach(card => {
-          card.addEventListener('click', (e) => {
-            if (e.target.closest('.rv-bono-pay-btn')) return; // Don't toggle on pay button click
-            const pid = card.dataset.personId;
-            const bid = card.dataset.bonoId;
-            const pc = res.personCredits?.[pid];
-            if (!pc) return;
-            if (pc.selectedBonoId === bid && pc.useCredit) {
-              pc.useCredit = false;
-              pc.selectedBonoId = null;
-            } else {
-              pc.useCredit = true;
-              pc.selectedBonoId = bid;
-              pc.bono = pc.allBonos?.find(b => b.id === bid) || pc.bono;
-            }
-            renderDetail(); // renderDetail() already calls bindDetailEvents()
-          });
-        });
-
-        // Bono pay buttons
-        overlay.querySelectorAll('.rv-bono-pay-btn').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const bonoId = btn.dataset.bonoId;
-            const pending = parseFloat(btn.dataset.pending) || 0;
-            const pid = btn.dataset.personId;
-            openBonoPayModal(res, overlay, pid, bonoId, pending);
-          });
-        });
-
-        // Load credit balances for linked persons
-        overlay.querySelectorAll('.rv-credit-row').forEach(async (row) => {
-          const profileId = row.dataset.profileId;
-          const personName = row.dataset.personName;
-          try {
-            const { data } = await supabase.from('profiles').select('credit_balance').eq('id', profileId).single();
-            const balance = Number(data?.credit_balance || 0);
-            if (balance > 0) {
-              row.innerHTML = `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px dashed #e5e7eb;margin-top:8px">
-                  <div>
-                    <span style="font-size:.82rem;color:#0f2f39;font-weight:600">${personName}</span>
-                    <span style="font-size:.78rem;color:#6b7280"> — Saldo a favor: </span>
-                    <strong style="color:#166534">${balance.toFixed(2)}€</strong>
-                  </div>
-                  <button class="rv-use-credit-btn rv-add-payment-btn" data-profile-id="${profileId}" data-balance="${balance}" data-person-name="${personName}" style="font-size:.75rem;padding:5px 12px">Usar saldo</button>
-                </div>`;
-              row.querySelector('.rv-use-credit-btn')?.addEventListener('click', () => {
-                openUseCreditModal(res, overlay, profileId, balance, personName);
-              });
-            }
-          } catch {}
-        });
-
-        // Cancel reservation
-        overlay.querySelector('#rv-cancel')?.addEventListener('click', () => {
-          if (confirm('¿Cancelar esta reserva? Esta acción no se puede deshacer.')) {
-            showToast('Reserva cancelada', 'success');
-            overlay.remove();
-            render();
-          }
-        });
-
-        // Send email
-        overlay.querySelector('#rv-send-email')?.addEventListener('click', () => {
-          showToast('Funcionalidad de email próximamente', 'success');
-        });
-
-        // Share
-        overlay.querySelector('#rv-share')?.addEventListener('click', () => {
-          navigator.clipboard?.writeText(`Reserva ${res.id} — ${res.activityLabel} — ${res.totalFinal.toFixed(2)}€`);
-          showToast('Enlace copiado al portapapeles', 'success');
-        });
-
-        // Download
-        overlay.querySelector('#rv-download')?.addEventListener('click', () => {
-          showToast('Descarga disponible próximamente', 'success');
-        });
-
-        // Ampliar
-        overlay.querySelector('#rv-ampliar')?.addEventListener('click', () => {
-          showToast('Función de ampliar próximamente', 'success');
-        });
-      }
-
-      function openAddPaymentModal(res, overlayRef) {
-        // Check for persons with credit balance
-        const personsWithCredit = res.persons.filter(p => p.profileId);
-        let creditOptionHtml = '';
-        if (personsWithCredit.length) {
-          creditOptionHtml = `
-            <div style="margin-top:8px;padding-top:12px;border-top:1px dashed #e5e7eb">
-              <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
-                <input type="checkbox" class="rv-pay-use-credit-cb" style="width:16px;height:16px;accent-color:#0f2f39" />
-                Usar saldo a favor del cliente
-              </label>
-              <div class="rv-credit-info-el" style="display:none;margin-top:8px;font-size:.82rem;color:#065f46;background:#ecfdf5;padding:8px 12px;border-radius:6px"></div>
-            </div>`;
-        }
-
-        // Create a high z-index modal instead of using openModal (which renders behind the overlay)
-        const modal = document.createElement('div');
-        modal.className = 'bk-overlay';
-        modal.style.zIndex = '10001';
-        modal.innerHTML = `
-          <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:12px;overflow:hidden">
-            <div class="bk-panel-header" style="background:#0f2f39;padding:16px 20px">
-              <button class="bk-close-btn rv-pay-modal-close">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
-              <div class="bk-header-left"><span class="bk-header-title" style="font-size:1rem">Añadir Pago</span></div>
-            </div>
-            <div style="padding:24px">
-              <form class="rv-payment-form-el trip-form">
-                <label>Importe</label>
-                <input type="number" class="rv-pay-amount-el" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
-                <label>Método de pago</label>
-                <select name="method" required>
-                  <option value="">Seleccionar…</option>
-                  <option value="efectivo">Efectivo</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="voucher">Voucher</option>
-                  <option value="saldo">Saldo a favor</option>
-                </select>
-                ${creditOptionHtml}
-                <label>Notas</label>
-                <input type="text" name="notes" placeholder="Opcional" />
-                <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago</button>
-              </form>
-            </div>
-          </div>`;
-        document.body.appendChild(modal);
-
-        modal.querySelector('.rv-pay-modal-close')?.addEventListener('click', () => modal.remove());
-        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-
-        // Load credit balance for "saldo" option
-        let clientCreditBalance = 0;
-        let clientProfileId = null;
-        if (personsWithCredit.length) {
-          const firstLinked = personsWithCredit[0];
-          clientProfileId = firstLinked.profileId;
-          supabase.from('profiles').select('credit_balance').eq('id', clientProfileId).single().then(({ data }) => {
-            clientCreditBalance = Number(data?.credit_balance || 0);
-            const creditInfo = modal.querySelector('.rv-credit-info-el');
-            if (creditInfo) creditInfo.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€`;
-          });
-
-          modal.querySelector('.rv-pay-use-credit-cb')?.addEventListener('change', (e) => {
-            const infoEl = modal.querySelector('.rv-credit-info-el');
-            if (infoEl) infoEl.style.display = e.target.checked ? 'block' : 'none';
-            if (e.target.checked) {
-              const amountInput = modal.querySelector('.rv-pay-amount-el');
-              const currentAmount = parseFloat(amountInput.value) || 0;
-              const creditToUse = Math.min(clientCreditBalance, currentAmount);
-              if (creditToUse > 0) {
-                const infoEl2 = modal.querySelector('.rv-credit-info-el');
-                if (infoEl2) infoEl2.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€ — Se aplicarán ${creditToUse.toFixed(2)}€`;
-              }
-            }
-          });
-        }
-
-        modal.querySelector('.rv-payment-form-el')?.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const fd = new FormData(e.target);
-          const amount = parseFloat(fd.get('amount')) || 0;
-          const method = fd.get('method');
-          const useCredit = modal.querySelector('.rv-pay-use-credit-cb')?.checked;
-
-          if (!method && !useCredit) { showToast('Selecciona un método', 'error'); return; }
-
-          let creditUsed = 0;
-          if (useCredit && clientCreditBalance > 0 && clientProfileId) {
-            creditUsed = Math.min(clientCreditBalance, amount);
-            const newBalance = clientCreditBalance - creditUsed;
-            await supabase.from('profiles').update({ credit_balance: newBalance }).eq('id', clientProfileId);
-          }
-
-          const effectiveMethod = creditUsed >= amount ? 'saldo' : (method || 'saldo');
-          res.pending = Math.max(0, res.pending - amount);
-          if (res.pending <= 0) res.status = 'paid';
-          res.payments.push({ amount, method: effectiveMethod, creditUsed, date: new Date().toISOString() });
-
-          modal.remove();
-          showToast(`Pago de ${amount.toFixed(2)}€ registrado${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ de saldo)` : ` (${effectiveMethod})`}`, 'success');
-          renderDetail(); // renderDetail() already calls bindDetailEvents()
-        });
-      }
-
-      function openBonoPayModal(res, overlayRef, personId, bonoId, pendingAmount) {
-        const pc = res.personCredits?.[personId];
-        const bono = pc?.allBonos?.find(b => b.id === bonoId);
-        if (!bono) return;
-
-        // Create a high z-index modal instead of using openModal (which renders behind the overlay)
-        const modal = document.createElement('div');
-        modal.className = 'bk-overlay';
-        modal.style.zIndex = '10001';
-        modal.innerHTML = `
-          <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:12px;overflow:hidden">
-            <div class="bk-panel-header" style="background:#f59e0b;padding:16px 20px">
-              <button class="bk-close-btn rv-bono-modal-close">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
-              <div class="bk-header-left"><span class="bk-header-title" style="font-size:1rem">Pagar Bono</span></div>
-            </div>
-            <div style="padding:24px">
-              <form class="rv-bono-pay-form-el trip-form">
-                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;margin-bottom:14px">
-                  <div style="font-size:.82rem;color:#92400e"><strong>${TYPE_LABELS[bono.class_type] || bono.class_type}</strong> · ${bono.total_credits} clases</div>
-                  <div style="font-size:.82rem;color:#92400e;margin-top:4px">Pagado: ${bono.totalPaidReal.toFixed(2)}€ / ${bono.expectedPrice.toFixed(2)}€ · <strong>Debe: ${pendingAmount.toFixed(2)}€</strong></div>
-                </div>
-                <label>Importe</label>
-                <input type="number" name="amount" step="0.01" value="${pendingAmount.toFixed(2)}" required />
-                <label>Método de pago</label>
-                <select name="method" required>
-                  <option value="">Seleccionar…</option>
-                  <option value="efectivo">Efectivo</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="voucher">Voucher</option>
-                  <option value="saldo">Saldo a favor</option>
-                </select>
-                <button type="submit" class="btn red" style="margin-top:12px">Registrar Pago del Bono</button>
-              </form>
-            </div>
-          </div>`;
-        document.body.appendChild(modal);
-
-        modal.querySelector('.rv-bono-modal-close')?.addEventListener('click', () => modal.remove());
-        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-
-        modal.querySelector('.rv-bono-pay-form-el')?.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const fd = new FormData(e.target);
-          const amount = parseFloat(fd.get('amount')) || 0;
-          const method = fd.get('method');
-          if (!method) { showToast('Selecciona un método', 'error'); return; }
-
-          const btn = e.target.querySelector('button[type="submit"]');
-          btn.disabled = true; btn.textContent = 'Procesando…';
-
-          try {
-            // Update bono total_paid in DB
-            const newPaid = bono.totalPaidReal + amount;
-            await supabase.from('bonos').update({
-              total_paid: newPaid,
-              updated_at: new Date().toISOString(),
-            }).eq('id', bonoId);
-
-            // If paying with saldo, deduct from profile
-            if (method === 'saldo') {
-              const person = res.persons.find(p => p.id === personId);
-              if (person?.profileId) {
-                const { data: profile } = await supabase.from('profiles').select('credit_balance').eq('id', person.profileId).single();
-                const currentBalance = Number(profile?.credit_balance || 0);
-                await supabase.from('profiles').update({ credit_balance: Math.max(0, currentBalance - amount) }).eq('id', person.profileId);
-              }
-            }
-
-            // Create payment record
-            await createPayment({
-              reservation_type: 'enrollment',
-              reference_id: bonoId,
-              amount,
-              payment_method: method,
-              concept: `Pago bono ${TYPE_LABELS[bono.class_type] || bono.class_type}`,
-            });
-
-            // Update local bono data
-            bono.totalPaidReal = newPaid;
-            bono.pendingAmount = Math.max(0, bono.expectedPrice - newPaid);
-            bono.isFullyPaid = newPaid >= bono.expectedPrice;
-
-            modal.remove();
-            showToast(`Pago de ${amount.toFixed(2)}€ registrado para el bono`, 'success');
-            renderDetail();
-            if (overlayRef) bindDetailEvents(overlayRef, res);
-          } catch (err) {
-            showToast('Error: ' + err.message, 'error');
-            btn.disabled = false; btn.textContent = 'Registrar Pago del Bono';
-          }
-        });
-      }
-
-      function openUseCreditModal(res, overlayRef, profileId, balance, personName) {
-        // Create a high z-index modal instead of using openModal (which renders behind the overlay)
-        const modal = document.createElement('div');
-        modal.className = 'bk-overlay';
-        modal.style.zIndex = '10001';
-        modal.innerHTML = `
-          <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:12px;overflow:hidden">
-            <div class="bk-panel-header" style="background:#166534;padding:16px 20px">
-              <button class="bk-close-btn rv-credit-modal-close">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
-              <div class="bk-header-left"><span class="bk-header-title" style="font-size:1rem">Usar Saldo a Favor</span></div>
-            </div>
-            <div style="padding:24px">
-              <form class="rv-use-credit-form-el trip-form">
-                <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:14px">
-                  <div style="font-size:.85rem;color:#065f46"><strong>${personName}</strong></div>
-                  <div style="font-size:.9rem;color:#065f46;margin-top:4px">Saldo disponible: <strong>${balance.toFixed(2)}€</strong></div>
-                </div>
-                <label>Importe a aplicar</label>
-                <input type="number" name="amount" step="0.01" value="${Math.min(balance, res.pending).toFixed(2)}" max="${balance.toFixed(2)}" required />
-                <p style="font-size:.78rem;color:#6b7280;margin:4px 0 0">Pendiente de la reserva: ${res.pending.toFixed(2)}€</p>
-                <button type="submit" class="btn red" style="margin-top:12px">Aplicar Saldo</button>
-              </form>
-            </div>
-          </div>`;
-        document.body.appendChild(modal);
-
-        modal.querySelector('.rv-credit-modal-close')?.addEventListener('click', () => modal.remove());
-        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-
-        modal.querySelector('.rv-use-credit-form-el')?.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const amount = parseFloat(new FormData(e.target).get('amount')) || 0;
-          if (amount > balance) { showToast('El importe supera el saldo disponible', 'error'); return; }
-          if (amount <= 0) { showToast('Introduce un importe válido', 'error'); return; }
-
-          const btn = e.target.querySelector('button[type="submit"]');
-          btn.disabled = true; btn.textContent = 'Aplicando…';
-
-          try {
-            await supabase.from('profiles').update({ credit_balance: Math.max(0, balance - amount) }).eq('id', profileId);
-
-            res.pending = Math.max(0, res.pending - amount);
-            if (res.pending <= 0) res.status = 'paid';
-            res.payments.push({ amount, method: 'saldo', creditUsed: amount, date: new Date().toISOString() });
-
-            modal.remove();
-            showToast(`${amount.toFixed(2)}€ de saldo aplicados a la reserva`, 'success');
-            renderDetail();
-            if (overlayRef) bindDetailEvents(overlayRef, res);
-          } catch (err) {
-            showToast('Error: ' + err.message, 'error');
-            btn.disabled = false; btn.textContent = 'Aplicar Saldo';
-          }
-        });
-      }
-
-      renderDetail();
-    }
 
     function openClientSearchForPerson(pid) {
       const searchOverlay = document.createElement('div');
@@ -2753,6 +2087,998 @@ export async function renderCalendario(container) {
     }
 
     renderPanel();
+  }
+
+  // ======== RESERVATION DETAIL VIEW ========
+  function openReservationDetail(res, overlay) {
+    const now = res.createdAt;
+    const dateStr = `${DAY_NAMES_FULL[now.getDay()].toLowerCase()}, ${now.getDate()} de ${MONTH_NAMES[now.getMonth()].toLowerCase().replace('.', '')} de ${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const shortId = res.id.slice(0, 24);
+    let statusLabel = res.status === 'paid' ? 'Pagado' : res.pending > 0 ? 'Pendiente' : 'Confirmado';
+    let statusColor = res.status === 'paid' ? '#166534' : res.pending > 0 ? '#b91c1c' : '#0ea5e9';
+    const pendingColor = res.pending > 0 ? '#b91c1c' : '#166534';
+    let activeTab = 'resumen';
+
+    // Async loaded data
+    let clientHistory = null; // all enrollments for this user
+    let clientCreditBalance = 0;
+
+    // Session dates for check-in/out
+    const sessionDates = res.sessions.map(s => s.date).sort();
+    const checkIn = sessionDates[0] || '';
+    const checkOut = sessionDates[sessionDates.length - 1] || '';
+
+    function getInitial(name) {
+      return (name || '?')[0].toUpperCase();
+    }
+
+    function formatDetailDate(ds) {
+      if (!ds) return '';
+      const d = new Date(ds + 'T00:00:00');
+      return `${DAY_NAMES_SHORT[d.getDay()].toLowerCase()}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()].toLowerCase()}`;
+    }
+
+    function renderDetail() {
+      // Build persons + sessions table
+      let personsHtml = '';
+      res.persons.forEach(p => {
+        const name = p.profileId ? p.profileName : `${p.nombre} ${p.apellidos}`.trim();
+        const initial = getInitial(name);
+
+        // Get sessions for this person
+        const personSessions = p.sessions.map(sid => {
+          return res.sessions.find(s => s.id === sid);
+        }).filter(Boolean);
+
+        personsHtml += `
+          <div class="rv-person-card">
+            <div class="rv-person-header">
+              <div class="rv-person-avatar" style="background:${res.activityColor}">${initial}</div>
+              <div class="rv-person-info">
+                <span class="rv-person-name">${name}</span>
+                <span class="rv-lang-badge">${res.contact.idioma || 'Español'}</span>
+              </div>
+              <button class="rv-person-menu-btn" title="Opciones">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+              </button>
+            </div>
+            <div class="rv-person-actions">
+              <button class="rv-icon-btn" title="WhatsApp"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg></button>
+              <button class="rv-icon-btn" title="Llamar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></button>
+              <button class="rv-icon-btn" title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></button>
+              <button class="rv-icon-btn" title="Añadir sesión"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/></svg></button>
+            </div>
+            <table class="rv-sessions-table">
+              <thead>
+                <tr><th>Fechas</th><th>Producto</th><th></th></tr>
+              </thead>
+              <tbody>
+                ${personSessions.map(s => `
+                  <tr>
+                    <td>${formatDetailDate(s.date)} / ${s.time_start?.slice(0,5)} a ${s.time_end?.slice(0,5)}</td>
+                    <td>
+                      <span class="rv-product-icon">⚡</span>
+                      <span class="rv-product-qty">1</span>
+                      <span class="rv-product-name">${TYPE_LABELS[s.type] || s.title}</span>
+                    </td>
+                    <td class="rv-session-row-actions">
+                      <button class="rv-icon-btn small" title="Eliminar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
+                      <button class="rv-icon-btn small" title="Editar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                      <button class="rv-icon-btn small" title="Expandir"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>`;
+      });
+
+      // Tabs content
+      let tabContent = '';
+      if (activeTab === 'resumen') {
+        // Build bonos section for linked persons
+        let bonosHtml = '';
+        const linkedPersons = res.persons.filter(p => p.profileId);
+        if (linkedPersons.length > 0 || res.personCredits) {
+          let bonoCards = '';
+          for (const p of res.persons) {
+            const pc = res.personCredits?.[p.id];
+            if (!pc || !pc.allBonos?.length) continue;
+            const name = p.profileName || `${p.nombre} ${p.apellidos}`.trim();
+            bonoCards += pc.allBonos.map(b => {
+              const remaining = b.total_credits - b.used_credits;
+              const isSelected = pc.selectedBonoId === b.id && pc.useCredit;
+              const paidPct = b.expectedPrice > 0 ? Math.min(100, (b.totalPaidReal / b.expectedPrice) * 100) : 0;
+              const cardStyle = isSelected
+                ? (b.isFullyPaid ? 'border-color:#22c55e;background:#f0fdf4;box-shadow:0 0 0 2px #22c55e40' : 'border-color:#f59e0b;background:#fffbeb;box-shadow:0 0 0 2px #f59e0b40')
+                : b.isFullyPaid ? 'border-color:#22c55e;background:#f0fdf4' : '';
+              const badgeHtml = isSelected
+                ? (b.isFullyPaid
+                  ? '<span style="font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:20px;background:#22c55e;color:#fff">En uso · Pagado</span>'
+                  : '<span class="rv-bono-badge rv-bono-badge-active">En uso</span>')
+                : b.isFullyPaid
+                  ? '<span style="font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:20px;background:#dcfce7;color:#166534">PAGADO</span>'
+                  : '<span class="rv-bono-badge">Disponible</span>';
+              const payBtnHtml = (!b.isFullyPaid && b.pendingAmount > 0)
+                ? `<button class="rv-bono-pay-btn" data-bono-id="${b.id}" data-pending="${b.pendingAmount.toFixed(2)}" data-person-id="${p.id}">Pagar ${b.pendingAmount.toFixed(2)}€</button>`
+                : b.isFullyPaid
+                  ? '<span style="color:#166534;font-size:.75rem;font-weight:600">PAGADO</span>'
+                  : '';
+              return `
+                <div class="rv-bono-card ${isSelected ? 'rv-bono-active' : ''}" data-person-id="${p.id}" data-bono-id="${b.id}" style="${cardStyle}">
+                  <div class="rv-bono-header">
+                    <span class="rv-bono-name">${name}</span>
+                    ${badgeHtml}
+                  </div>
+                  <div class="rv-bono-details">
+                    <span>${TYPE_LABELS[b.class_type] || b.class_type} · ${remaining}/${b.total_credits} clases</span>
+                  </div>
+                  <div class="rv-bono-pay-row">
+                    <div class="rv-bono-bar"><div class="rv-bono-bar-fill" style="width:${paidPct}%;background:${b.isFullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
+                    <span class="rv-bono-pay-label">${b.totalPaidReal.toFixed(2)}€ / ${b.expectedPrice.toFixed(2)}€</span>
+                    ${payBtnHtml}
+                  </div>
+                </div>`;
+            }).join('');
+          }
+
+          // Credit balance
+          let creditHtml = '';
+          for (const p of res.persons) {
+            if (!p.profileId) continue;
+            // We'll load this async, but show placeholder
+            creditHtml += `<div class="rv-credit-row" data-profile-id="${p.profileId}" data-person-name="${p.profileName || p.nombre}"></div>`;
+          }
+
+          if (bonoCards || creditHtml) {
+            bonosHtml = `
+              <div class="rv-info-card" style="margin-top:16px">
+                <h3>Bonos y Saldo</h3>
+                ${bonoCards}
+                <div id="rv-credit-balances" style="padding:0 24px 16px">${creditHtml}</div>
+              </div>`;
+          }
+        }
+
+        tabContent = `
+          <div class="rv-summary-header">
+            <h2 class="rv-title">Resumen de la reserva <span class="rv-status-badge" style="background:${statusColor}15;color:${statusColor}">${statusLabel}</span></h2>
+          </div>
+          <div class="rv-info-card">
+            <div class="rv-info-top">
+              <div class="rv-info-top-left">
+                <div class="rv-info-id">Reserva ${shortId}</div>
+                <div class="rv-info-created">Creada el ${dateStr} · Por ADMIN</div>
+              </div>
+              <div class="rv-info-top-right">
+                <div class="rv-info-stat">
+                  <label>Total</label>
+                  <span class="rv-info-amount">${res.totalFinal.toFixed(2)}€</span>
+                </div>
+                <div class="rv-info-stat">
+                  <label>Pendiente</label>
+                  <span class="rv-info-amount" style="color:${pendingColor}">${res.pending.toFixed(2)}€</span>
+                </div>
+                <button class="rv-add-payment-btn" id="rv-add-payment">+ Añadir pago</button>
+              </div>
+            </div>
+            <div class="rv-info-bottom">
+              <div class="rv-info-detail">
+                <label>Reservado por</label>
+                <div>
+                  <strong>${res.contact.nombre} ${res.contact.apellidos}</strong>
+                  <span class="rv-lang-badge">${res.contact.idioma || 'Español'}</span>
+                </div>
+                <div class="rv-contact-links">
+                  ${res.contact.telefono ? `<span class="rv-contact-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg> +34${res.contact.telefono}</span>` : ''}
+                  ${res.contact.email ? `<span class="rv-contact-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> ${res.contact.email}</span>` : ''}
+                </div>
+              </div>
+              <div class="rv-info-detail">
+                <label>Check in / Check out</label>
+                <div class="rv-check-dates">
+                  <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ${formatDetailDate(checkIn)}</span>
+                  <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ${formatDetailDate(checkOut)}</span>
+                </div>
+              </div>
+              <div class="rv-info-detail">
+                <label>Personas</label>
+                <div class="rv-persons-count">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                  ${res.persons.length}
+                </div>
+              </div>
+            </div>
+          </div>
+          ${bonosHtml}
+          ${personsHtml}`;
+      } else if (activeTab === 'datos_comprador') {
+        const prof = res.profile;
+        const fm = res.familyMember;
+        let buyerHtml = '';
+        if (fm) {
+          buyerHtml = `
+            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:0 0 12px">Beneficiario (familiar)</h3>
+            <div class="bk-contact-fields" style="margin-bottom:24px">
+              <div class="bk-contact-field"><label>Nombre</label><input type="text" value="${fm.full_name || fm.name || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Edad</label><input type="text" value="${fm.age != null ? fm.age + ' años' : (fm.birth_date || '')}" readonly /></div>
+              <div class="bk-contact-field"><label>Relación</label><input type="text" value="${fm.relationship || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Nivel</label><input type="text" value="${fm.level || ''}" readonly /></div>
+            </div>
+            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:0 0 12px">Titular de la cuenta</h3>
+            <div class="bk-contact-fields">
+              <div class="bk-contact-field"><label>Nombre completo</label><input type="text" value="${prof?.full_name || res.contact.nombre + ' ' + res.contact.apellidos}" readonly /></div>
+              <div class="bk-contact-field"><label>Email</label><input type="email" value="${prof?.email || res.contact.email || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Teléfono</label><input type="tel" value="${prof?.phone || res.contact.telefono || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Dirección</label><input type="text" value="${prof?.address || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Ciudad</label><input type="text" value="${prof?.city || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Código postal</label><input type="text" value="${prof?.postal_code || ''}" readonly /></div>
+            </div>`;
+        } else {
+          buyerHtml = `
+            <div class="bk-contact-fields">
+              <div class="bk-contact-field"><label>Nombre completo</label><input type="text" value="${prof?.full_name || res.contact.nombre + ' ' + res.contact.apellidos}" readonly /></div>
+              <div class="bk-contact-field"><label>Email</label><input type="email" value="${prof?.email || res.contact.email || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Teléfono</label><input type="tel" value="${prof?.phone || res.contact.telefono || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Dirección</label><input type="text" value="${prof?.address || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Ciudad</label><input type="text" value="${prof?.city || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Código postal</label><input type="text" value="${prof?.postal_code || ''}" readonly /></div>
+            </div>`;
+        }
+        tabContent = `
+          <h2 class="rv-title">Datos del Comprador</h2>
+          <div class="rv-info-card" style="padding:24px">
+            ${buyerHtml}
+          </div>`;
+      } else if (activeTab === 'datos_internos') {
+        tabContent = `
+          <h2 class="rv-title">Datos Internos</h2>
+          <div class="rv-info-card" style="padding:24px">
+            <div class="bk-contact-fields">
+              <div class="bk-contact-field"><label>ID Reserva</label><input type="text" value="${res.id}" readonly /></div>
+              <div class="bk-contact-field"><label>Creada</label><input type="text" value="${dateStr}" readonly /></div>
+              <div class="bk-contact-field"><label>Estado</label><input type="text" value="${statusLabel}" readonly /></div>
+              <div class="bk-contact-field"><label>Origen</label><input type="text" value="Manual (Admin)" readonly /></div>
+              <div class="bk-contact-field full-width">
+                <label>Notas internas</label>
+                <textarea class="rv-notes-textarea" id="rv-notes" rows="4" placeholder="Añadir notas internas sobre esta reserva…"></textarea>
+              </div>
+            </div>
+          </div>`;
+      } else if (activeTab === 'pagos') {
+        const METHOD_LABELS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', saldo: 'Saldo a favor', online: 'Online' };
+        const allPayments = [...(res.payments || [])];
+        if (res.cobrarAnticipo && res.anticipoAmount > 0) {
+          allPayments.unshift({ amount: res.anticipoAmount, method: res.paymentMethod, date: res.createdAt.toISOString(), creditUsed: 0 });
+        }
+        const totalPaid = allPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+
+        let paymentsListHtml = '';
+        if (allPayments.length) {
+          paymentsListHtml = allPayments.map(p => {
+            const d = new Date(p.date || p.payment_date);
+            const methodKey = p.method || p.payment_method;
+            const amt = Number(p.amount || 0);
+            const creditUsed = Number(p.creditUsed || 0);
+            const dateLabel = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            return `
+              <div class="rv-pay-row">
+                <span>${dateLabel} · ${METHOD_LABELS[methodKey] || methodKey}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}</span>
+                <strong style="color:#166534">+${amt.toFixed(2)}€</strong>
+              </div>`;
+          }).join('');
+        } else {
+          paymentsListHtml = '<p style="font-size:.85rem;color:#6b7280">No hay pagos registrados</p>';
+        }
+
+        tabContent = `
+          <h2 class="rv-title">Pagos</h2>
+          <div class="rv-info-card" style="padding:24px">
+            <div class="rv-payments-summary">
+              <div class="rv-pay-row"><span>Total reserva</span><strong>${res.totalFinal.toFixed(2)}€</strong></div>
+              ${res.discount > 0 ? `<div class="rv-pay-row"><span>Descuento</span><span style="color:#b91c1c">-${res.discount.toFixed(2)}€</span></div>` : ''}
+              <div class="rv-pay-row" style="border-top:1px solid #e5e7eb;padding-top:8px;margin-top:4px"><span>Total pagado</span><strong style="color:#166534">${totalPaid.toFixed(2)}€</strong></div>
+              <div class="rv-pay-row total"><span>Pendiente</span><strong style="color:${pendingColor}">${res.pending.toFixed(2)}€</strong></div>
+            </div>
+            <div style="margin-top:16px;padding-top:12px;border-top:1px dashed #e5e7eb">
+              <h4 style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:0 0 8px">Historial de pagos</h4>
+              ${paymentsListHtml}
+            </div>
+            <button class="rv-add-payment-btn" id="rv-add-payment-tab" style="margin-top:16px">+ Añadir pago</button>
+          </div>`;
+      } else if (activeTab === 'historico') {
+        // Build timeline from real data
+        let timelineItems = '';
+
+        // 1. Reservation created
+        timelineItems += `
+          <div class="rv-timeline-item">
+            <div class="rv-timeline-dot" style="background:#22c55e"></div>
+            <div class="rv-timeline-content">
+              <strong>Reserva creada</strong>
+              <span>${dateStr}</span>
+              <small>Por ADMIN · Manual</small>
+            </div>
+          </div>`;
+
+        // 2. Initial payment if applicable
+        if (res.cobrarAnticipo && res.anticipoAmount > 0) {
+          timelineItems += `
+            <div class="rv-timeline-item">
+              <div class="rv-timeline-dot" style="background:#0ea5e9"></div>
+              <div class="rv-timeline-content">
+                <strong>Anticipo registrado (${res.paymentMethod})</strong>
+                <span>${dateStr}</span>
+                <small>${res.anticipoAmount.toFixed(2)}€</small>
+              </div>
+            </div>`;
+        }
+
+        // 3. All recorded payments
+        const METHOD_LABELS_H = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', saldo: 'Saldo a favor', online: 'Online' };
+        (res.payments || []).forEach(p => {
+          const d = new Date(p.date || p.payment_date);
+          const dLabel = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          timelineItems += `
+            <div class="rv-timeline-item">
+              <div class="rv-timeline-dot" style="background:#0ea5e9"></div>
+              <div class="rv-timeline-content">
+                <strong>Pago registrado (${METHOD_LABELS_H[p.method || p.payment_method] || p.method || p.payment_method})</strong>
+                <span>${dLabel}</span>
+                <small>+${Number(p.amount).toFixed(2)}€${p.concept ? ` · ${p.concept}` : ''}</small>
+              </div>
+            </div>`;
+        });
+
+        // 4. Client enrollment history (loaded async)
+        let historyHtml = '<div id="rv-client-history" style="margin-top:20px"><p style="font-size:.85rem;color:#6b7280">Cargando historial del cliente...</p></div>';
+
+        tabContent = `
+          <h2 class="rv-title">Histórico</h2>
+          <div class="rv-info-card" style="padding:24px">
+            <h4 style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:0 0 12px">Actividad de esta reserva</h4>
+            <div class="rv-timeline">${timelineItems}</div>
+          </div>
+          ${historyHtml}`;
+      }
+
+      const detailHtml = `
+        <div class="rv-layout">
+          <nav class="rv-sidebar">
+            <a class="rv-nav-item ${activeTab === 'resumen' ? 'active' : ''}" data-tab="resumen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              Resumen
+            </a>
+            <div class="rv-nav-group">Cliente</div>
+            <a class="rv-nav-item ${activeTab === 'datos_comprador' ? 'active' : ''}" data-tab="datos_comprador">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4-4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Datos del comprador
+            </a>
+            <div class="rv-nav-group">Gestión</div>
+            <a class="rv-nav-item ${activeTab === 'datos_internos' ? 'active' : ''}" data-tab="datos_internos">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Datos internos
+            </a>
+            <a class="rv-nav-item ${activeTab === 'pagos' ? 'active' : ''}" data-tab="pagos">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+              Pagos
+            </a>
+            <a class="rv-nav-item ${activeTab === 'historico' ? 'active' : ''}" data-tab="historico">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Histórico
+            </a>
+          </nav>
+
+          <main class="rv-main">
+            ${tabContent}
+          </main>
+
+          <aside class="rv-actions">
+            <button class="rv-action-link danger" id="rv-cancel">
+              <span>Cancelar</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </button>
+            <button class="rv-action-link" id="rv-ampliar">
+              <span>Ampliar</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <button class="rv-action-link" id="rv-send-email">
+              <span>Enviar Email</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+            <div class="rv-actions-separator"></div>
+            <div class="rv-other-details">
+              <div class="rv-other-title">Otros Detalles</div>
+              <div class="rv-other-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                Manual
+              </div>
+            </div>
+          </aside>
+        </div>`;
+
+      // Replace panel content
+      const panel = overlay.querySelector('.bk-panel');
+      if (!panel) return;
+
+      // Update header
+      const panelHeader = panel.querySelector('.bk-panel-header');
+      if (panelHeader) {
+        panelHeader.innerHTML = `
+          <div class="bk-header-left" style="display:flex;align-items:center;gap:14px">
+            <button class="bk-close-btn" id="rv-close">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <span class="bk-header-title">Ficha de Reserva</span>
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.7;background:rgba(255,255,255,.15);padding:3px 10px;border-radius:5px">${res.activityLabel || ''}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:.72rem;font-weight:600;opacity:.8">#${shortId.slice(0,8)}</span>
+          </div>`;
+        panelHeader.style.background = `linear-gradient(135deg, ${res.activityColor}, ${res.activityColor}dd)`;
+        // Remove confirm button area
+        const headerRight = panelHeader.querySelector('.bk-header-right');
+        if (headerRight) headerRight.remove();
+      }
+
+      // Replace body
+      const panelBody = panel.querySelector('.bk-panel-body');
+      if (panelBody) {
+        panelBody.outerHTML = `<div class="bk-panel-body" style="padding:0">${detailHtml}</div>`;
+      }
+
+      // Make panel fullscreen for reservation detail
+      panel.classList.add('bk-panel-fullscreen');
+      overlay.classList.add('bk-overlay-fullscreen');
+
+      bindDetailEvents(overlay, res);
+    }
+
+    function bindDetailEvents(overlay, res) {
+      // Close
+      overlay.querySelector('#rv-close')?.addEventListener('click', () => {
+        overlay.remove();
+        render();
+      });
+
+      // Tab navigation
+      overlay.querySelectorAll('.rv-nav-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.preventDefault();
+          const tab = item.dataset.tab;
+          if (tab) {
+            activeTab = tab;
+            renderDetail(); // renderDetail() already calls bindDetailEvents()
+          }
+        });
+      });
+
+      // Add payment buttons
+      overlay.querySelector('#rv-add-payment')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
+      overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
+
+      // Bono card clicks — toggle selection
+      overlay.querySelectorAll('.rv-bono-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.rv-bono-pay-btn')) return; // Don't toggle on pay button click
+          const pid = card.dataset.personId;
+          const bid = card.dataset.bonoId;
+          const pc = res.personCredits?.[pid];
+          if (!pc) return;
+          if (pc.selectedBonoId === bid && pc.useCredit) {
+            pc.useCredit = false;
+            pc.selectedBonoId = null;
+          } else {
+            pc.useCredit = true;
+            pc.selectedBonoId = bid;
+            pc.bono = pc.allBonos?.find(b => b.id === bid) || pc.bono;
+          }
+          renderDetail(); // renderDetail() already calls bindDetailEvents()
+        });
+      });
+
+      // Bono pay buttons
+      overlay.querySelectorAll('.rv-bono-pay-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const bonoId = btn.dataset.bonoId;
+          const pending = parseFloat(btn.dataset.pending) || 0;
+          const pid = btn.dataset.personId;
+          openBonoPayModal(res, overlay, pid, bonoId, pending);
+        });
+      });
+
+      // Load credit balances for linked persons
+      overlay.querySelectorAll('.rv-credit-row').forEach(async (row) => {
+        const profileId = row.dataset.profileId;
+        const personName = row.dataset.personName;
+        try {
+          const { data } = await supabase.from('profiles').select('credit_balance').eq('id', profileId).single();
+          const balance = Number(data?.credit_balance || 0);
+          if (balance > 0) {
+            row.innerHTML = `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px dashed #e5e7eb;margin-top:8px">
+                <div>
+                  <span style="font-size:.82rem;color:#0f2f39;font-weight:600">${personName}</span>
+                  <span style="font-size:.78rem;color:#6b7280"> — Saldo a favor: </span>
+                  <strong style="color:#166534">${balance.toFixed(2)}€</strong>
+                </div>
+                <button class="rv-use-credit-btn rv-add-payment-btn" data-profile-id="${profileId}" data-balance="${balance}" data-person-name="${personName}" style="font-size:.75rem;padding:5px 12px">Usar saldo</button>
+              </div>`;
+            row.querySelector('.rv-use-credit-btn')?.addEventListener('click', () => {
+              openUseCreditModal(res, overlay, profileId, balance, personName);
+            });
+          }
+        } catch {}
+      });
+
+      // Cancel reservation
+      overlay.querySelector('#rv-cancel')?.addEventListener('click', async () => {
+        if (confirm('¿Cancelar esta reserva? Esta acción no se puede deshacer.')) {
+          try {
+            await deleteEnrollment(res.id);
+            showToast('Reserva cancelada', 'success');
+          } catch {
+            // If delete fails, try status update
+            await updateEnrollmentStatus(res.id, 'cancelled').catch(() => {});
+            showToast('Reserva cancelada', 'success');
+          }
+          overlay.remove();
+          render();
+        }
+      });
+
+      // Send email
+      overlay.querySelector('#rv-send-email')?.addEventListener('click', () => {
+        showToast('Funcionalidad de email próximamente', 'success');
+      });
+
+      // Ampliar — open booking panel for same activity type
+      overlay.querySelector('#rv-ampliar')?.addEventListener('click', () => {
+        if (res.sessions?.length) {
+          const firstSession = res.sessions[0];
+          const cls = { id: firstSession.id, date: firstSession.date, time_start: firstSession.time_start, time_end: firstSession.time_end, type: firstSession.type || res.activityType, title: firstSession.title || res.activityLabel, price: res.totalFinal, max_students: 8 };
+          overlay.remove();
+          openBookingPanel(cls);
+        } else {
+          showToast('No hay sesión asociada para ampliar', 'error');
+        }
+      });
+
+      // Load client history for Histórico tab
+      const historyEl = overlay.querySelector('#rv-client-history');
+      if (historyEl) {
+        const userId = res.persons?.[0]?.profileId;
+        if (userId) {
+          (async () => {
+            try {
+              // Fetch all enrollments for this user
+              const { data: enrollments } = await supabase
+                .from('class_enrollments')
+                .select('id, class_id, status, created_at, attendance')
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false })
+                .limit(50);
+
+              if (!enrollments?.length) {
+                historyEl.innerHTML = '<div class="rv-info-card" style="padding:24px"><p style="font-size:.85rem;color:#6b7280">No hay historial previo para este cliente</p></div>';
+                return;
+              }
+
+              // Fetch class details for these enrollments
+              const classIds = [...new Set(enrollments.map(e => e.class_id))];
+              const { data: classes } = await supabase
+                .from('surf_classes')
+                .select('id, type, date, time_start, time_end, title')
+                .in('id', classIds);
+              const classMap = {};
+              (classes || []).forEach(c => { classMap[c.id] = c; });
+
+              // Stats
+              const total = enrollments.length;
+              const attended = enrollments.filter(e => e.attendance === true || e.status === 'completed').length;
+              const cancelled = enrollments.filter(e => e.status === 'cancelled').length;
+              const noShow = enrollments.filter(e => e.attendance === false && e.status !== 'cancelled').length;
+
+              // Credit balance
+              let creditHtml = '';
+              try {
+                const { data: profile } = await supabase.from('profiles').select('credit_balance').eq('id', userId).single();
+                clientCreditBalance = Number(profile?.credit_balance || 0);
+                if (clientCreditBalance > 0) {
+                  creditHtml = `<div style="margin-top:12px;padding:12px 16px;background:#ecfdf5;border-radius:10px;display:flex;justify-content:space-between;align-items:center">
+                    <span style="font-size:.85rem;color:#065f46;font-weight:600">Saldo a favor</span>
+                    <strong style="color:#166534;font-size:1rem">${clientCreditBalance.toFixed(2)}€</strong>
+                  </div>`;
+                }
+              } catch {}
+
+              // Fetch bonos for this user
+              let bonoTimelineHtml = '';
+              try {
+                const { data: userBonos } = await supabase.from('bonos').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+                if (userBonos?.length) {
+                  bonoTimelineHtml = `
+                    <div style="margin-top:20px">
+                      <h4 style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:0 0 12px">Bonos del cliente</h4>
+                      <div class="rv-timeline">
+                        ${userBonos.map(bo => {
+                          const boDate = new Date(bo.created_at);
+                          const boDateStr = boDate.getDate() + '/' + (boDate.getMonth() + 1) + '/' + boDate.getFullYear();
+                          const statusLbl = bo.status === 'active' ? 'Activo' : bo.status === 'completed' ? 'Completado' : bo.status === 'expired' ? 'Expirado' : bo.status;
+                          const statusClr = bo.status === 'active' ? '#0ea5e9' : bo.status === 'completed' ? '#22c55e' : '#6b7280';
+                          return `<div class="rv-timeline-item">
+                            <div class="rv-timeline-dot" style="background:${statusClr}"></div>
+                            <div class="rv-timeline-content">
+                              <strong>Bono ${TYPE_LABELS[bo.class_type] || bo.class_type} · ${bo.total_credits} clases</strong>
+                              <span>${boDateStr}</span>
+                              <small>${statusLbl} · ${bo.used_credits}/${bo.total_credits} usadas</small>
+                            </div>
+                          </div>`;
+                        }).join('')}
+                      </div>
+                    </div>`;
+                }
+              } catch {}
+
+              let historyRows = enrollments.slice(0, 20).map(e => {
+                const c = classMap[e.class_id];
+                const typeLbl = c ? (TYPE_LABELS[c.type] || c.type) : '—';
+                const dateL = c ? formatDetailDate(c.date) : '—';
+                const time = c ? `${c.time_start?.slice(0,5)} - ${c.time_end?.slice(0,5)}` : '';
+                const statusMap = { confirmed: ['Confirmado', '#0ea5e9'], paid: ['Pagado', '#166534'], completed: ['Asistió', '#22c55e'], cancelled: ['Cancelado', '#b91c1c'], 'no-show': ['No show', '#92400e'] };
+                const isCurrent = e.id === res.id;
+                const [sLbl, sClr] = statusMap[e.status] || [e.status, '#6b7280'];
+                const attendLbl = e.attendance === true ? '✓ Asistió' : e.attendance === false ? '✗ No asistió' : '';
+                return `<tr style="${isCurrent ? 'background:#fffbeb' : ''}">
+                  <td style="font-size:.82rem">${dateL}</td>
+                  <td style="font-size:.82rem">${typeLbl}</td>
+                  <td style="font-size:.82rem">${time}</td>
+                  <td><span style="font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:20px;background:${sClr}15;color:${sClr}">${sLbl}</span></td>
+                  <td style="font-size:.78rem;color:#6b7280">${attendLbl}</td>
+                </tr>`;
+              }).join('');
+
+              historyEl.innerHTML = `
+                <div class="rv-info-card" style="padding:24px">
+                  <h4 style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:0 0 12px">Historial del cliente</h4>
+                  <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+                    <div style="flex:1;min-width:100px;padding:12px 16px;background:#f0fdf4;border-radius:10px;text-align:center">
+                      <div style="font-size:1.2rem;font-weight:700;color:#166534">${attended}</div>
+                      <div style="font-size:.72rem;color:#065f46;text-transform:uppercase;letter-spacing:.03em">Asistencias</div>
+                    </div>
+                    <div style="flex:1;min-width:100px;padding:12px 16px;background:#fef2f2;border-radius:10px;text-align:center">
+                      <div style="font-size:1.2rem;font-weight:700;color:#b91c1c">${cancelled}</div>
+                      <div style="font-size:.72rem;color:#991b1b;text-transform:uppercase;letter-spacing:.03em">Cancelaciones</div>
+                    </div>
+                    <div style="flex:1;min-width:100px;padding:12px 16px;background:#f0f9ff;border-radius:10px;text-align:center">
+                      <div style="font-size:1.2rem;font-weight:700;color:#0369a1">${total}</div>
+                      <div style="font-size:.72rem;color:#0c4a6e;text-transform:uppercase;letter-spacing:.03em">Total reservas</div>
+                    </div>
+                  </div>
+                  ${creditHtml}
+                  <div style="margin-top:16px;overflow-x:auto">
+                    <table style="width:100%;border-collapse:collapse;font-family:'Manrope',sans-serif">
+                      <thead>
+                        <tr style="border-bottom:2px solid #e5e7eb">
+                          <th style="text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;padding:8px 6px">Fecha</th>
+                          <th style="text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;padding:8px 6px">Actividad</th>
+                          <th style="text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;padding:8px 6px">Hora</th>
+                          <th style="text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;padding:8px 6px">Estado</th>
+                          <th style="text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;padding:8px 6px">Asistencia</th>
+                        </tr>
+                      </thead>
+                      <tbody>${historyRows}</tbody>
+                    </table>
+                  </div>
+                </div>
+                ${bonoTimelineHtml}`;
+            } catch (err) {
+              historyEl.innerHTML = `<div class="rv-info-card" style="padding:24px"><p style="font-size:.85rem;color:#b91c1c">Error cargando historial: ${err.message}</p></div>`;
+            }
+          })();
+        } else {
+          historyEl.innerHTML = '<div class="rv-info-card" style="padding:24px"><p style="font-size:.85rem;color:#6b7280">Cliente no vinculado — sin historial disponible</p></div>';
+        }
+      }
+    }
+
+    function openAddPaymentModal(res, overlayRef) {
+      // Check for persons with credit balance
+      const personsWithCredit = res.persons.filter(p => p.profileId);
+      let creditOptionHtml = '';
+      if (personsWithCredit.length) {
+        creditOptionHtml = `
+          <div style="margin-top:8px;padding-top:12px;border-top:1px dashed #e5e7eb">
+            <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer">
+              <input type="checkbox" class="rv-pay-use-credit-cb" style="width:16px;height:16px;accent-color:#0f2f39" />
+              Usar saldo a favor del cliente
+            </label>
+            <div class="rv-credit-info-el" style="display:none;margin-top:8px;font-size:.82rem;color:#065f46;background:#ecfdf5;padding:8px 12px;border-radius:6px"></div>
+          </div>`;
+      }
+
+      // Create a high z-index modal instead of using openModal (which renders behind the overlay)
+      const modal = document.createElement('div');
+      modal.className = 'bk-overlay';
+      modal.style.zIndex = '10001';
+      modal.innerHTML = `
+        <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:16px;overflow:hidden">
+          <div class="bk-panel-header" style="background:var(--color-navy,#0f2f39);padding:16px 22px">
+            <div class="bk-header-left" style="display:flex;align-items:center;gap:12px">
+              <button class="bk-close-btn rv-pay-modal-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <span class="bk-header-title" style="font-size:1.1rem">Añadir Pago</span>
+            </div>
+          </div>
+          <div style="padding:24px">
+            <form class="rv-payment-form-el trip-form">
+              <label>Importe</label>
+              <input type="number" class="rv-pay-amount-el" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
+              <label>Método de pago</label>
+              <select name="method" required>
+                <option value="">Seleccionar…</option>
+                <option value="efectivo">Efectivo</option>
+                <option value="tarjeta">Tarjeta</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="voucher">Voucher</option>
+                <option value="saldo">Saldo a favor</option>
+              </select>
+              ${creditOptionHtml}
+              <label>Notas</label>
+              <input type="text" name="notes" placeholder="Opcional" />
+              <button type="submit" class="bk-final-confirm-btn" style="margin-top:12px">Registrar Pago</button>
+            </form>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      modal.querySelector('.rv-pay-modal-close')?.addEventListener('click', () => modal.remove());
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+      // Load credit balance for "saldo" option
+      let clientCreditBalance = 0;
+      let clientProfileId = null;
+      if (personsWithCredit.length) {
+        const firstLinked = personsWithCredit[0];
+        clientProfileId = firstLinked.profileId;
+        supabase.from('profiles').select('credit_balance').eq('id', clientProfileId).single().then(({ data }) => {
+          clientCreditBalance = Number(data?.credit_balance || 0);
+          const creditInfo = modal.querySelector('.rv-credit-info-el');
+          if (creditInfo) creditInfo.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€`;
+        });
+
+        modal.querySelector('.rv-pay-use-credit-cb')?.addEventListener('change', (e) => {
+          const infoEl = modal.querySelector('.rv-credit-info-el');
+          if (infoEl) infoEl.style.display = e.target.checked ? 'block' : 'none';
+          if (e.target.checked) {
+            const amountInput = modal.querySelector('.rv-pay-amount-el');
+            const currentAmount = parseFloat(amountInput.value) || 0;
+            const creditToUse = Math.min(clientCreditBalance, currentAmount);
+            if (creditToUse > 0) {
+              const infoEl2 = modal.querySelector('.rv-credit-info-el');
+              if (infoEl2) infoEl2.textContent = `Saldo disponible: ${clientCreditBalance.toFixed(2)}€ — Se aplicarán ${creditToUse.toFixed(2)}€`;
+            }
+          }
+        });
+      }
+
+      modal.querySelector('.rv-payment-form-el')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const amount = parseFloat(fd.get('amount')) || 0;
+        const method = fd.get('method');
+        const useCredit = modal.querySelector('.rv-pay-use-credit-cb')?.checked;
+
+        if (!method && !useCredit) { showToast('Selecciona un método', 'error'); return; }
+
+        let creditUsed = 0;
+        if (useCredit && clientCreditBalance > 0 && clientProfileId) {
+          creditUsed = Math.min(clientCreditBalance, amount);
+          const newBalance = clientCreditBalance - creditUsed;
+          await supabase.from('profiles').update({ credit_balance: newBalance }).eq('id', clientProfileId);
+        }
+
+        const effectiveMethod = creditUsed >= amount ? 'saldo' : (method || 'saldo');
+
+        // Persist payment to DB
+        await createPayment({
+          reservation_type: 'enrollment',
+          reference_id: res.id,
+          amount,
+          payment_method: effectiveMethod,
+          concept: `Pago reserva ${res.activityLabel || ''}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}`,
+        });
+
+        res.pending = Math.max(0, res.pending - amount);
+        if (res.pending <= 0) res.status = 'paid';
+        res.payments.push({ amount, method: effectiveMethod, creditUsed, date: new Date().toISOString() });
+
+        // Update enrollment status if fully paid
+        if (res.pending <= 0) {
+          await updateEnrollmentStatus(res.id, 'paid').catch(() => {});
+        }
+
+        modal.remove();
+        showToast(`Pago de ${amount.toFixed(2)}€ registrado${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ de saldo)` : ` (${effectiveMethod})`}`, 'success');
+        renderDetail(); // renderDetail() already calls bindDetailEvents()
+      });
+    }
+
+    function openBonoPayModal(res, overlayRef, personId, bonoId, pendingAmount) {
+      const pc = res.personCredits?.[personId];
+      const bono = pc?.allBonos?.find(b => b.id === bonoId);
+      if (!bono) return;
+
+      // Create a high z-index modal instead of using openModal (which renders behind the overlay)
+      const modal = document.createElement('div');
+      modal.className = 'bk-overlay';
+      modal.style.zIndex = '10001';
+      modal.innerHTML = `
+        <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:16px;overflow:hidden">
+          <div class="bk-panel-header" style="background:var(--color-navy,#0f2f39);padding:16px 22px">
+            <div class="bk-header-left" style="display:flex;align-items:center;gap:12px">
+              <button class="bk-close-btn rv-bono-modal-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <span class="bk-header-title" style="font-size:1.1rem">Pagar Bono</span>
+            </div>
+          </div>
+          <div style="padding:24px">
+            <form class="rv-bono-pay-form-el trip-form">
+              <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;margin-bottom:16px">
+                <div style="font-size:.85rem;color:#92400e;font-weight:600">${TYPE_LABELS[bono.class_type] || bono.class_type} · ${bono.total_credits} clases</div>
+                <div style="font-size:.82rem;color:#92400e;margin-top:4px">Pagado: ${bono.totalPaidReal.toFixed(2)}€ / ${bono.expectedPrice.toFixed(2)}€ · <strong>Debe: ${pendingAmount.toFixed(2)}€</strong></div>
+              </div>
+              <label>Importe</label>
+              <input type="number" name="amount" step="0.01" value="${pendingAmount.toFixed(2)}" required />
+              <label>Método de pago</label>
+              <select name="method" required>
+                <option value="">Seleccionar…</option>
+                <option value="efectivo">Efectivo</option>
+                <option value="tarjeta">Tarjeta</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="voucher">Voucher</option>
+                <option value="saldo">Saldo a favor</option>
+              </select>
+              <button type="submit" class="bk-final-confirm-btn" style="margin-top:12px">Registrar Pago</button>
+            </form>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      modal.querySelector('.rv-bono-modal-close')?.addEventListener('click', () => modal.remove());
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+      modal.querySelector('.rv-bono-pay-form-el')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const amount = parseFloat(fd.get('amount')) || 0;
+        const method = fd.get('method');
+        if (!method) { showToast('Selecciona un método', 'error'); return; }
+
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true; btn.textContent = 'Procesando…';
+
+        try {
+          // Update bono total_paid in DB
+          const newPaid = bono.totalPaidReal + amount;
+          await supabase.from('bonos').update({
+            total_paid: newPaid,
+            updated_at: new Date().toISOString(),
+          }).eq('id', bonoId);
+
+          // If paying with saldo, deduct from profile
+          if (method === 'saldo') {
+            const person = res.persons.find(p => p.id === personId);
+            if (person?.profileId) {
+              const { data: profile } = await supabase.from('profiles').select('credit_balance').eq('id', person.profileId).single();
+              const currentBalance = Number(profile?.credit_balance || 0);
+              await supabase.from('profiles').update({ credit_balance: Math.max(0, currentBalance - amount) }).eq('id', person.profileId);
+            }
+          }
+
+          // Create payment record
+          await createPayment({
+            reservation_type: 'enrollment',
+            reference_id: bonoId,
+            amount,
+            payment_method: method,
+            concept: `Pago bono ${TYPE_LABELS[bono.class_type] || bono.class_type}`,
+          });
+
+          // Update local bono data
+          bono.totalPaidReal = newPaid;
+          bono.pendingAmount = Math.max(0, Math.round((bono.expectedPrice - newPaid) * 100) / 100);
+          bono.isFullyPaid = bono.pendingAmount <= 0;
+
+          modal.remove();
+          showToast(`Pago de ${amount.toFixed(2)}€ registrado para el bono`, 'success');
+          renderDetail();
+          if (overlayRef) bindDetailEvents(overlayRef, res);
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+          btn.disabled = false; btn.textContent = 'Registrar Pago del Bono';
+        }
+      });
+    }
+
+    function openUseCreditModal(res, overlayRef, profileId, balance, personName) {
+      // Create a high z-index modal instead of using openModal (which renders behind the overlay)
+      const modal = document.createElement('div');
+      modal.className = 'bk-overlay';
+      modal.style.zIndex = '10001';
+      modal.innerHTML = `
+        <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:16px;overflow:hidden">
+          <div class="bk-panel-header" style="background:var(--color-navy,#0f2f39);padding:16px 22px">
+            <div class="bk-header-left" style="display:flex;align-items:center;gap:12px">
+              <button class="bk-close-btn rv-credit-modal-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <span class="bk-header-title" style="font-size:1.1rem">Usar Saldo a Favor</span>
+            </div>
+          </div>
+          <div style="padding:24px">
+            <form class="rv-use-credit-form-el trip-form">
+              <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:16px">
+                <div style="font-size:.88rem;color:#065f46;font-weight:700">${personName}</div>
+                <div style="font-size:.88rem;color:#065f46;margin-top:4px">Saldo disponible: <strong>${balance.toFixed(2)}€</strong></div>
+              </div>
+              <label>Importe a aplicar</label>
+              <input type="number" name="amount" step="0.01" value="${Math.min(balance, res.pending).toFixed(2)}" max="${balance.toFixed(2)}" required />
+              <p style="font-size:.78rem;color:#6b7280;margin:4px 0 0">Pendiente de la reserva: ${res.pending.toFixed(2)}€</p>
+              <button type="submit" class="bk-final-confirm-btn" style="margin-top:12px">Aplicar Saldo</button>
+            </form>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      modal.querySelector('.rv-credit-modal-close')?.addEventListener('click', () => modal.remove());
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+      modal.querySelector('.rv-use-credit-form-el')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const amount = parseFloat(new FormData(e.target).get('amount')) || 0;
+        if (amount > balance) { showToast('El importe supera el saldo disponible', 'error'); return; }
+        if (amount <= 0) { showToast('Introduce un importe válido', 'error'); return; }
+
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true; btn.textContent = 'Aplicando…';
+
+        try {
+          await supabase.from('profiles').update({ credit_balance: Math.max(0, balance - amount) }).eq('id', profileId);
+
+          // Persist payment to DB
+          await createPayment({
+            reservation_type: 'enrollment',
+            reference_id: res.id,
+            amount,
+            payment_method: 'saldo',
+            concept: `Saldo a favor de ${personName} (${amount.toFixed(2)}€)`,
+          });
+
+          res.pending = Math.max(0, res.pending - amount);
+          if (res.pending <= 0) res.status = 'paid';
+          res.payments.push({ amount, method: 'saldo', creditUsed: amount, date: new Date().toISOString() });
+
+          // Update enrollment status if fully paid
+          if (res.pending <= 0) {
+            await updateEnrollmentStatus(res.id, 'paid').catch(() => {});
+          }
+
+          modal.remove();
+          showToast(`${amount.toFixed(2)}€ de saldo aplicados a la reserva`, 'success');
+          renderDetail();
+          if (overlayRef) bindDetailEvents(overlayRef, res);
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+          btn.disabled = false; btn.textContent = 'Aplicar Saldo';
+        }
+      });
+    }
+
+    renderDetail();
   }
 
   // ======== NEW SESSION MODAL ========
@@ -3211,14 +3537,17 @@ export async function renderCalendario(container) {
 
       overlay.innerHTML = `
         <div class="bk-panel bk-panel-fullscreen">
-          <div class="bk-panel-header" style="background:#0ea5e9">
-            <button class="bk-close-btn" id="rd-close">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-            <div class="bk-header-left"><span class="bk-header-title">Ficha de Reserva</span></div>
-            <div class="bk-header-right" style="display:flex;align-items:center;gap:12px">
-              <div style="text-align:center"><div style="font-size:.65rem;text-transform:uppercase;opacity:.7">Total</div><div style="font-size:1.1rem;font-weight:700">${totalAmount.toFixed(2)}€</div></div>
-              <div style="text-align:center"><div style="font-size:.65rem;text-transform:uppercase;opacity:.7">Pendiente</div><div style="font-size:1.1rem;font-weight:700;color:${getPending() > 0 ? '#fca5a5' : '#86efac'}">${getPending().toFixed(2)}€</div></div>
+          <div class="bk-panel-header" style="background:linear-gradient(135deg,#0ea5e9,#0ea5e9dd)">
+            <div class="bk-header-left" style="display:flex;align-items:center;gap:14px">
+              <button class="bk-close-btn" id="rd-close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <span class="bk-header-title">Ficha de Reserva</span>
+              <span style="font-family:'Space Grotesk',sans-serif;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.7;background:rgba(255,255,255,.15);padding:3px 10px;border-radius:5px">${equipName}</span>
+            </div>
+            <div class="bk-header-right" style="display:flex;align-items:center;gap:16px">
+              <div class="bk-header-total"><small>Total</small><span>${totalAmount.toFixed(2)}€</span></div>
+              <div class="bk-header-total"><small>Pendiente</small><span style="color:${getPending() > 0 ? '#fca5a5' : '#86efac'}">${getPending().toFixed(2)}€</span></div>
             </div>
           </div>
           <div class="bk-panel-body" style="padding:0">
@@ -3325,7 +3654,7 @@ export async function renderCalendario(container) {
                   <input type="number" name="amount" step="0.01" min="0" value="${pending.toFixed(2)}" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:.9rem;font-family:inherit" required />
                 </div>
               </div>
-              <button type="submit" style="width:100%;padding:12px;background:#22c55e;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer">Guardar pago</button>
+              <button type="submit" class="bk-final-confirm-btn" style="margin-top:0">Guardar pago</button>
             </form>
           </div>
         </div>`;
@@ -3470,650 +3799,6 @@ export async function renderCalendario(container) {
     renderRdPanel();
   }
 
-  // ======== ENROLLMENT DETAIL (click on client in calendar) ========
-  function openEnrollmentDetail(cls, enrollmentId, clientName, isPaid) {
-    const color = TYPE_COLORS[cls.type] || '#0f2f39';
-    const label = TYPE_LABELS[cls.type] || cls.title;
-    const timeStart = cls.time_start?.slice(0, 5) || '--:--';
-    const timeEnd = cls.time_end?.slice(0, 5) || '--:--';
-    const dateLabel = shortDateLabel(cls.date);
-    let currentStatus = isPaid ? 'paid' : 'confirmed';
-    const packPrice = getPackPrice(cls.type, 1, Number(cls.price) || 0);
-    let edActiveTab = 'resumen';
-
-    // Find the enrollment data to get user_id
-    const enrollments = enrollmentsCache[cls.id] || [];
-    const enrollment = enrollments.find(e => e.id === enrollmentId);
-    const userId = enrollment?.user_id || null;
-
-    // Client history cache
-    let clientHistory = null;
-
-    // Available bonos for "Pagar con crédito"
-    let edBonos = null;
-
-    // All user bonos for this class type (for info display)
-    let edUserBonos = null;
-    let edLinkedBono = null;
-
-    // Payments tracking
-    let edPayments = null;
-    function getEdTotalPaid() { return (edPayments || []).reduce((s, p) => s + Number(p.amount || 0), 0); }
-    function getEdPending() { return Math.max(0, packPrice - getEdTotalPaid()); }
-
-    const overlay = document.createElement('div');
-    overlay.className = 'bk-overlay bk-overlay-fullscreen';
-    document.body.appendChild(overlay);
-
-    function getStatusLabel() { return currentStatus === 'paid' ? 'Pagado' : currentStatus === 'partial' ? 'Anticipo' : 'Pendiente'; }
-    function getStatusColor() { return currentStatus === 'paid' ? '#166534' : currentStatus === 'partial' ? '#92400e' : '#b91c1c'; }
-    function getStatusBg() { return currentStatus === 'paid' ? '#dcfce7' : currentStatus === 'partial' ? '#fff7ed' : '#fee2e2'; }
-
-    function renderEdPanel() {
-      const statusLabel = getStatusLabel();
-      const statusColor = getStatusColor();
-      const statusBg = getStatusBg();
-
-      // Tab content
-      let tabContent = '';
-      if (edActiveTab === 'resumen') {
-        tabContent = `
-          <div class="rv-summary-header">
-            <h2 class="rv-title">Reserva de ${clientName} <span class="rv-status-badge" style="background:${statusBg};color:${statusColor}">${statusLabel}</span></h2>
-          </div>
-          <div class="rv-info-card">
-            <div class="rv-info-top">
-              <div class="rv-info-top-left">
-                <div class="rv-info-id">Enrollment ${enrollmentId.slice(0, 12)}...</div>
-              </div>
-              <div class="rv-info-top-right">
-                <div class="rv-info-stat">
-                  <label>Total</label>
-                  <span class="rv-info-amount">${packPrice.toFixed(2)}€</span>
-                </div>
-                <div class="rv-info-stat">
-                  <label>Estado</label>
-                  <span class="rv-info-amount" style="color:${statusColor}">${statusLabel}</span>
-                </div>
-              </div>
-            </div>
-            <div class="rv-info-bottom">
-              <div class="rv-info-detail"><label>Cliente</label><strong>${clientName}</strong></div>
-              <div class="rv-info-detail"><label>Actividad</label><div>${label}</div></div>
-              <div class="rv-info-detail"><label>Fecha y hora</label><div>${dateLabel} · ${timeStart} - ${timeEnd}</div></div>
-            </div>
-          </div>
-          <div class="rv-person-card">
-            <div class="rv-person-header">
-              <div class="rv-person-avatar" style="background:${color}">${(clientName || '?')[0].toUpperCase()}</div>
-              <div class="rv-person-info"><span class="rv-person-name">${clientName}</span></div>
-            </div>
-            <table class="rv-sessions-table">
-              <thead><tr><th>Fecha</th><th>Actividad</th><th>Horario</th><th>Estado</th></tr></thead>
-              <tbody>
-                <tr>
-                  <td>${dateLabel}</td><td>${label}</td><td>${timeStart} - ${timeEnd}</td>
-                  <td><span style="padding:2px 8px;border-radius:4px;font-size:.78rem;background:${statusBg};color:${statusColor}">${statusLabel}</span></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          ${(() => {
-            // Bono & payment summary
-            if (!userId) return '';
-            if (edUserBonos === null) {
-              loadEdUserBonos();
-              return '<div class="rv-info-card" style="padding:16px;margin-top:16px"><p style="color:var(--color-muted);font-size:.85rem">Cargando información de bonos...</p></div>';
-            }
-            if (!edUserBonos.length) return '';
-
-            const totalPaid = getEdTotalPaid();
-            const linkedBono = edLinkedBono;
-
-            let html = '<div style="margin-top:16px">';
-            html += '<h3 style="font-family:Space Grotesk,sans-serif;font-size:.82rem;text-transform:uppercase;color:var(--color-navy);margin:0 0 10px">Bonos del cliente — ' + label + '</h3>';
-
-            // Show each bono
-            html += edUserBonos.map(b => {
-              const remaining = b.total_credits - b.used_credits;
-              const paid = b.totalPaidReal;
-              const isLinked = enrollment?.bono_id === b.id;
-              const pct = b.total_credits > 0 ? Math.round((b.used_credits / b.total_credits) * 100) : 0;
-              const borderColor = isLinked ? '#0ea5e9' : '#e2e8f0';
-
-              return '<div style="padding:12px 16px;border:' + (isLinked ? '2px' : '1px') + ' solid ' + borderColor + ';border-radius:10px;margin-bottom:8px;background:#fff">' +
-                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
-                  '<div><strong style="font-size:.88rem">Bono ' + b.total_credits + ' clases</strong>' +
-                    (isLinked ? ' <span style="font-size:.7rem;padding:2px 8px;background:#dbeafe;color:#1d4ed8;border-radius:4px;font-weight:700">VINCULADO</span>' : '') +
-                    (b.status === 'active' ? ' <span style="font-size:.7rem;padding:2px 8px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">ACTIVO</span>' : ' <span style="font-size:.7rem;padding:2px 8px;background:#f3f4f6;color:#6b7280;border-radius:4px">' + b.status.toUpperCase() + '</span>') +
-                  '</div>' +
-                  '<div>' + (b.isFullyPaid
-                    ? '<span style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:6px;background:#dcfce7;color:#166534">PAGADO</span>'
-                    : '<span style="font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:6px;background:#fef3c7;color:#92400e">DEBE ' + b.pendingAmount.toFixed(2) + '\u20ac</span>'
-                  ) + '</div>' +
-                '</div>' +
-                '<div style="display:flex;gap:16px;font-size:.78rem;color:var(--color-muted)">' +
-                  '<span>Cr\u00e9ditos: ' + remaining + '/' + b.total_credits + ' restantes</span>' +
-                  '<span>Pagado: ' + paid.toFixed(2) + '\u20ac de ' + b.expectedPrice.toFixed(2) + '\u20ac</span>' +
-                '</div>' +
-                '<div style="margin-top:6px;height:4px;background:#f1f5f9;border-radius:2px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:' + (b.isFullyPaid ? '#22c55e' : '#f59e0b') + ';border-radius:2px"></div></div>' +
-              '</div>';
-            }).join('');
-
-            // Summary
-            const totalBonosPaid = edUserBonos.reduce((s, b) => s + b.totalPaidReal, 0);
-            const totalBonosExpected = edUserBonos.reduce((s, b) => s + b.expectedPrice, 0);
-            const totalBonoPending = Math.max(0, totalBonosExpected - totalBonosPaid);
-            const totalCreditsRemaining = edUserBonos.filter(b => b.status === 'active').reduce((s, b) => s + (b.total_credits - b.used_credits), 0);
-
-            html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">' +
-              '<div style="padding:10px;background:#f8fafc;border-radius:8px;text-align:center"><div style="font-size:.68rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:2px">Cr\u00e9ditos</div><div style="font-size:1rem;font-weight:700;color:var(--color-navy)">' + totalCreditsRemaining + '</div></div>' +
-              '<div style="padding:10px;background:#f8fafc;border-radius:8px;text-align:center"><div style="font-size:.68rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:2px">Total pagado</div><div style="font-size:1rem;font-weight:700;color:#166534">' + totalBonosPaid.toFixed(2) + '\u20ac</div></div>' +
-              '<div style="padding:10px;background:#f8fafc;border-radius:8px;text-align:center"><div style="font-size:.68rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:2px">Pendiente</div><div style="font-size:1rem;font-weight:700;color:' + (totalBonoPending > 0 ? '#b91c1c' : '#166534') + '">' + totalBonoPending.toFixed(2) + '\u20ac</div></div>' +
-            '</div>';
-
-            html += '</div>';
-            return html;
-          })()}`;
-      } else if (edActiveTab === 'datos') {
-        if (!userId) {
-          tabContent = `
-            <h2 class="rv-title">Datos del Cliente</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <p style="color:var(--color-muted)">Este es un cliente sin cuenta (invitado).</p>
-              <p><strong>Nombre:</strong> ${clientName}</p>
-            </div>`;
-        } else if (clientHistory) {
-          const p = clientHistory.profile;
-          const enr = clientHistory.enrollments || [];
-          const rentals = clientHistory.rentals || [];
-          tabContent = `
-            <h2 class="rv-title">Datos del Cliente</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <div class="bk-contact-fields">
-                <div class="bk-contact-field"><label>Nombre</label><input type="text" value="${p?.full_name || clientName}" readonly /></div>
-                <div class="bk-contact-field"><label>Teléfono</label><input type="text" value="${p?.phone || '—'}" readonly /></div>
-                <div class="bk-contact-field"><label>Rol</label><input type="text" value="${p?.role || 'client'}" readonly /></div>
-                <div class="bk-contact-field"><label>Registrado</label><input type="text" value="${p?.created_at ? new Date(p.created_at).toLocaleDateString('es-ES') : '—'}" readonly /></div>
-              </div>
-            </div>
-            ${enr.length ? `
-            <h3 class="rv-title" style="margin-top:24px">Historial de Clases (${enr.length})</h3>
-            <div class="rv-info-card" style="padding:0;overflow:hidden">
-              <div class="table-wrap"><table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Horario</th><th>Estado</th></tr></thead>
-                <tbody>${enr.map(e => {
-                  const sc = e.surf_class || {};
-                  return `<tr>
-                    <td>${sc.date ? shortDateLabel(sc.date) : '—'}</td>
-                    <td>${TYPE_LABELS[sc.type] || sc.type || '—'}</td>
-                    <td>${sc.time_start?.slice(0,5) || '—'} - ${sc.time_end?.slice(0,5) || '—'}</td>
-                    <td><span style="padding:2px 8px;border-radius:4px;font-size:.78rem;background:${e.status === 'paid' ? '#dcfce7' : '#fee2e2'};color:${e.status === 'paid' ? '#166534' : '#b91c1c'}">${e.status === 'paid' ? 'Pagado' : e.status}</span></td>
-                  </tr>`;
-                }).join('')}</tbody>
-              </table></div>
-            </div>` : ''}
-            ${rentals.length ? `
-            <h3 class="rv-title" style="margin-top:24px">Alquileres (${rentals.length})</h3>
-            <div class="rv-info-card" style="padding:0;overflow:hidden">
-              <div class="table-wrap"><table>
-                <thead><tr><th>Material</th><th>Periodo</th><th>Talla</th><th>Estado</th></tr></thead>
-                <tbody>${rentals.map(r => `<tr>
-                  <td>${r.equipment?.name || '—'}</td>
-                  <td>${r.date_start} — ${r.date_end}</td>
-                  <td>${r.size || '—'}</td>
-                  <td>${r.status || '—'}</td>
-                </tr>`).join('')}</tbody>
-              </table></div>
-            </div>` : ''}`;
-        } else {
-          tabContent = `
-            <h2 class="rv-title">Datos del Cliente</h2>
-            <div class="rv-info-card" style="padding:24px">
-              <p style="color:var(--color-muted)">Cargando historial del cliente...</p>
-            </div>`;
-          // Fetch client history
-          loadClientHistory();
-        }
-      } else if (edActiveTab === 'pagos') {
-        const paymentsList = edPayments || [];
-        const totalPaid = getEdTotalPaid();
-        const displayPending = getEdPending();
-        tabContent = `
-          <h2 class="rv-title">Pagos</h2>
-          <div class="rv-info-card" style="padding:0;overflow:hidden">
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #f1f5f9">
-              <div style="padding:16px;text-align:center"><div style="font-size:.72rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:4px">Subtotal</div><div style="font-size:1.1rem;font-weight:600">${packPrice.toFixed(2)}€</div></div>
-              <div style="padding:16px;text-align:center"><div style="font-size:.72rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:4px">Descuento</div><div style="font-size:1.1rem;font-weight:600;color:#f59e0b">0.00€</div></div>
-              <div style="padding:16px;text-align:center"><div style="font-size:.72rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:4px">Total</div><div style="font-size:1.1rem;font-weight:600">${packPrice.toFixed(2)}€</div></div>
-              <div style="padding:16px;text-align:center"><div style="font-size:.72rem;text-transform:uppercase;color:var(--color-muted);margin-bottom:4px">Pendiente</div><div style="font-size:1.1rem;font-weight:600;color:${displayPending > 0 ? '#b91c1c' : '#166534'}">${displayPending.toFixed(2)}€</div></div>
-            </div>
-            ${paymentsList.length ? `
-            <table style="width:100%;border-collapse:collapse">
-              <thead><tr style="background:#f8fafc">
-                <th style="padding:10px 16px;text-align:left;font-size:.72rem;text-transform:uppercase;color:var(--color-muted);font-weight:600">Concepto</th>
-                <th style="padding:10px 16px;text-align:left;font-size:.72rem;text-transform:uppercase;color:var(--color-muted);font-weight:600">Tipo</th>
-                <th style="padding:10px 16px;text-align:left;font-size:.72rem;text-transform:uppercase;color:var(--color-muted);font-weight:600">Fecha</th>
-                <th style="padding:10px 16px;text-align:right;font-size:.72rem;text-transform:uppercase;color:var(--color-muted);font-weight:600">Total</th>
-                <th style="padding:10px 16px;width:60px"></th>
-              </tr></thead>
-              <tbody>${paymentsList.map(p => `
-                <tr style="border-top:1px solid #f1f5f9">
-                  <td style="padding:10px 16px">${p.concept || 'Pago clase'}</td>
-                  <td style="padding:10px 16px;text-transform:capitalize">${p.payment_method}</td>
-                  <td style="padding:10px 16px">${new Date(p.payment_date).toLocaleString('es-ES')}</td>
-                  <td style="padding:10px 16px;text-align:right;font-weight:600">${Number(p.amount).toFixed(2)}€</td>
-                  <td style="padding:10px 16px;text-align:right"><button class="ed-delete-payment" data-pid="${p.id}" style="background:none;border:none;cursor:pointer;color:#b91c1c" title="Eliminar pago"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></td>
-                </tr>`).join('')}
-              </tbody>
-            </table>` : `<div style="padding:24px;text-align:center;color:var(--color-muted)">No hay pagos registrados</div>`}
-          </div>
-          <button class="btn ed-add-payment-btn" style="margin-top:16px;background:#22c55e;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600">Añadir pago</button>
-          ${!enrollment?.bono_id ? (() => {
-            if (edBonos === null) return '<div style="margin-top:16px;padding:16px;background:#f0f9ff;border-radius:8px;color:var(--color-muted);font-size:.85rem">Cargando créditos disponibles...</div>';
-            if (!edBonos.length) return '';
-            const totalCredits = edBonos.reduce((s, b) => s + (b.total_credits - b.used_credits), 0);
-            const bestBono = edBonos.find(b => (b.total_credits - b.used_credits) >= 1) || edBonos[0];
-            const typeLabel = TYPE_LABELS[cls.type] || cls.type;
-            return '<div style="margin-top:20px;padding:16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px">' +
-              '<h4 style="margin:0 0 8px;font-family:Space Grotesk,sans-serif;font-size:.82rem;text-transform:uppercase;color:#166534">Pagar con cr\u00e9dito</h4>' +
-              '<p style="font-size:.82rem;color:#15803d;margin:0 0 12px">El cliente tiene <strong>' + totalCredits + ' cr\u00e9ditos</strong> de ' + typeLabel + ' disponibles.</p>' +
-              '<button class="ed-pay-with-credit" data-bono-id="' + bestBono.id + '" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;background:#fff;border:1px solid #86efac;border-radius:8px;cursor:pointer;font-family:inherit;transition:background .15s">' +
-                '<div style="text-align:left"><div style="font-weight:600;font-size:.9rem;color:#0f2f39">' + typeLabel + '</div><div style="font-size:.78rem;color:var(--color-muted)">' + totalCredits + ' cr\u00e9ditos disponibles en total</div></div>' +
-                '<span style="background:#22c55e;color:#fff;padding:6px 14px;border-radius:6px;font-size:.8rem;font-weight:600;white-space:nowrap">Usar 1 cr\u00e9dito</span></button>' +
-            '</div>';
-          })() : '<div style="margin-top:16px;padding:12px 16px;background:#f0fdf4;border-radius:8px;font-size:.85rem;color:#166534"><strong>Pagado con cr\u00e9dito</strong> — Bono vinculado: ' + (enrollment.bono_id?.slice(0, 8) || '') + '...</div>'}`;
-        if (!edPayments) loadEdPayments();
-        if (edBonos === null && !enrollment?.bono_id) loadEdBonos();
-      } else if (edActiveTab === 'historico') {
-        const timeline = [];
-        if (enrollment?.created_at) timeline.push({ date: enrollment.created_at, label: 'Inscripción creada', color: '#22c55e' });
-        if (edPayments?.length) {
-          edPayments.forEach(p => timeline.push({ date: p.payment_date, label: `Pago: ${Number(p.amount).toFixed(2)}€ (${p.payment_method})${p.concept ? ' — ' + p.concept : ''}`, color: '#22c55e' }));
-        } else if (!edPayments) { loadEdPayments(); }
-        timeline.sort((a, b) => new Date(a.date) - new Date(b.date));
-        tabContent = `
-          <h2 class="rv-title">Histórico</h2>
-          <div class="rv-info-card" style="padding:24px">
-            <div class="rv-timeline">
-              ${timeline.map(t => `
-                <div class="rv-timeline-item">
-                  <div class="rv-timeline-dot" style="background:${t.color}"></div>
-                  <div class="rv-timeline-content">
-                    <strong>${t.label}</strong>
-                    <span>${new Date(t.date).toLocaleString('es-ES')}</span>
-                  </div>
-                </div>`).join('')}
-            </div>
-          </div>`;
-      }
-
-      overlay.innerHTML = `
-        <div class="bk-panel bk-panel-fullscreen">
-          <div class="bk-panel-header" style="background:${color}">
-            <button class="bk-close-btn" id="ed-close">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-            <div class="bk-header-left"><span class="bk-header-title">Ficha de Reserva</span></div>
-            <div class="bk-header-right" style="display:flex;align-items:center;gap:12px">
-              <div style="text-align:center"><div style="font-size:.65rem;text-transform:uppercase;opacity:.7">Total</div><div style="font-size:1.1rem;font-weight:700">${packPrice.toFixed(2)}€</div></div>
-              <div style="text-align:center"><div style="font-size:.65rem;text-transform:uppercase;opacity:.7">Pendiente</div><div style="font-size:1.1rem;font-weight:700;color:${getEdPending() > 0 ? '#fca5a5' : '#86efac'}">${getEdPending().toFixed(2)}€</div></div>
-            </div>
-          </div>
-          <div class="bk-panel-body" style="padding:0">
-            <div class="rv-layout">
-              <nav class="rv-sidebar">
-                <a class="rv-nav-item ${edActiveTab === 'resumen' ? 'active' : ''}" data-tab="resumen">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                  Resumen
-                </a>
-                <div class="rv-nav-group">Cliente</div>
-                <a class="rv-nav-item ${edActiveTab === 'datos' ? 'active' : ''}" data-tab="datos">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                  Datos del comprador
-                </a>
-                <div class="rv-nav-group">Gestión</div>
-                <a class="rv-nav-item ${edActiveTab === 'pagos' ? 'active' : ''}" data-tab="pagos">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                  Pagos
-                </a>
-                <a class="rv-nav-item ${edActiveTab === 'historico' ? 'active' : ''}" data-tab="historico">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  Histórico
-                </a>
-              </nav>
-              <main class="rv-main" id="ed-main">${tabContent}</main>
-              <aside class="rv-actions">
-                <button class="rv-action-link danger" id="ed-cancel">
-                  <span>Cancelar</span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                </button>
-                <button class="rv-action-link ${currentStatus === 'paid' ? '' : 'danger'}" id="ed-toggle-pay">
-                  <span>${currentStatus === 'paid' ? 'Marcar pendiente' : 'Marcar pagado'}</span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-                </button>
-                <button class="rv-action-link" id="ed-move">
-                  <span>Mover a otra sesión</span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/></svg>
-                </button>
-                <button class="rv-action-link ed-add-payment-btn" style="color:#22c55e">
-                  <span>Añadir pago</span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-                </button>
-              </aside>
-            </div>
-          </div>
-        </div>`;
-
-      bindEdEvents();
-    }
-
-    async function loadClientHistory() {
-      if (!userId) return;
-      try {
-        const [profileRes, enrollRes, rentalRes] = await Promise.all([
-          supabase.from('profiles').select('*').eq('id', userId).single(),
-          supabase.from('class_enrollments').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(20),
-          supabase.from('equipment_reservations').select('*, rental_equipment(name, type)').eq('user_id', userId).order('created_at', { ascending: false }).limit(20),
-        ]);
-
-        const enrData = enrollRes.data || [];
-        // Fetch class details for enrollments
-        const classIds = [...new Set(enrData.filter(e => e.class_id).map(e => e.class_id))];
-        let classesMap = {};
-        if (classIds.length) {
-          const { data: classes } = await supabase.from('surf_classes').select('*').in('id', classIds);
-          if (classes) classes.forEach(c => { classesMap[c.id] = c; });
-        }
-
-        clientHistory = {
-          profile: profileRes.data,
-          enrollments: enrData.map(e => ({ ...e, surf_class: classesMap[e.class_id] || null })),
-          rentals: (rentalRes.data || []).map(r => ({ ...r, equipment: r.rental_equipment })),
-        };
-        renderEdPanel();
-      } catch (err) {
-        console.warn('Error loading client history:', err);
-      }
-    }
-
-    async function loadEdPayments() {
-      try {
-        edPayments = await fetchPayments('enrollment', enrollmentId);
-        // Auto-update status based on payments
-        const totalPaid = getEdTotalPaid();
-        if (totalPaid >= packPrice && currentStatus !== 'paid') {
-          currentStatus = 'paid';
-          await updateEnrollmentStatus(enrollmentId, 'paid').catch(() => {});
-        } else if (totalPaid > 0 && totalPaid < packPrice && currentStatus !== 'partial') {
-          currentStatus = 'partial';
-          await updateEnrollmentStatus(enrollmentId, 'partial').catch(() => {});
-        }
-        renderEdPanel();
-      } catch (err) { console.warn('Error loading enrollment payments:', err); }
-    }
-
-    async function loadEdBonos() {
-      if (!userId) { edBonos = []; return; }
-      try {
-        const { data } = await supabase
-          .from('bonos')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('status', 'active')
-          .eq('class_type', cls.type)
-          .gt('expires_at', new Date().toISOString());
-        edBonos = (data || []).filter(b => b.used_credits < b.total_credits);
-        renderEdPanel();
-      } catch (err) { console.warn('Error loading bonos:', err); edBonos = []; }
-    }
-
-    async function loadEdUserBonos() {
-      if (!userId) { edUserBonos = []; return; }
-      try {
-        const { data } = await supabase
-          .from('bonos')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('class_type', cls.type)
-          .order('created_at', { ascending: false });
-        edUserBonos = (data || []).map(b => {
-          const expectedPrice = getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
-          // If total_paid is 0 but bono was bought online (has order_id), at least the deposit was paid
-          const deposit = DEPOSIT[b.class_type] || 15;
-          const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
-          return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: Math.max(0, expectedPrice - paid), isFullyPaid: paid >= expectedPrice };
-        });
-        // If enrollment is linked to a bono, cache it
-        if (enrollment?.bono_id) {
-          edLinkedBono = edUserBonos.find(b => b.id === enrollment.bono_id) || null;
-        }
-        renderEdPanel();
-      } catch (err) { console.warn('Error loading user bonos:', err); edUserBonos = []; }
-    }
-
-    function openEdAddPaymentModal() {
-      const pending = getEdPending();
-      const modal = document.createElement('div');
-      modal.className = 'bk-overlay';
-      modal.style.zIndex = '10001';
-      modal.innerHTML = `
-        <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:12px;overflow:hidden">
-          <div class="bk-panel-header" style="background:#22c55e;padding:16px 20px">
-            <button class="bk-close-btn" id="ed-pay-modal-close">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-            <div class="bk-header-left"><span class="bk-header-title" style="font-size:1rem">Añadir pago</span></div>
-          </div>
-          <div style="padding:24px">
-            <form id="ed-add-payment-form">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-                <div>
-                  <label style="display:block;font-size:.75rem;text-transform:uppercase;font-weight:600;color:var(--color-muted);margin-bottom:6px">Concepto</label>
-                  <input type="text" name="concept" placeholder="Clase de surf" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:.9rem;font-family:inherit" />
-                </div>
-                <div>
-                  <label style="display:block;font-size:.75rem;text-transform:uppercase;font-weight:600;color:var(--color-muted);margin-bottom:6px">Tipo</label>
-                  <select name="payment_method" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:.9rem;font-family:inherit;background:#fff">
-                    <option value="efectivo">Efectivo</option>
-                    <option value="tarjeta">Tarjeta</option>
-                    <option value="transferencia">Transferencia</option>
-                    <option value="voucher">Voucher</option>
-                  </select>
-                </div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
-                <div>
-                  <label style="display:block;font-size:.75rem;text-transform:uppercase;font-weight:600;color:var(--color-muted);margin-bottom:6px">Fecha</label>
-                  <input type="datetime-local" name="payment_date" value="${new Date().toISOString().slice(0, 16)}" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:.9rem;font-family:inherit" />
-                </div>
-                <div>
-                  <label style="display:block;font-size:.75rem;text-transform:uppercase;font-weight:600;color:var(--color-muted);margin-bottom:6px">Total (€)</label>
-                  <input type="number" name="amount" step="0.01" min="0" value="${pending.toFixed(2)}" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:.9rem;font-family:inherit" required />
-                </div>
-              </div>
-              <button type="submit" style="width:100%;padding:12px;background:#22c55e;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer">Guardar pago</button>
-            </form>
-          </div>
-        </div>`;
-      document.body.appendChild(modal);
-
-      modal.querySelector('#ed-pay-modal-close')?.addEventListener('click', () => modal.remove());
-      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-
-      modal.querySelector('#ed-add-payment-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        const amount = parseFloat(fd.get('amount'));
-        if (!amount || amount <= 0) { showToast('Introduce un importe válido', 'error'); return; }
-        const btn = e.target.querySelector('button[type="submit"]');
-        btn.disabled = true; btn.textContent = 'Guardando...';
-        try {
-          await createPayment({
-            reservation_type: 'enrollment',
-            reference_id: enrollmentId,
-            amount,
-            payment_method: fd.get('payment_method'),
-            concept: fd.get('concept')?.trim() || null,
-            payment_date: fd.get('payment_date') ? new Date(fd.get('payment_date')).toISOString() : new Date().toISOString(),
-          });
-          edPayments = null; // force reload
-          modal.remove();
-          showToast('Pago registrado', 'success');
-          // Update bono total_paid if enrollment is linked to a bono
-          if (enrollment?.bono_id) {
-            try {
-              const { data: bono } = await supabase.from('bonos').select('total_paid').eq('id', enrollment.bono_id).single();
-              const bonoCurrentPaid = Number(bono?.total_paid || 0);
-              await supabase.from('bonos').update({
-                total_paid: bonoCurrentPaid + amount,
-                updated_at: new Date().toISOString(),
-              }).eq('id', enrollment.bono_id);
-            } catch (err) { console.warn('Error updating bono total_paid:', err); }
-          }
-          // Auto-mark status based on total paid
-          const newTotalPaid = getEdTotalPaid() + amount;
-          if (newTotalPaid >= packPrice && currentStatus !== 'paid') {
-            currentStatus = 'paid';
-            await updateEnrollmentStatus(enrollmentId, 'paid').catch(() => {});
-          } else if (newTotalPaid > 0 && newTotalPaid < packPrice) {
-            currentStatus = 'partial';
-            await updateEnrollmentStatus(enrollmentId, 'partial').catch(() => {});
-          }
-          await loadEdPayments();
-        } catch (err) {
-          showToast('Error: ' + err.message, 'error');
-          btn.disabled = false; btn.textContent = 'Guardar pago';
-        }
-      });
-    }
-
-    function bindEdEvents() {
-      // Close
-      overlay.querySelector('#ed-close')?.addEventListener('click', () => { overlay.remove(); render(); });
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); render(); } });
-
-      // Tab navigation
-      overlay.querySelectorAll('.rv-nav-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-          e.preventDefault();
-          const tab = item.dataset.tab;
-          if (tab) { edActiveTab = tab; renderEdPanel(); }
-        });
-      });
-
-      // Toggle payment
-      const togglePay = async () => {
-        const newStatus = currentStatus === 'paid' ? 'confirmed' : 'paid';
-        try {
-          await updateEnrollmentStatus(enrollmentId, newStatus);
-          currentStatus = newStatus;
-          showToast(newStatus === 'paid' ? 'Marcado como pagado' : 'Marcado como pendiente', 'success');
-          renderEdPanel();
-        } catch (err) { showToast('Error: ' + err.message, 'error'); }
-      };
-      overlay.querySelector('#ed-toggle-pay')?.addEventListener('click', togglePay);
-      overlay.querySelector('#ed-toggle-pay-tab')?.addEventListener('click', togglePay);
-
-      // Cancel
-      overlay.querySelector('#ed-cancel')?.addEventListener('click', async () => {
-        if (!confirm('¿Cancelar esta reserva?')) return;
-        try {
-          await deleteEnrollment(enrollmentId);
-          showToast('Reserva cancelada', 'success');
-          overlay.remove();
-          render();
-        } catch (err) { showToast('Error: ' + err.message, 'error'); }
-      });
-
-      // Add payment buttons (sidebar + pagos tab)
-      overlay.querySelectorAll('.ed-add-payment-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => { e.preventDefault(); openEdAddPaymentModal(); });
-      });
-
-      // Pay with credit buttons
-      overlay.querySelectorAll('.ed-pay-with-credit').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const bonoId = btn.dataset.bonoId;
-          if (!confirm('¿Usar 1 crédito de bono para pagar esta clase?')) return;
-          btn.disabled = true;
-          btn.style.opacity = '0.5';
-          try {
-            // 1. Check bono payment status to determine enrollment status
-            const { data: bonoData } = await supabase.from('bonos').select('*').eq('id', bonoId).single();
-            const bonoExpectedPrice = getPackPrice(cls.type, bonoData?.total_credits || 1, Number(cls.price) || 0);
-            const deposit = DEPOSIT[cls.type] || 15;
-            const bonoPaid = Number(bonoData?.total_paid || 0) || (bonoData?.order_id ? deposit : 0);
-            const bonoFullyPaid = bonoPaid >= bonoExpectedPrice;
-            const newStatus = bonoFullyPaid ? 'paid' : 'partial';
-
-            await supabase.from('class_enrollments').update({
-              bono_id: bonoId,
-              status: newStatus,
-              updated_at: new Date().toISOString(),
-            }).eq('id', enrollmentId);
-            // Update local enrollment ref
-            if (enrollment) { enrollment.bono_id = bonoId; enrollment.status = newStatus; }
-            currentStatus = newStatus;
-
-            // 2. Increment used_credits on the bono
-            const { data: bono } = await supabase.from('bonos').select('used_credits').eq('id', bonoId).single();
-            const newUsed = (Number(bono?.used_credits) || 0) + 1;
-            await supabase.from('bonos').update({
-              used_credits: newUsed,
-              updated_at: new Date().toISOString(),
-            }).eq('id', bonoId);
-
-            showToast('Clase pagada con crédito de bono', 'success');
-            edBonos = null;
-            edUserBonos = null; // force reload
-            renderEdPanel();
-          } catch (err) {
-            showToast('Error: ' + err.message, 'error');
-            btn.disabled = false;
-            btn.style.opacity = '1';
-          }
-        });
-      });
-
-      // Delete payment buttons
-      overlay.querySelectorAll('.ed-delete-payment').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          if (!confirm('¿Eliminar este pago?')) return;
-          try {
-            const pid = btn.dataset.pid;
-            const payment = edPayments?.find(p => p.id === pid);
-            await deletePayment(pid);
-            if (payment) {
-              const removedAmount = Number(payment.amount || 0);
-              // If removing this payment makes total < packPrice, revert to confirmed
-              const remainingPaid = getEdTotalPaid() - removedAmount;
-              if (remainingPaid < packPrice && currentStatus === 'paid') {
-                currentStatus = 'confirmed';
-                await updateEnrollmentStatus(enrollmentId, 'confirmed').catch(() => {});
-              }
-              // Update bono total_paid
-              if (enrollment?.bono_id) {
-                try {
-                  const { data: bono } = await supabase.from('bonos').select('total_paid').eq('id', enrollment.bono_id).single();
-                  const bonoCurrentPaid = Number(bono?.total_paid || 0);
-                  await supabase.from('bonos').update({
-                    total_paid: Math.max(0, bonoCurrentPaid - removedAmount),
-                    updated_at: new Date().toISOString(),
-                  }).eq('id', enrollment.bono_id);
-                } catch (err) { console.warn('Error updating bono total_paid:', err); }
-              }
-            }
-            edPayments = null;
-            showToast('Pago eliminado', 'success');
-            await loadEdPayments();
-          } catch (err) { showToast('Error: ' + err.message, 'error'); }
-        });
-      });
-    }
-
-    renderEdPanel();
-  }
 
   // ======== EDIT SESSION MODAL ========
   function openEditSessionModal(cls) {
