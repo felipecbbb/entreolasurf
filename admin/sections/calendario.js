@@ -13,6 +13,7 @@ import {
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING, DEPOSIT } from '../modules/constants.js';
 import { supabase } from '/lib/supabase.js';
+import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml } from '/lib/shared-constants.js';
 
 // Get pack price for a person: uses tiered pricing, extra sessions beyond max tier use the per-session rate of max tier
 // fallbackPrice is used when no pack pricing exists for the type
@@ -263,7 +264,20 @@ export async function renderCalendario(container) {
           </label>
           <span class="cal-client-name">${name}</span>
           <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+            ${isPaid
+              ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11.5 14.5 16 9.5"/></svg>'
+              : isPartial
+                ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+                : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+            }
+          </span>
+          <span class="cal-client-move-btns">
+            <button class="cal-move-btn" data-dir="prev" data-eid="${e.id}" data-class-id="${c.id}" title="Mover al día anterior">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="cal-move-btn" data-dir="next" data-eid="${e.id}" data-class-id="${c.id}" title="Mover al día siguiente">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
+            </button>
           </span>
         </div>`;
     });
@@ -609,7 +623,7 @@ export async function renderCalendario(container) {
     // Click on client row → open detail panel
     container.querySelectorAll('.cal-client-row').forEach(row => {
       row.addEventListener('click', (e) => {
-        if (e.target.closest('.cal-client-pay-icon') || e.target.closest('.cal-client-attendance') || e.target.closest('.cal-client-drag')) return;
+        if (e.target.closest('.cal-client-pay-icon') || e.target.closest('.cal-client-attendance') || e.target.closest('.cal-client-drag') || e.target.closest('.cal-move-btn')) return;
         const itemType = row.dataset.itemType;
         const clientName = row.dataset.clientName;
 
@@ -716,6 +730,49 @@ export async function renderCalendario(container) {
           const rid = row.dataset.rentalId;
           const reservation = rentalReservations.find(r => r.id === rid);
           if (reservation) openRentalDetail(reservation);
+        }
+      });
+    });
+
+    // Move enrollment between days (← →)
+    container.querySelectorAll('.cal-move-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const dir = btn.dataset.dir; // 'prev' or 'next'
+        const eid = btn.dataset.eid;
+        const classId = btn.dataset.classId;
+        const cls = classes.find(c => c.id === classId);
+        if (!cls) return;
+
+        const clsDate = new Date(cls.date + 'T00:00:00');
+        const targetDate = new Date(clsDate);
+        targetDate.setDate(targetDate.getDate() + (dir === 'next' ? 1 : -1));
+        const targetDateStr = getDateStr(targetDate);
+
+        // Find a class of the same type on the target date
+        const targetClasses = await fetchClassesInRange(targetDateStr, targetDateStr);
+        const targetClass = targetClasses.find(c => c.type === cls.type && c.id !== classId);
+        if (!targetClass) {
+          showToast(`No hay clase de ${TYPE_LABELS[cls.type] || cls.type} el ${shortDateLabel(targetDateStr)}`, 'error');
+          return;
+        }
+
+        // Check capacity
+        const targetEnrollments = await fetchClassEnrollments(targetClass.id);
+        if (targetEnrollments.length >= (targetClass.max_students || 0)) {
+          showToast(`La clase del ${shortDateLabel(targetDateStr)} está llena`, 'error');
+          return;
+        }
+
+        try {
+          await moveEnrollment(eid, targetClass.id);
+          showToast(`Alumno movido al ${shortDateLabel(targetDateStr)}`, 'success');
+          // Clear caches for both classes
+          delete enrollmentsCache[classId];
+          delete enrollmentsCache[targetClass.id];
+          render();
+        } catch (err) {
+          showToast('Error al mover: ' + err.message, 'error');
         }
       });
     });
@@ -951,13 +1008,7 @@ export async function renderCalendario(container) {
                     <label class="bk-field-label">Talla neopreno</label>
                     <select class="bk-field-input bk-talla" data-pid="${p.id}">
                       <option value="" ${!p.tallaNeopreno ? 'selected' : ''}>Seleccionar</option>
-                      <option value="XXS" ${p.tallaNeopreno === 'XXS' ? 'selected' : ''}>XXS</option>
-                      <option value="XS" ${p.tallaNeopreno === 'XS' ? 'selected' : ''}>XS</option>
-                      <option value="S" ${p.tallaNeopreno === 'S' ? 'selected' : ''}>S</option>
-                      <option value="M" ${p.tallaNeopreno === 'M' ? 'selected' : ''}>M</option>
-                      <option value="L" ${p.tallaNeopreno === 'L' ? 'selected' : ''}>L</option>
-                      <option value="XL" ${p.tallaNeopreno === 'XL' ? 'selected' : ''}>XL</option>
-                      <option value="XXL" ${p.tallaNeopreno === 'XXL' ? 'selected' : ''}>XXL</option>
+                      ${WETSUIT_SIZES.map(s => `<option value="${s}" ${p.tallaNeopreno === s ? 'selected' : ''}>${s}</option>`).join('')}
                     </select>
                   </div>
                   <div class="bk-field">
@@ -1298,7 +1349,23 @@ export async function renderCalendario(container) {
     // ======== CHECKOUT PANEL ========
     async function openCheckoutPanel() {
       const totalQty = getTotalQuantity();
-      const subtotal = getTotalPrice();
+      let subtotal = getTotalPrice();
+
+      // Recalculate subtotal excluding sessions covered by credit/bono
+      function recalcSubtotal() {
+        const paidSessions = [];
+        const creditSessions = [];
+        for (const p of persons) {
+          const pc = personCredits[p.id];
+          if (pc?.useCredit && pc.bono) {
+            creditSessions.push(...p.sessions);
+          } else {
+            paidSessions.push(...p.sessions);
+          }
+        }
+        // Price only the non-credit sessions
+        subtotal = getPackPrice(cls.type, paidSessions.length, price);
+      }
 
       // Checkout state
       let discountType = 'percent';
@@ -1416,6 +1483,7 @@ export async function renderCalendario(container) {
       }
 
       function renderCheckout() {
+        recalcSubtotal();
         const discount = getDiscount();
         const total = getTotal();
         const taxIncluded = (total * 21 / 121).toFixed(2); // IVA included in price
@@ -1919,7 +1987,7 @@ export async function renderCalendario(container) {
               discount: getDiscount(),
               totalFinal: total,
               anticipoAmount: cobrarAnticipo ? anticipoAmount : 0,
-              pending: cobrarAnticipo ? Math.max(0, total - anticipoAmount) : total,
+              pending: cobrarAnticipo ? Math.round(Math.max(0, total - anticipoAmount) * 100) / 100 : total,
               paymentMethod,
               cobrarAnticipo,
               crearInvitacion,
@@ -3119,6 +3187,8 @@ export async function renderCalendario(container) {
           <input type="date" name="repeat_until" value="${getEndOfMonthStr(currentDate)}" required />
           <label>Instructor</label>
           <input type="text" name="instructor" placeholder="Opcional" />
+          <label>Público</label>
+          <select name="audience">${audienceOptionsHtml()}</select>
           <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
             <input type="checkbox" name="published" style="width:auto" />
             Publicar inmediatamente
@@ -3144,10 +3214,31 @@ export async function renderCalendario(container) {
             <label>Precio personalizado (€)</label>
             <input type="number" name="custom_price" id="nr-custom-price" step="0.01" min="0" value="0" />
           </div>
-          <label>Nombre del cliente</label>
-          <input type="text" name="guest_name" placeholder="Nombre completo" required />
-          <label>Teléfono / Email (opcional)</label>
-          <input type="text" name="guest_contact" placeholder="Teléfono o email" />
+          <label>Nombre</label>
+          <input type="text" name="guest_name" placeholder="Nombre" required />
+          <label>Apellidos</label>
+          <input type="text" name="guest_last_name" placeholder="Apellidos" />
+          <label>Email</label>
+          <input type="email" name="guest_email" placeholder="email@ejemplo.com" />
+          <label>Teléfono</label>
+          <input type="tel" name="guest_phone" placeholder="+34 600 000 000" />
+          <label>Talla neopreno</label>
+          <select name="wetsuit_size">${wetsuitOptionsHtml()}</select>
+          <label>¿Sabe nadar?</label>
+          <select name="can_swim">
+            <option value="">Sin definir</option>
+            <option value="si">Sí</option>
+            <option value="no">No</option>
+          </select>
+          <label>¿Tiene alguna lesión?</label>
+          <select name="has_injury" id="nr-has-injury">
+            <option value="no">No</option>
+            <option value="si">Sí</option>
+          </select>
+          <div id="nr-injury-detail-wrap" style="display:none">
+            <label>Detalle de la lesión</label>
+            <input type="text" name="injury_detail" placeholder="Describe la lesión" />
+          </div>
           <label>Fecha inicio</label>
           <input type="date" name="date_start" value="${dateStr}" required />
           <label>Fecha fin</label>
@@ -3169,6 +3260,11 @@ export async function renderCalendario(container) {
         document.getElementById('ns-clase-form').style.display = isClase ? '' : 'none';
         document.getElementById('ns-material-form').style.display = isClase ? 'none' : '';
       });
+    });
+
+    // Injury toggle in rental form
+    document.getElementById('nr-has-injury')?.addEventListener('change', (e) => {
+      document.getElementById('nr-injury-detail-wrap').style.display = e.target.value === 'si' ? '' : 'none';
     });
 
     // Load equipment for rental form — store data in JS map (not data attributes, avoids JSON parsing issues)
@@ -3252,6 +3348,9 @@ export async function renderCalendario(container) {
       document.getElementById('ns-capacity').value = defaultCapacities[t] || 8;
     });
 
+    // Dispatch change event on load to sync capacity with default type
+    document.getElementById('ns-type')?.dispatchEvent(new Event('change'));
+
     // Class session form submit
     document.getElementById('new-session-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -3259,8 +3358,11 @@ export async function renderCalendario(container) {
       const type = fd.get('type');
       const timeStart = fd.get('time_start');
       const timeEnd = fd.get('time_end');
-      const maxStudents = parseInt(fd.get('max_students'));
+      let maxStudents = parseInt(fd.get('max_students'));
+      // Auto-correct capacity for individual classes
+      if (type === 'individual') maxStudents = Math.min(maxStudents, defaultCapacities.individual || 1);
       const instructor = fd.get('instructor') || null;
+      const audience = fd.get('audience') || null;
       const published = e.target.published.checked;
       const repeatUntil = fd.get('repeat_until');
       const repeatDays = fd.getAll('repeat_days').map(Number);
@@ -3285,7 +3387,7 @@ export async function renderCalendario(container) {
           await upsertClass({
             title: TYPE_LABELS[type], type, level: 'todos', date,
             time_start: timeStart, time_end: timeEnd,
-            max_students: maxStudents, instructor, price: 0, published,
+            max_students: maxStudents, instructor, audience, price: 0, published,
             location: 'Playa de Roche', status: 'scheduled',
           });
         }
@@ -3325,12 +3427,26 @@ export async function renderCalendario(container) {
       submitBtn.disabled = true;
       submitBtn.textContent = 'Creando reserva…';
 
+      // Build notes JSON with extra client data
+      const extraData = {};
+      const wetsuitSize = fd.get('wetsuit_size')?.trim();
+      const canSwim = fd.get('can_swim');
+      const hasInjury = fd.get('has_injury');
+      const injuryDetail = fd.get('injury_detail')?.trim();
+      const guestLastName = fd.get('guest_last_name')?.trim();
+      if (wetsuitSize) extraData.wetsuit_size = wetsuitSize;
+      if (canSwim) extraData.can_swim = canSwim;
+      if (hasInjury === 'si') extraData.injury = injuryDetail || 'Sí';
+      if (guestLastName) extraData.guest_last_name = guestLastName;
+
+      const fullName = [fd.get('guest_name')?.trim(), guestLastName].filter(Boolean).join(' ') || null;
+
       try {
         await createEquipmentReservation({
           equipment_id: equipmentId,
-          guest_name: fd.get('guest_name')?.trim() || null,
-          guest_email: null,
-          guest_phone: fd.get('guest_contact')?.trim() || null,
+          guest_name: fullName,
+          guest_email: fd.get('guest_email')?.trim() || null,
+          guest_phone: fd.get('guest_phone')?.trim() || null,
           date_start: fd.get('date_start'),
           date_end: fd.get('date_end'),
           duration_key: durKey === 'custom' ? 'custom' : durKey,
@@ -3339,6 +3455,7 @@ export async function renderCalendario(container) {
           total_amount: totalPrice,
           deposit_paid: deposit,
           status: 'confirmed',
+          notes: Object.keys(extraData).length ? JSON.stringify(extraData) : null,
         });
         closeModal();
         showToast('Reserva de material creada', 'success');
@@ -3820,6 +3937,8 @@ export async function renderCalendario(container) {
         <input type="number" name="max_students" value="${cls.max_students || 8}" min="1" required />
         <label>Instructor</label>
         <input type="text" name="instructor" value="${cls.instructor || ''}" />
+        <label>Público</label>
+        <select name="audience">${audienceOptionsHtml(cls.audience || '')}</select>
         <label>Precio (€)</label>
         <input type="number" name="price" step="0.01" value="${cls.price || ''}" required />
         <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
@@ -3841,6 +3960,7 @@ export async function renderCalendario(container) {
       obj.location = cls.location || 'Playa de Roche';
       obj.status = cls.status || 'scheduled';
       if (!obj.instructor) obj.instructor = null;
+      if (!obj.audience) obj.audience = null;
 
       try {
         await upsertClass(obj);

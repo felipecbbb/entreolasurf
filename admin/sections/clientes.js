@@ -5,6 +5,7 @@ import { fetchProfiles, createClientFromAdmin, createPayment } from '../modules/
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { PACK_PRICING, DEPOSIT } from '../modules/constants.js';
+import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
 
 function getPackPrice(type, sessionCount, fallbackPrice = 0) {
   if (sessionCount <= 0) return 0;
@@ -600,14 +601,7 @@ export async function renderClientes(container) {
           <div class="act-form-field">
             <label class="act-form-label">TALLA NEOPRENO</label>
             <select class="act-form-input" id="cli-wetsuit-size">
-              <option value="" ${!c.wetsuit_size ? 'selected' : ''}>Sin definir</option>
-              <option value="XXS" ${c.wetsuit_size === 'XXS' ? 'selected' : ''}>XXS</option>
-              <option value="XS" ${c.wetsuit_size === 'XS' ? 'selected' : ''}>XS</option>
-              <option value="S" ${c.wetsuit_size === 'S' ? 'selected' : ''}>S</option>
-              <option value="M" ${c.wetsuit_size === 'M' ? 'selected' : ''}>M</option>
-              <option value="L" ${c.wetsuit_size === 'L' ? 'selected' : ''}>L</option>
-              <option value="XL" ${c.wetsuit_size === 'XL' ? 'selected' : ''}>XL</option>
-              <option value="XXL" ${c.wetsuit_size === 'XXL' ? 'selected' : ''}>XXL</option>
+              ${wetsuitOptionsHtml(c.wetsuit_size || '')}
             </select>
           </div>
         </div>
@@ -760,14 +754,7 @@ export async function renderClientes(container) {
         <input type="text" name="injury_detail" value="${esc(member?.injury_detail)}" placeholder="Describe la lesión…" />
         <label>Talla neopreno</label>
         <select name="wetsuit_size">
-          <option value="" ${!member?.wetsuit_size ? 'selected' : ''}>Sin definir</option>
-          <option value="XXS" ${member?.wetsuit_size === 'XXS' ? 'selected' : ''}>XXS</option>
-          <option value="XS" ${member?.wetsuit_size === 'XS' ? 'selected' : ''}>XS</option>
-          <option value="S" ${member?.wetsuit_size === 'S' ? 'selected' : ''}>S</option>
-          <option value="M" ${member?.wetsuit_size === 'M' ? 'selected' : ''}>M</option>
-          <option value="L" ${member?.wetsuit_size === 'L' ? 'selected' : ''}>L</option>
-          <option value="XL" ${member?.wetsuit_size === 'XL' ? 'selected' : ''}>XL</option>
-          <option value="XXL" ${member?.wetsuit_size === 'XXL' ? 'selected' : ''}>XXL</option>
+          ${wetsuitOptionsHtml(member?.wetsuit_size || '')}
         </select>
         <label>Notas</label>
         <input type="text" name="notes" value="${esc(member?.notes)}" placeholder="Alergias, observaciones…" />
@@ -877,14 +864,7 @@ export async function renderClientes(container) {
           <div class="act-form-field">
             <label class="act-form-label">TALLA NEOPRENO</label>
             <select class="act-form-input" id="mf-wetsuit">
-              <option value="" ${!member.wetsuit_size ? 'selected' : ''}>Sin definir</option>
-              <option value="XXS" ${member.wetsuit_size === 'XXS' ? 'selected' : ''}>XXS</option>
-              <option value="XS" ${member.wetsuit_size === 'XS' ? 'selected' : ''}>XS</option>
-              <option value="S" ${member.wetsuit_size === 'S' ? 'selected' : ''}>S</option>
-              <option value="M" ${member.wetsuit_size === 'M' ? 'selected' : ''}>M</option>
-              <option value="L" ${member.wetsuit_size === 'L' ? 'selected' : ''}>L</option>
-              <option value="XL" ${member.wetsuit_size === 'XL' ? 'selected' : ''}>XL</option>
-              <option value="XXL" ${member.wetsuit_size === 'XXL' ? 'selected' : ''}>XXL</option>
+              ${wetsuitOptionsHtml(member.wetsuit_size || '')}
             </select>
           </div>
         </div>

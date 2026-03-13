@@ -7,16 +7,18 @@ export async function renderPayments(panel) {
 
   panel.innerHTML = '<p style="color:var(--color-muted)">Cargando pagos…</p>';
 
-  // Fetch payments via RPC + orders in parallel
-  const [paymentsRes, ordersRes, profileRes] = await Promise.all([
+  // Fetch payments via RPC + orders + bonos in parallel
+  const [paymentsRes, ordersRes, profileRes, bonosRes] = await Promise.all([
     supabase.rpc('get_user_payments', { p_user_id: user.id }),
     supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
     supabase.from('profiles').select('credit_balance').eq('id', user.id).single(),
+    supabase.from('bonos').select('*, payments:payments(amount)').eq('user_id', user.id).eq('status', 'active'),
   ]);
 
   const payments = paymentsRes.data || [];
   const orders = ordersRes.data || [];
   const creditBalance = Number(profileRes.data?.credit_balance || 0);
+  const activeBonos = bonosRes.data || [];
 
   // Build unified timeline
   const timeline = [];
@@ -47,12 +49,30 @@ export async function renderPayments(panel) {
   timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
   const totalPaid = timeline.reduce((s, t) => s + t.amount, 0);
 
+  // Calculate pending payment from active bonos
+  // For each active bono, check expected price vs total paid
+  let totalPending = 0;
+  for (const b of activeBonos) {
+    const bonoPayments = (b.payments || []);
+    const totalBonoPayments = bonoPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const expectedPrice = Number(b.price || 0);
+    const pending = Math.round((expectedPrice - totalBonoPayments) * 100) / 100;
+    if (pending > 0) totalPending += pending;
+  }
+  totalPending = Math.round(totalPending * 100) / 100;
+
   let html = `
     <div class="pay-summary-grid">
       <div class="pay-summary-card pay-summary-green">
-        <div class="pay-summary-label">Total pagado</div>
+        <div class="pay-summary-label">Créditos comprados</div>
         <div class="pay-summary-value">${formatPrice(totalPaid)}</div>
       </div>
+      ${totalPending > 0 ? `
+      <div class="pay-summary-card" style="border-color:#ef4444;background:#fef2f2">
+        <div class="pay-summary-label" style="color:#b91c1c">Pendiente de pago</div>
+        <div class="pay-summary-value" style="color:#b91c1c">${formatPrice(totalPending)}</div>
+        <div class="pay-summary-hint" style="color:#b91c1c">Saldo pendiente en tus bonos activos</div>
+      </div>` : ''}
       <div class="pay-summary-card ${creditBalance > 0 ? 'pay-summary-yellow' : 'pay-summary-neutral'}">
         <div class="pay-summary-label">Saldo a favor</div>
         <div class="pay-summary-value">${formatPrice(creditBalance)}</div>

@@ -1,6 +1,8 @@
 import { getSession, getProfile, signIn, signUp, signOut, updateProfile } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
 import { esc, formatDate, formatPrice } from '/lib/utils.js';
+import { WETSUIT_SIZES, LEVEL_OPTIONS, wetsuitOptionsHtml, levelOptionsHtml } from '/lib/shared-constants.js';
+import { TERMS_HTML, WAIVER_HTML, openLegalModal } from '/mi-cuenta/legal-texts.js';
 import { renderFamily } from '/mi-cuenta/tabs/family.js';
 import { renderBonos } from '/mi-cuenta/tabs/bonos.js';
 import { renderCalendar } from '/mi-cuenta/tabs/calendar.js';
@@ -54,22 +56,98 @@ function renderAuth() {
           <div id="auth-view-register" class="auth-view">
             <h1 class="auth-title">Crear cuenta</h1>
             <p class="auth-subtitle">Regístrate para reservar clases y gestionar tu perfil</p>
-            <form id="register-form" class="auth-form">
+
+            <!-- Step 1: Personal data -->
+            <form id="register-step1" class="auth-form">
               <div class="auth-field">
-                <label for="reg-name">Nombre completo</label>
-                <input type="text" id="reg-name" name="fullname" placeholder="Tu nombre" required>
+                <label for="reg-name">Nombre completo *</label>
+                <input type="text" id="reg-name" name="fullname" placeholder="Tu nombre completo" required>
               </div>
               <div class="auth-field">
-                <label for="reg-email">Email</label>
+                <label for="reg-phone">Teléfono *</label>
+                <input type="tel" id="reg-phone" name="phone" placeholder="+34 600 000 000" required>
+              </div>
+              <div class="auth-field">
+                <label for="reg-email">Email *</label>
                 <input type="email" id="reg-email" name="email" placeholder="tu@email.com" required>
               </div>
               <div class="auth-field">
-                <label for="reg-pass">Contraseña</label>
-                <input type="password" id="reg-pass" name="password" placeholder="Mínimo 6 caracteres" required minlength="6">
+                <label for="reg-address">Dirección</label>
+                <input type="text" id="reg-address" name="address" placeholder="Calle, número, ciudad">
               </div>
-              <p class="auth-error" id="register-error"></p>
-              <button type="submit" class="auth-submit-btn">Crear cuenta</button>
+              <div class="auth-field">
+                <label for="reg-postal">Código postal</label>
+                <input type="text" id="reg-postal" name="postal_code" placeholder="11149">
+              </div>
+              <div class="auth-field">
+                <label for="reg-level">Nivel de surf *</label>
+                <select id="reg-level" name="level" required>
+                  <option value="">Seleccionar nivel</option>
+                  ${LEVEL_OPTIONS.map(l => `<option value="${l.value}">${l.label} (${l.desc})</option>`).join('')}
+                </select>
+              </div>
+              <div class="auth-field">
+                <label for="reg-wetsuit">Talla de neopreno</label>
+                <select id="reg-wetsuit" name="wetsuit_size">
+                  ${wetsuitOptionsHtml()}
+                </select>
+              </div>
+              <div class="auth-field">
+                <label for="reg-swim">¿Sabes nadar? *</label>
+                <select id="reg-swim" name="can_swim" required>
+                  <option value="">Seleccionar</option>
+                  <option value="true">Sí</option>
+                  <option value="false">No</option>
+                </select>
+              </div>
+              <div class="auth-field">
+                <label for="reg-injury">¿Tienes alguna lesión?</label>
+                <select id="reg-injury" name="has_injury">
+                  <option value="false">No</option>
+                  <option value="true">Sí</option>
+                </select>
+              </div>
+              <div class="auth-field" id="reg-injury-wrap" style="display:none">
+                <label for="reg-injury-detail">Describe tu lesión</label>
+                <input type="text" id="reg-injury-detail" name="injury_detail" placeholder="Ej: rodilla derecha">
+              </div>
+              <div class="auth-field">
+                <label class="auth-checkbox-label">
+                  <input type="checkbox" id="reg-terms" required>
+                  Acepto los <a href="#" id="open-terms-modal">Términos y Condiciones</a> *
+                </label>
+              </div>
+              <div class="auth-field">
+                <label class="auth-checkbox-label">
+                  <input type="checkbox" id="reg-waiver" required>
+                  Acepto la <a href="#" id="open-waiver-modal">Exención de Responsabilidad</a> *
+                </label>
+              </div>
+              <p class="auth-error" id="register-error-step1"></p>
+              <button type="submit" class="auth-submit-btn">Siguiente →</button>
             </form>
+
+            <!-- Step 2: Create account (password) -->
+            <form id="register-step2" class="auth-form" style="display:none">
+              <div class="auth-field">
+                <label for="reg2-email">Email</label>
+                <input type="email" id="reg2-email" disabled>
+              </div>
+              <div class="auth-field">
+                <label for="reg2-pass">Contraseña *</label>
+                <input type="password" id="reg2-pass" name="password" placeholder="Mínimo 6 caracteres" required minlength="6">
+              </div>
+              <div class="auth-field">
+                <label for="reg2-pass2">Repetir contraseña *</label>
+                <input type="password" id="reg2-pass2" name="password2" placeholder="Repite tu contraseña" required minlength="6">
+              </div>
+              <p class="auth-error" id="register-error-step2"></p>
+              <div style="display:flex;gap:8px">
+                <button type="button" class="auth-submit-btn" id="reg-back-btn" style="background:transparent;color:var(--color-navy);border:1px solid var(--color-line)">← Atrás</button>
+                <button type="submit" class="auth-submit-btn">Crear cuenta</button>
+              </div>
+            </form>
+
             <p class="auth-switch">¿Ya tienes cuenta? <a href="#" id="switch-to-login">Iniciar sesión</a></p>
           </div>
         </div>
@@ -113,17 +191,96 @@ function renderAuth() {
     }
   });
 
-  // Register
-  document.getElementById('register-form').addEventListener('submit', async (e) => {
+  // Register — multi-step
+  let regStep1Data = {};
+
+  // Injury toggle
+  document.getElementById('reg-injury')?.addEventListener('change', (e) => {
+    document.getElementById('reg-injury-wrap').style.display = e.target.value === 'true' ? '' : 'none';
+  });
+
+  // Legal modals
+  document.getElementById('open-terms-modal')?.addEventListener('click', (e) => {
     e.preventDefault();
-    const errEl = document.getElementById('register-error');
+    openLegalModal('Términos y Condiciones', TERMS_HTML);
+  });
+  document.getElementById('open-waiver-modal')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    openLegalModal('Exención de Responsabilidad', WAIVER_HTML);
+  });
+
+  // Step 1 → Step 2
+  document.getElementById('register-step1').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('register-error-step1');
+    errEl.textContent = '';
+
+    if (!document.getElementById('reg-terms').checked) {
+      errEl.textContent = 'Debes aceptar los Términos y Condiciones.';
+      return;
+    }
+    if (!document.getElementById('reg-waiver').checked) {
+      errEl.textContent = 'Debes aceptar la Exención de Responsabilidad.';
+      return;
+    }
+
+    regStep1Data = {
+      fullname: e.target.fullname.value.trim(),
+      phone: e.target.phone.value.trim(),
+      email: e.target.email.value.trim(),
+      address: e.target.address?.value?.trim() || null,
+      postal_code: e.target.postal_code?.value?.trim() || null,
+      level: e.target.level.value,
+      wetsuit_size: e.target.wetsuit_size.value || null,
+      can_swim: e.target.can_swim.value === 'true',
+      has_injury: e.target.has_injury.value === 'true',
+      injury_detail: e.target.injury_detail?.value?.trim() || null,
+    };
+
+    document.getElementById('register-step1').style.display = 'none';
+    document.getElementById('register-step2').style.display = '';
+    document.getElementById('reg2-email').value = regStep1Data.email;
+  });
+
+  // Back button
+  document.getElementById('reg-back-btn')?.addEventListener('click', () => {
+    document.getElementById('register-step2').style.display = 'none';
+    document.getElementById('register-step1').style.display = '';
+  });
+
+  // Step 2 — create account
+  document.getElementById('register-step2').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('register-error-step2');
     const btn = e.target.querySelector('button[type="submit"]');
     errEl.textContent = '';
+
+    const pass = e.target.password.value;
+    const pass2 = e.target.password2.value;
+    if (pass !== pass2) {
+      errEl.textContent = 'Las contraseñas no coinciden.';
+      return;
+    }
+
     btn.disabled = true; btn.textContent = 'Creando cuenta…';
     try {
-      const result = await signUp(e.target.email.value, e.target.password.value, e.target.fullname.value);
+      const result = await signUp(regStep1Data.email, pass, regStep1Data.fullname);
       if (result?.session || result?.user) {
-        await checkOnboardingOrDashboard();
+        // Save profile data from step 1
+        const now = new Date().toISOString();
+        await updateProfile({
+          phone: regStep1Data.phone,
+          address: regStep1Data.address,
+          postal_code: regStep1Data.postal_code,
+          level: regStep1Data.level,
+          wetsuit_size: regStep1Data.wetsuit_size,
+          can_swim: regStep1Data.can_swim,
+          has_injury: regStep1Data.has_injury,
+          injury_detail: regStep1Data.injury_detail,
+          terms_accepted_at: now,
+          waiver_accepted_at: now,
+        });
+        renderDashboard();
       } else {
         errEl.style.color = '#1b5e20';
         errEl.textContent = 'Cuenta creada. Inicia sesión para continuar.';
@@ -152,7 +309,6 @@ async function checkOnboardingOrDashboard() {
 
 function renderOnboarding(profile) {
   hideFooter();
-  const WETSUIT_SIZES = ['6 años','8 años','10 años','12 años','XS','S','M','L','XL'];
   mainEl.innerHTML = `
     <div class="auth-page">
       <div class="auth-page-left">
@@ -160,6 +316,12 @@ function renderOnboarding(profile) {
           <h1 class="auth-title">Un último paso</h1>
           <p class="auth-subtitle">Necesitamos algunos datos para tu seguridad y comodidad</p>
           <form id="onboarding-form" class="auth-form">
+            <div class="auth-field">
+              <label for="ob-level">Nivel de surf</label>
+              <select id="ob-level" name="level">
+                ${levelOptionsHtml(profile?.level || '', true)}
+              </select>
+            </div>
             <div class="auth-field">
               <label for="ob-swim">¿Sabes nadar?</label>
               <select id="ob-swim" name="can_swim" required>
@@ -182,8 +344,7 @@ function renderOnboarding(profile) {
             <div class="auth-field">
               <label for="ob-wetsuit">Talla de neopreno</label>
               <select id="ob-wetsuit" name="wetsuit_size">
-                <option value="">Sin definir</option>
-                ${WETSUIT_SIZES.map(s => `<option value="${s}">${s}</option>`).join('')}
+                ${wetsuitOptionsHtml(profile?.wetsuit_size || '')}
               </select>
             </div>
             <p class="auth-error" id="onboarding-error"></p>
@@ -223,6 +384,7 @@ function renderOnboarding(profile) {
     btn.disabled = true; btn.textContent = 'Guardando…';
     try {
       await updateProfile({
+        level: e.target.level?.value || null,
         can_swim: e.target.can_swim.value === 'true' ? true : e.target.can_swim.value === 'false' ? false : null,
         has_injury: e.target.has_injury.value === 'true',
         injury_detail: e.target.injury_detail?.value || null,
@@ -378,7 +540,6 @@ async function renderDashboard() {
 
 // ---- Tab: Mis datos ----
 function renderDatos(session, profile) {
-  const WETSUIT_SIZES = ['6 años','8 años','10 años','12 años','XS','S','M','L','XL'];
   const datosPanel = document.getElementById('tab-datos');
   datosPanel.innerHTML = `
     <form id="profile-form">
@@ -402,12 +563,26 @@ function renderDatos(session, profile) {
             <label for="pf-phone">Teléfono</label>
             <input type="tel" id="pf-phone" name="phone" value="${esc(profile?.phone)}" placeholder="+34 600 000 000" />
           </div>
+          <div class="account-field">
+            <label for="pf-address">Dirección</label>
+            <input type="text" id="pf-address" name="address" value="${esc(profile?.address || '')}" placeholder="Calle, número, ciudad" />
+          </div>
+          <div class="account-field">
+            <label for="pf-postal">Código postal</label>
+            <input type="text" id="pf-postal" name="postal_code" value="${esc(profile?.postal_code || '')}" placeholder="11149" />
+          </div>
         </div>
       </div>
 
       <div class="account-form-card">
         <h3>Salud y equipamiento</h3>
         <div class="account-form-grid">
+          <div class="account-field">
+            <label for="pf-level">Nivel de surf</label>
+            <select id="pf-level" name="level">
+              ${levelOptionsHtml(profile?.level || '', true)}
+            </select>
+          </div>
           <div class="account-field">
             <label for="pf-swim">¿Sabes nadar?</label>
             <select id="pf-swim" name="can_swim">
@@ -430,8 +605,7 @@ function renderDatos(session, profile) {
           <div class="account-field">
             <label for="pf-wetsuit">Talla de neopreno</label>
             <select id="pf-wetsuit" name="wetsuit_size">
-              <option value="">Sin definir</option>
-              ${WETSUIT_SIZES.map(s => `<option value="${s}" ${profile?.wetsuit_size === s ? 'selected' : ''}>${s}</option>`).join('')}
+              ${wetsuitOptionsHtml(profile?.wetsuit_size || '')}
             </select>
           </div>
         </div>
@@ -455,6 +629,9 @@ function renderDatos(session, profile) {
         full_name: e.target.full_name.value,
         last_name: e.target.last_name.value,
         phone: e.target.phone.value,
+        address: e.target.address?.value || null,
+        postal_code: e.target.postal_code?.value || null,
+        level: e.target.level?.value || null,
         can_swim: e.target.can_swim.value === 'true' ? true : e.target.can_swim.value === 'false' ? false : null,
         has_injury: e.target.has_injury.value === 'true',
         injury_detail: e.target.injury_detail?.value || null,

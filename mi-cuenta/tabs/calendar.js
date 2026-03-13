@@ -3,6 +3,7 @@ import { fetchActiveBonos, fetchUserBonos } from '/lib/bonos.js';
 import { fetchFamilyMembers } from '/lib/family.js';
 import { supabase } from '/lib/supabase.js';
 import { TYPE_LABELS, showToast } from '/lib/utils.js';
+import { LEVEL_OPTIONS, AUDIENCE_OPTIONS } from '/lib/shared-constants.js';
 
 const TYPE_COLORS = {
   grupal: '#0ea5e9',
@@ -12,7 +13,7 @@ const TYPE_COLORS = {
   surfskate: '#ef4444',
 };
 
-const LEVELS = ['todos', 'principiante', 'intermedio', 'avanzado'];
+const AUDIENCE_LABELS = Object.fromEntries(AUDIENCE_OPTIONS.map(a => [a.value, a.label]));
 
 function formatTime(t) { return t?.slice(0, 5) || ''; }
 
@@ -58,7 +59,7 @@ async function fetchClassesForDate(date, level) {
 export async function renderCalendar(panel) {
   let dateOffset = 0;
   let selectedDate = null;
-  let filterLevel = '';
+  let filterLevel = 'principiante';
   let filterType = '';
   let allBonos = [];
 
@@ -118,8 +119,7 @@ export async function renderCalendar(panel) {
         ${allTypes.map(t => `<button class="cal-type-btn ${filterType === t ? 'active' : ''}" data-type="${t}" style="--type-color:${TYPE_COLORS[t]}">${TYPE_LABELS[t]}</button>`).join('')}
       </div>
       <select id="cal-filter-level" style="padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--color-line);font-size:.85rem">
-        <option value="">Todos los niveles</option>
-        ${LEVELS.map(l => `<option value="${l}" ${filterLevel === l ? 'selected' : ''}>${l}</option>`).join('')}
+        ${LEVEL_OPTIONS.map(l => `<option value="${l.value}" ${filterLevel === l.value ? 'selected' : ''}>${l.label}</option>`).join('')}
       </select>
     </div>`;
 
@@ -202,6 +202,7 @@ export async function renderCalendar(panel) {
               <strong>${c.title || TYPE_LABELS[c.type]}</strong>
               ${c.instructor ? `<span class="meta">${c.instructor}</span>` : ''}
               ${c.level && c.level !== 'todos' ? `<span class="meta">Nivel: ${c.level}</span>` : ''}
+              ${c.audience ? `<span class="meta">${AUDIENCE_LABELS[c.audience] || c.audience}</span>` : ''}
               ${c.location ? `<span class="meta">${c.location}</span>` : ''}
             </div>
             <div class="class-slot-footer">

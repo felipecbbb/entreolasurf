@@ -1074,6 +1074,35 @@
   flex-shrink: 0;
 }
 
+/* Move buttons (← →) */
+.cal-client-move-btns {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.cal-client-row:hover .cal-client-move-btns { opacity: 1; }
+.cal-move-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  color: #64748b;
+  padding: 0;
+}
+.cal-move-btn:hover {
+  background: #f1f5f9;
+  color: #0f2f39;
+  border-color: #cbd5e1;
+}
+
 /* Drop outside hint */
 .cal-day-content.drop-outside-active {
   outline: 2px dashed #ef4444;

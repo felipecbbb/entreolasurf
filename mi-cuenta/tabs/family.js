@@ -1,6 +1,5 @@
 import { fetchFamilyMembers, createFamilyMember, updateFamilyMember, deleteFamilyMember } from '/lib/family.js';
-
-const LEVELS = ['principiante', 'intermedio', 'avanzado'];
+import { wetsuitOptionsHtml, levelOptionsHtml } from '/lib/shared-constants.js';
 
 export async function renderFamily(panel) {
   async function render() {
@@ -43,8 +42,7 @@ export async function renderFamily(panel) {
           <label>Fecha de nacimiento <input type="date" name="birth_date"></label>
           <label>Nivel
             <select name="level">
-              <option value="">Sin definir</option>
-              ${LEVELS.map(l => `<option value="${l}">${l}</option>`).join('')}
+              ${levelOptionsHtml('', true)}
             </select>
           </label>
           <label>Notas <input type="text" name="notes" placeholder="Alergias, observaciones..."></label>
@@ -66,16 +64,7 @@ export async function renderFamily(panel) {
           </label>
           <label>Talla de neopreno
             <select name="wetsuit_size">
-              <option value="">Sin definir</option>
-              <option value="6 años">6 años</option>
-              <option value="8 años">8 años</option>
-              <option value="10 años">10 años</option>
-              <option value="12 años">12 años</option>
-              <option value="XS">XS</option>
-              <option value="S">S</option>
-              <option value="M">M</option>
-              <option value="L">L</option>
-              <option value="XL">XL</option>
+              ${wetsuitOptionsHtml()}
             </select>
           </label>
           <div style="display:flex;gap:8px;margin-top:8px">

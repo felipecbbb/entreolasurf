@@ -8,17 +8,23 @@ export async function renderEnrollments(panel) {
     const enrollments = await fetchUserEnrollments();
 
     const now = new Date();
+
+    // Upcoming: confirmed future + cancelled future
     const upcoming = enrollments.filter(e => {
-      if (e.status !== 'confirmed') return false;
       const cls = e.surf_classes;
       if (!cls) return false;
-      return new Date(cls.date + 'T' + cls.time_start) > now;
+      const classTime = new Date(cls.date + 'T' + cls.time_start);
+      if (classTime <= now) return false;
+      return e.status === 'confirmed' || e.status === 'cancelled';
     });
 
+    // Past: everything else (past confirmed, past cancelled, completed, no_show, etc.)
     const past = enrollments.filter(e => {
       const cls = e.surf_classes;
       if (!cls) return true;
-      return e.status !== 'confirmed' || new Date(cls.date + 'T' + cls.time_start) <= now;
+      const classTime = new Date(cls.date + 'T' + cls.time_start);
+      if (classTime > now && (e.status === 'confirmed' || e.status === 'cancelled')) return false;
+      return true;
     });
 
     let html = '';
@@ -29,24 +35,34 @@ export async function renderEnrollments(panel) {
     if (upcoming.length) {
       html += upcoming.map(e => {
         const cls = e.surf_classes;
-        const canCancel = new Date(cls.date + 'T' + cls.time_start) > new Date(Date.now() + 2 * 3600 * 1000);
+        const isCancelled = e.status === 'cancelled';
+        const canCancel = !isCancelled && new Date(cls.date + 'T' + cls.time_start) > new Date(Date.now() + 2 * 3600 * 1000);
         const attendee = e.family_members?.full_name || 'Yo';
+
+        let statusHtml = '';
+        if (isCancelled) {
+          const cancelledLabel = e.cancelled_by === 'admin' ? 'Cancelada por la escuela' : 'Cancelada por mí';
+          statusHtml = `<span class="status-badge cancelled" style="background:#fef2f2;color:#b91c1c">${cancelledLabel}</span>`;
+        } else {
+          statusHtml = `<span class="status-badge confirmed">Confirmada</span>`;
+        }
+
         return `
-          <div class="booking-card-item">
+          <div class="booking-card-item" style="${isCancelled ? 'opacity:.55;border-left:3px solid #ef4444;' : ''}">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <div>
                 <strong>${cls.title}</strong>
                 <span class="bono-type-badge" style="margin-left:8px">${TYPE_LABELS[cls.type] || cls.type}</span>
               </div>
-              <span class="status-badge confirmed">Confirmada</span>
+              ${statusHtml}
             </div>
             <p class="meta">${formatDate(cls.date)} · ${formatTime(cls.time_start)} — ${formatTime(cls.time_end)} ${cls.instructor ? '· ' + cls.instructor : ''}</p>
             <p class="meta">Asistente: <strong>${attendee}</strong></p>
-            <div style="margin-top:8px">
+            ${!isCancelled ? `<div style="margin-top:8px">
               <button class="btn line" data-action="cancel" data-id="${e.id}" style="font-size:.8rem;padding:6px 12px;${canCancel ? '' : 'opacity:.4;cursor:not-allowed'}" ${canCancel ? '' : 'disabled'}>
                 ${canCancel ? 'Cancelar reserva' : 'No cancelable (<2h)'}
               </button>
-            </div>
+            </div>` : ''}
           </div>`;
       }).join('');
     } else {
@@ -61,7 +77,10 @@ export async function renderEnrollments(panel) {
           ${past.map(e => {
             const cls = e.surf_classes;
             const attendee = e.family_members?.full_name || 'Yo';
-            const statusLabel = e.status === 'cancelled' ? 'Cancelada' : e.status === 'completed' ? 'Completada' : e.status === 'no_show' ? 'No asistió' : e.status;
+            let statusLabel = e.status === 'cancelled' ? 'Cancelada' : e.status === 'completed' ? 'Completada' : e.status === 'no_show' ? 'No asistió' : e.status;
+            if (e.status === 'cancelled' && e.cancelled_by) {
+              statusLabel = e.cancelled_by === 'admin' ? 'Cancelada por la escuela' : 'Cancelada por mí';
+            }
             return `
               <div class="booking-card-item" style="opacity:.7">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">

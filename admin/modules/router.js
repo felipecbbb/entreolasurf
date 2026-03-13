@@ -12,7 +12,7 @@ const sectionTitles = {
   reservas: 'Reservas',
   actividades: 'Actividades',
   camps: 'Surf Camps',
-  calendario: 'Calendario',
+  calendario: 'Calendario Clases',
   material: 'Material',
   productos: 'Productos',
   pedidos: 'Pedidos',

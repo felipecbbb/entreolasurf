@@ -329,7 +329,7 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   color: var(--color-navy, #0f2f39);
 }
 
-.auth-field input,
+.auth-field input:not([type="checkbox"]),
 .auth-field select {
   width: 100%;
   border: 1px solid #e5e7eb;
@@ -354,11 +354,11 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   cursor: pointer;
 }
 
-.auth-field input::placeholder {
+.auth-field input:not([type="checkbox"])::placeholder {
   color: #b0b8c1;
 }
 
-.auth-field input:focus,
+.auth-field input:not([type="checkbox"]):focus,
 .auth-field select:focus {
   border-color: var(--color-yellow, #FFCC01);
   box-shadow: 0 0 0 3px rgba(255, 204, 1, 0.2);
@@ -397,6 +397,24 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 .auth-submit-btn:disabled {
   opacity: .6;
   cursor: not-allowed;
+}
+
+.auth-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: .9rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.auth-checkbox-label input[type="checkbox"] {
+  width: auto;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.auth-checkbox-label a {
+  color: var(--color-accent, #0ea5e9);
+  text-decoration: underline;
 }
 
 .auth-switch {
@@ -848,7 +866,7 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   }
 
   /* Auth page small */
-  .auth-field input, .auth-field select { padding: 12px 14px; }
+  .auth-field input:not([type="checkbox"]), .auth-field select { padding: 12px 14px; }
   .auth-submit-btn { padding: 13px; }
 }
 
