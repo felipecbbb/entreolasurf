@@ -41,7 +41,7 @@ export async function renderDashboard(container) {
     // Revenue by payment method
     const byMethod = {};
     payments.forEach(p => {
-      const m = p.method || 'otros';
+      const m = p.payment_method || 'otros';
       byMethod[m] = (byMethod[m] || 0) + Number(p.amount || 0);
     });
 

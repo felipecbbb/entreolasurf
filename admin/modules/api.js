@@ -32,7 +32,7 @@ export async function fetchDashboardStats(dateFrom, dateTo) {
   try {
     const queries = [
       // Payments (the single source of truth for money)
-      supabase.from('payments').select('id, amount, method, payment_date, reservation_type, reference_id')
+      supabase.from('payments').select('id, amount, payment_method, payment_date, reservation_type, reference_id')
         .gte('payment_date', dateFrom).lte('payment_date', dateTo + 'T23:59:59'),
       // Bookings (camps)
       supabase.from('bookings').select('id, total_amount, status, created_at')
