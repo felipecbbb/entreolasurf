@@ -1754,6 +1754,9 @@ td a {
 .status-badge.confirmed { background: #e8f5e9; color: #1b5e20; }
 .status-badge.cancelled { background: #ffebee; color: #b71c1c; }
 .status-badge.completed { background: #e3f2fd; color: #0d47a1; }
+.status-badge.paid { background: #dcfce7; color: #166534; }
+.status-badge.partial { background: #fef3c7; color: #92400e; }
+.status-badge.no_show { background: #f1f5f9; color: #64748b; }
 
 /* --- Add to Cart button (tienda) --- */
 .product-actions {

@@ -537,10 +537,13 @@ export async function renderCalendario(container) {
 
         if (itemType === 'enrollment') {
           const eid = row.dataset.enrollmentId;
-          const newStatus = isPaid ? 'confirmed' : 'paid';
+          const isPartial = row.classList.contains('partial');
+          // Cycle: unpaid → partial → paid → unpaid
+          const newStatus = isPaid ? 'confirmed' : isPartial ? 'paid' : 'partial';
+          const statusMsg = { confirmed: 'Marcado como pendiente', partial: 'Marcado como anticipo pagado', paid: 'Marcado como pagado' };
           try {
             await updateEnrollmentStatus(eid, newStatus);
-            showToast(isPaid ? 'Marcado como pendiente' : 'Marcado como pagado', 'success');
+            showToast(statusMsg[newStatus] || newStatus, 'success');
             render();
           } catch (err) { showToast('Error: ' + err.message, 'error'); }
         } else if (itemType === 'rental') {
@@ -660,7 +663,7 @@ export async function renderCalendario(container) {
                   const { data: bonos } = await supabase.from('bonos').select('*').eq('user_id', userId).eq('class_type', cls.type).eq('status', 'active');
                   if (bonos?.length) {
                     const enrichedBonos = await Promise.all(bonos.map(async (b) => {
-                      const bPayments = await fetchPayments('enrollment', b.id);
+                      const bPayments = await fetchPayments('bono', b.id);
                       const totalPaidReal = bPayments.reduce((s, p) => s + Number(p.amount || 0), 0) || Number(b.total_paid || 0);
                       const expectedPrice = getPackPrice(cls.type, b.total_credits, Number(cls.price || 0));
                       const pending = Math.max(0, Math.round((expectedPrice - totalPaidReal) * 100) / 100);

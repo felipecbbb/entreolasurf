@@ -151,7 +151,7 @@ export async function renderCalendar(panel) {
             .select('id, class_id, family_member_id, status, family_members(full_name)')
             .eq('user_id', user.id)
             .in('class_id', classIds)
-            .eq('status', 'confirmed');
+            .in('status', ['confirmed', 'paid', 'partial']);
           userEnrollments = data || [];
         }
       } catch (err) {

@@ -27,6 +27,58 @@ export async function fetchStats() {
   return { totalBookings, upcomingCamps, scheduledClasses, revenue: revenue + orderRevenue };
 }
 
+// ---- Dashboard Stats (full, with date range) ----
+export async function fetchDashboardStats(dateFrom, dateTo) {
+  try {
+    const queries = [
+      // Payments (the single source of truth for money)
+      supabase.from('payments').select('id, amount, method, payment_date, reservation_type, reference_id')
+        .gte('payment_date', dateFrom).lte('payment_date', dateTo + 'T23:59:59'),
+      // Bookings (camps)
+      supabase.from('bookings').select('id, total_amount, status, created_at')
+        .gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
+      // Orders (shop)
+      supabase.from('orders').select('id, total, status, created_at')
+        .gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
+      // Classes in range
+      supabase.from('surf_classes').select('id, type, date, max_students, enrolled_count, status')
+        .gte('date', dateFrom).lte('date', dateTo),
+      // Enrollments in range (via class date)
+      supabase.from('class_enrollments').select('id, class_id, status, bono_id, created_at')
+        .gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
+      // Bonos created in range
+      supabase.from('bonos').select('id, class_type, total_credits, used_credits, total_paid, status, created_at')
+        .gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
+      // Equipment reservations
+      supabase.from('equipment_reservations').select('id, total_amount, deposit_paid, status, date_start')
+        .gte('date_start', dateFrom).lte('date_start', dateTo + 'T23:59:59'),
+      // Upcoming camps (always future)
+      supabase.from('surf_camps').select('id, title, date_start, status, max_spots, spots_taken')
+        .gte('date_start', new Date().toISOString().slice(0, 10)),
+      // Scheduled classes (always future)
+      supabase.from('surf_classes').select('id').eq('status', 'scheduled')
+        .gte('date', new Date().toISOString().slice(0, 10)),
+    ];
+
+    const [payments, bookings, orders, classes, enrollments, bonos, equipment, futureCamps, futureClasses] = await Promise.all(queries);
+
+    return {
+      payments: payments.data || [],
+      bookings: bookings.data || [],
+      orders: orders.data || [],
+      classes: classes.data || [],
+      enrollments: enrollments.data || [],
+      bonos: bonos.data || [],
+      equipment: equipment.data || [],
+      futureCamps: futureCamps.data || [],
+      futureClasses: futureClasses.data || [],
+    };
+  } catch (err) {
+    console.error('fetchDashboardStats error:', err);
+    return { payments: [], bookings: [], orders: [], classes: [], enrollments: [], bonos: [], equipment: [], futureCamps: [], futureClasses: [] };
+  }
+}
+
 // ---- Bookings ----
 export async function fetchBookings(statusFilter) {
   let query = supabase
