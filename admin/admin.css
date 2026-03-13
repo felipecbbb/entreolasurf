@@ -4713,3 +4713,228 @@
 .mat-pricing-input {
   font-weight: 600 !important;
 }
+
+/* ============================================================
+   BOOKING WIZARD
+   ============================================================ */
+.cal-booking-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff !important;
+  background: var(--color-navy, #0f2f39) !important;
+  border-color: var(--color-navy, #0f2f39) !important;
+}
+.cal-booking-btn:hover {
+  background: var(--color-yellow, #FFCC01) !important;
+  border-color: var(--color-yellow, #FFCC01) !important;
+  color: var(--color-navy, #0f2f39) !important;
+}
+
+.bkw-step {
+  width: 100%;
+}
+
+/* Step 1 — type grid */
+.bkw-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+.bkw-type-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 24px;
+  background: #fff;
+  border: 2px solid #e5e7eb;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.bkw-type-card:hover {
+  border-color: var(--color-yellow, #FFCC01);
+  box-shadow: 0 8px 32px rgba(15,47,57,.12);
+  transform: translateY(-2px);
+}
+.bkw-type-label {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.5rem;
+  letter-spacing: 1px;
+  color: var(--color-navy, #0f2f39);
+}
+.bkw-type-desc {
+  font-size: .82rem;
+  color: #6b7280;
+}
+
+/* Step 2 — activity grid */
+.bkw-search {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: .9rem;
+  margin-bottom: 16px;
+  outline: none;
+}
+.bkw-search:focus {
+  border-color: var(--color-navy, #0f2f39);
+  box-shadow: 0 0 0 3px rgba(15,47,57,.08);
+}
+.bkw-activity-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bkw-activity-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  background: #fff;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  text-align: left;
+}
+.bkw-activity-card:hover {
+  border-color: var(--ac-color, #0f2f39);
+  background: var(--ac-color, #0f2f39);
+  color: #fff;
+}
+.bkw-activity-card:hover .bkw-ac-label {
+  color: #fff;
+}
+.bkw-activity-card:hover .bkw-ac-dot {
+  background: #fff !important;
+}
+.bkw-ac-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.bkw-ac-label {
+  font-weight: 600;
+  font-size: .95rem;
+  color: var(--color-navy, #0f2f39);
+}
+
+/* Step 3 — calendar */
+.bkw-cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.bkw-cal-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  letter-spacing: .5px;
+  color: var(--color-navy, #0f2f39);
+}
+.bkw-cal-arrow {
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  color: var(--color-navy, #0f2f39);
+  transition: all .15s;
+}
+.bkw-cal-arrow:hover {
+  background: var(--color-navy, #0f2f39);
+  color: #fff;
+  border-color: var(--color-navy, #0f2f39);
+}
+.bkw-calendar {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  padding: 16px;
+}
+.bkw-cal-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  margin-bottom: 8px;
+}
+.bkw-cal-day-name {
+  font-size: .75rem;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+.bkw-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.bkw-cal-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: .9rem;
+  font-weight: 600;
+  transition: all .15s;
+}
+.bkw-cal-day.empty {
+  background: none;
+}
+.bkw-cal-day.available {
+  background: #dcfce7;
+  color: #166534;
+  cursor: pointer;
+}
+.bkw-cal-day.available:hover {
+  background: #22c55e;
+  color: #fff;
+  transform: scale(1.1);
+}
+.bkw-cal-day.unavailable {
+  background: #fee2e2;
+  color: #b91c1c;
+  opacity: .5;
+}
+.bkw-cal-day.today {
+  box-shadow: inset 0 0 0 2px #3b82f6;
+}
+.bkw-cal-legend {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin-top: 16px;
+  font-size: .8rem;
+  color: #6b7280;
+}
+.bkw-cal-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bkw-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  .bkw-type-grid {
+    grid-template-columns: 1fr;
+    max-width: 100%;
+  }
+  .bkw-type-card {
+    padding: 28px 20px;
+  }
+}

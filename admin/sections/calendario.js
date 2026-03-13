@@ -147,6 +147,10 @@ export async function renderCalendario(container) {
             <button class="cal-view-btn ${viewMode === 'day' ? 'active' : ''}" data-view="day">Día</button>
             <button class="cal-view-btn ${viewMode === 'week' ? 'active' : ''}" data-view="week">Semana</button>
           </div>
+          <button class="cal-action-btn cal-booking-btn" id="cal-new-booking" title="Crear reserva">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M12 14l2 2 4-4"/></svg>
+            <span style="font-size:.82rem;font-weight:600">Reserva</span>
+          </button>
           <button class="cal-action-btn cal-add-btn" id="cal-add-session" title="Nueva sesión">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
@@ -512,6 +516,7 @@ export async function renderCalendario(container) {
     });
 
     container.querySelector('#cal-add-session')?.addEventListener('click', () => openNewSessionModal());
+    container.querySelector('#cal-new-booking')?.addEventListener('click', () => openBookingWizard());
 
     // Click on session header → show enrollments
     container.querySelectorAll('.cal-session-header').forEach(header => {
@@ -3150,6 +3155,246 @@ export async function renderCalendario(container) {
     }
 
     renderDetail();
+  }
+
+  // ======== BOOKING WIZARD ========
+  function openBookingWizard() {
+    const overlay = document.createElement('div');
+    overlay.className = 'bk-overlay bk-overlay-fullscreen';
+    overlay.id = 'bkw-overlay';
+    document.body.appendChild(overlay);
+
+    let selectedType = null;
+    let calMonth = new Date();
+    calMonth.setDate(1);
+
+    const MONTH_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const DAY_INITIALS = ['L','M','X','J','V','S','D'];
+
+    renderStep1();
+
+    function closeWizard() { overlay.remove(); }
+
+    // Step 1: Actividad vs Alquiler
+    function renderStep1() {
+      overlay.innerHTML = `
+        <div class="bk-panel bk-panel-fullscreen">
+          <div class="bk-panel-header" style="background:#0f2f39;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:16px 24px">
+            <h2 style="margin:0;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:1px">CREAR RESERVA</h2>
+            <button id="bkw-close" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="bk-panel-body" style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 64px)">
+            <div class="bkw-step">
+              <p style="text-align:center;color:#6b7280;margin-bottom:24px;font-size:.95rem">¿Qué tipo de reserva quieres crear?</p>
+              <div class="bkw-type-grid">
+                <button class="bkw-type-card" data-choice="actividad">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFCC01" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                  <span class="bkw-type-label">Actividad</span>
+                  <span class="bkw-type-desc">Clases, yoga, paddle surf...</span>
+                </button>
+                <button class="bkw-type-card" data-choice="alquiler">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#0369a1" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12c0-2.2 1.8-4 4-4m0 8c2.2 0 4-1.8 4-4"/><circle cx="12" cy="12" r="1.5" fill="#0369a1"/></svg>
+                  <span class="bkw-type-label">Alquiler</span>
+                  <span class="bkw-type-desc">Material, neoprenos, tablas...</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      overlay.querySelector('#bkw-close').addEventListener('click', closeWizard);
+      overlay.querySelectorAll('.bkw-type-card').forEach(card => {
+        card.addEventListener('click', () => {
+          if (card.dataset.choice === 'alquiler') {
+            closeWizard();
+            openNewSessionModal();
+            // Auto-switch to material tab after a tick
+            setTimeout(() => {
+              const matTab = document.querySelector('[data-modal-type="material"]');
+              if (matTab) matTab.click();
+            }, 50);
+          } else {
+            renderStep2();
+          }
+        });
+      });
+    }
+
+    // Step 2: Tipo de actividad
+    function renderStep2() {
+      const types = Object.entries(TYPE_LABELS);
+      const cardsHtml = types.map(([key, label]) => {
+        const color = TYPE_COLORS[key] || '#0f2f39';
+        return `<button class="bkw-activity-card" data-type="${key}" style="--ac-color:${color}">
+          <span class="bkw-ac-dot" style="background:${color}"></span>
+          <span class="bkw-ac-label">${label}</span>
+        </button>`;
+      }).join('');
+
+      overlay.innerHTML = `
+        <div class="bk-panel bk-panel-fullscreen">
+          <div class="bk-panel-header" style="background:#0f2f39;color:#fff;display:flex;align-items:center;gap:12px;padding:16px 24px">
+            <button id="bkw-back" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <h2 style="margin:0;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:1px">TIPO DE ACTIVIDAD</h2>
+            <div style="flex:1"></div>
+            <button id="bkw-close" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="bk-panel-body" style="padding:24px;max-width:600px;margin:0 auto;width:100%">
+            <div class="bkw-step">
+              <input type="text" id="bkw-search" class="bkw-search" placeholder="Buscar actividad..." />
+              <div class="bkw-activity-grid" id="bkw-activity-grid">
+                ${cardsHtml}
+              </div>
+            </div>
+          </div>
+        </div>`;
+      overlay.querySelector('#bkw-close').addEventListener('click', closeWizard);
+      overlay.querySelector('#bkw-back').addEventListener('click', () => renderStep1());
+      // Search filter
+      overlay.querySelector('#bkw-search').addEventListener('input', (e) => {
+        const q = e.target.value.toLowerCase();
+        overlay.querySelectorAll('.bkw-activity-card').forEach(c => {
+          const label = c.querySelector('.bkw-ac-label').textContent.toLowerCase();
+          c.style.display = label.includes(q) ? '' : 'none';
+        });
+      });
+      // Card click → step 3
+      overlay.querySelectorAll('.bkw-activity-card').forEach(card => {
+        card.addEventListener('click', () => {
+          selectedType = card.dataset.type;
+          renderStep3();
+        });
+      });
+    }
+
+    // Step 3: Calendario mensual
+    async function renderStep3() {
+      const typeColor = TYPE_COLORS[selectedType] || '#0f2f39';
+      const typeLabel = TYPE_LABELS[selectedType] || selectedType;
+
+      // Show loading state
+      overlay.innerHTML = `
+        <div class="bk-panel bk-panel-fullscreen">
+          <div class="bk-panel-header" style="background:${typeColor};color:#fff;display:flex;align-items:center;gap:12px;padding:16px 24px">
+            <button id="bkw-back" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <h2 style="margin:0;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:1px">${typeLabel.toUpperCase()}</h2>
+            <div style="flex:1"></div>
+            <button id="bkw-close" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="bk-panel-body" style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 64px)">
+            <div style="text-align:center;color:#9ca3af"><div class="spinner" style="margin:0 auto 12px"></div>Cargando disponibilidad...</div>
+          </div>
+        </div>`;
+      overlay.querySelector('#bkw-close').addEventListener('click', closeWizard);
+      overlay.querySelector('#bkw-back').addEventListener('click', () => renderStep2());
+
+      // Fetch classes for the current calendar month
+      const monthStart = new Date(calMonth.getFullYear(), calMonth.getMonth(), 1);
+      const monthEnd = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0);
+      const fromStr = getDateStr(monthStart);
+      const toStr = getDateStr(monthEnd);
+
+      let monthClasses = [];
+      try {
+        const all = await fetchClassesInRange(fromStr, toStr);
+        monthClasses = all.filter(c => c.type === selectedType);
+      } catch (e) { /* ignore fetch errors */ }
+
+      // Build availability map: dateStr → hasAvailable
+      const availMap = {};
+      monthClasses.forEach(c => {
+        const enrolled = c.enrolled_count || 0;
+        const max = c.max_students || 0;
+        if (enrolled < max) availMap[c.date] = true;
+      });
+
+      // Build calendar grid
+      const year = calMonth.getFullYear();
+      const month = calMonth.getMonth();
+      const firstDay = new Date(year, month, 1);
+      let startDay = firstDay.getDay(); // 0=Sun
+      startDay = startDay === 0 ? 6 : startDay - 1; // convert to Mon=0
+      const daysInMonth = monthEnd.getDate();
+      const todayStr = getDateStr(new Date());
+
+      let calCells = '';
+      // Empty cells before first day
+      for (let i = 0; i < startDay; i++) calCells += `<div class="bkw-cal-day empty"></div>`;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const isAvail = availMap[ds];
+        const isToday = ds === todayStr;
+        const cls = `bkw-cal-day${isAvail ? ' available' : ' unavailable'}${isToday ? ' today' : ''}`;
+        calCells += `<div class="${cls}" data-date="${ds}">${d}</div>`;
+      }
+
+      overlay.innerHTML = `
+        <div class="bk-panel bk-panel-fullscreen">
+          <div class="bk-panel-header" style="background:${typeColor};color:#fff;display:flex;align-items:center;gap:12px;padding:16px 24px">
+            <button id="bkw-back" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <h2 style="margin:0;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:1px">${typeLabel.toUpperCase()}</h2>
+            <div style="flex:1"></div>
+            <button id="bkw-close" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="bk-panel-body" style="padding:24px;max-width:480px;margin:0 auto;width:100%">
+            <div class="bkw-step">
+              <div class="bkw-cal-nav">
+                <button id="bkw-prev" class="bkw-cal-arrow">&larr;</button>
+                <span class="bkw-cal-title">${MONTH_FULL[month]} ${year}</span>
+                <button id="bkw-next" class="bkw-cal-arrow">&rarr;</button>
+              </div>
+              <div class="bkw-calendar">
+                <div class="bkw-cal-header">
+                  ${DAY_INITIALS.map(d => `<div class="bkw-cal-day-name">${d}</div>`).join('')}
+                </div>
+                <div class="bkw-cal-grid">
+                  ${calCells}
+                </div>
+              </div>
+              <div class="bkw-cal-legend">
+                <span><span class="bkw-legend-dot" style="background:#22c55e"></span> Disponible</span>
+                <span><span class="bkw-legend-dot" style="background:#fca5a5"></span> Sin plazas</span>
+              </div>
+            </div>
+          </div>
+        </div>`;
+
+      overlay.querySelector('#bkw-close').addEventListener('click', closeWizard);
+      overlay.querySelector('#bkw-back').addEventListener('click', () => renderStep2());
+      overlay.querySelector('#bkw-prev').addEventListener('click', () => {
+        calMonth.setMonth(calMonth.getMonth() - 1);
+        renderStep3();
+      });
+      overlay.querySelector('#bkw-next').addEventListener('click', () => {
+        calMonth.setMonth(calMonth.getMonth() + 1);
+        renderStep3();
+      });
+      // Day click → open booking panel
+      overlay.querySelectorAll('.bkw-cal-day.available').forEach(cell => {
+        cell.addEventListener('click', () => {
+          const dateStr = cell.dataset.date;
+          const dayClasses = monthClasses.filter(c => c.date === dateStr);
+          if (dayClasses.length > 0) {
+            closeWizard();
+            openBookingPanel(dayClasses[0]);
+          }
+        });
+      });
+    }
   }
 
   // ======== NEW SESSION MODAL ========
