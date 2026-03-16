@@ -36,10 +36,7 @@ export async function renderDashboard(container) {
 
     let data;
     try {
-      console.log('[Dashboard] Fetching stats:', dateFrom, '→', dateTo);
       data = await fetchDashboardStats(dateFrom, dateTo);
-      console.log('[Dashboard] Data received:', { payments: data.payments.length, classes: data.classes.length, enrollments: data.enrollments.length, bonos: data.bonos.length, equipment: data.equipment.length });
-      console.log('[Dashboard] Classes detail:', data.classes.map(c => ({ id: c.id, type: c.type, date: c.date, enrolled: c.enrolled_count, max: c.max_students })));
     } catch (err) {
       container.innerHTML = `<p style="color:#ef4444;padding:24px">Error al cargar estadísticas: ${err.message}</p>`;
       console.error('Dashboard render error:', err);
@@ -110,8 +107,8 @@ export async function renderDashboard(container) {
     const totalRentals = data.equipment.length;
     const rentalRevenue = data.equipment.reduce((s, r) => s + Number(r.deposit_paid || 0), 0);
 
-    // Aggregated revenue (use payments as source of truth, fallback to calculated)
-    const totalRevenue = totalPayments || (campRevenue + orderRevenue + bonoRevenue + rentalRevenue);
+    // Aggregated revenue: payments table is source of truth; fallback only if no payments exist at all
+    const totalRevenue = data.payments.length > 0 ? totalPayments : (campRevenue + orderRevenue + bonoRevenue + rentalRevenue);
 
     // IVA / Commission calculations
     const baseImponible = Math.round(totalRevenue / (1 + ivaPct / 100) * 100) / 100;
@@ -308,8 +305,6 @@ export async function renderDashboard(container) {
         </div>
       </div>
     `;
-    console.log('[Dashboard] HTML rendered. KPIs:', { totalRevenue, totalClasses, totalEnrollments, totalStudents, avgOccupancy, classesByType: Object.keys(classesByType) });
-
     // ---- Bind events ----
     // Date presets
     container.querySelectorAll('.dash-preset-btn').forEach(btn => {
