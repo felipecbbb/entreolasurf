@@ -80,6 +80,103 @@ export async function fetchDashboardStats(dateFrom, dateTo) {
   }
 }
 
+// ---- Estadísticas (extended dashboard stats with enrollment-class type cross + user names) ----
+export async function fetchEstadisticas(dateFrom, dateTo) {
+  const base = await fetchDashboardStats(dateFrom, dateTo);
+
+  // Enrollments with class type — two separate queries to avoid schema cache issues
+  const { data: enrollmentsRaw } = await supabase
+    .from('class_enrollments')
+    .select('id, class_id, bono_id, user_id, guest_name, status, created_at')
+    .gte('created_at', dateFrom)
+    .lte('created_at', dateTo + 'T23:59:59');
+
+  const enrollmentsList = enrollmentsRaw || [];
+
+  // Get unique class IDs to fetch their types + details
+  const classIds = [...new Set(enrollmentsList.map(e => e.class_id).filter(Boolean))];
+  let classTypeMap = {};
+  if (classIds.length) {
+    const { data: classTypes } = await supabase
+      .from('surf_classes')
+      .select('id, type')
+      .in('id', classIds);
+    if (classTypes) classTypes.forEach(c => { classTypeMap[c.id] = c.type; });
+  }
+
+  // Merge type into enrollments
+  const enrollmentsWithType = enrollmentsList.map(e => ({
+    ...e,
+    class_type: classTypeMap[e.class_id] || null,
+  }));
+
+  // Bonos with user_id for drill-down
+  const { data: bonosDetailed } = await supabase
+    .from('bonos')
+    .select('id, class_type, total_credits, used_credits, total_paid, status, user_id, created_at')
+    .gte('created_at', dateFrom)
+    .lte('created_at', dateTo + 'T23:59:59');
+
+  // Bookings with user_id
+  const { data: bookingsDetailed } = await supabase
+    .from('bookings')
+    .select('id, total_amount, status, user_id, created_at')
+    .gte('created_at', dateFrom)
+    .lte('created_at', dateTo + 'T23:59:59');
+
+  // Orders with user_id
+  const { data: ordersDetailed } = await supabase
+    .from('orders')
+    .select('id, total, status, user_id, created_at')
+    .gte('created_at', dateFrom)
+    .lte('created_at', dateTo + 'T23:59:59');
+
+  // Equipment with user info
+  const { data: equipDetailed } = await supabase
+    .from('equipment_reservations')
+    .select('id, total_amount, deposit_paid, status, user_id, date_start, date_end')
+    .gte('date_start', dateFrom)
+    .lte('date_start', dateTo + 'T23:59:59');
+
+  // Collect all user IDs and resolve to profile names in one batch
+  const allUserIds = new Set();
+  (bonosDetailed || []).forEach(b => b.user_id && allUserIds.add(b.user_id));
+  (bookingsDetailed || []).forEach(b => b.user_id && allUserIds.add(b.user_id));
+  (ordersDetailed || []).forEach(o => o.user_id && allUserIds.add(o.user_id));
+  (equipDetailed || []).forEach(e => e.user_id && allUserIds.add(e.user_id));
+  enrollmentsList.forEach(e => e.user_id && allUserIds.add(e.user_id));
+
+  let profileMap = {};
+  const userIdArr = [...allUserIds];
+  if (userIdArr.length) {
+    // Supabase .in() max is ~300; batch if needed
+    for (let i = 0; i < userIdArr.length; i += 200) {
+      const batch = userIdArr.slice(i, i + 200);
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, phone')
+        .in('id', batch);
+      if (profiles) profiles.forEach(p => { profileMap[p.id] = p; });
+    }
+  }
+
+  // Helper to attach profile name
+  const withName = (item) => ({
+    ...item,
+    _name: (item.user_id && profileMap[item.user_id]?.full_name) || item.guest_name || null,
+  });
+
+  return {
+    ...base,
+    enrollmentsWithType: enrollmentsWithType.map(withName),
+    bonosDetailed: (bonosDetailed || []).map(withName),
+    bookingsDetailed: (bookingsDetailed || []).map(withName),
+    ordersDetailed: (ordersDetailed || []).map(withName),
+    equipDetailed: (equipDetailed || []).map(withName),
+    profileMap,
+  };
+}
+
 // ---- Bookings ----
 export async function fetchBookings(statusFilter) {
   let query = supabase

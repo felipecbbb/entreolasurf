@@ -20,15 +20,31 @@ export async function renderPayments(panel) {
   const creditBalance = Number(profileRes.data?.credit_balance || 0);
   const activeBonos = bonosRes.data || [];
 
-  // Build unified timeline
+  // Domain colors & labels for type badges
+  const DOMAIN_CONFIG = {
+    enrollment: { label: 'Clase', color: '#22c55e', bg: '#f0fdf4' },
+    rental:     { label: 'Alquiler', color: '#8b5cf6', bg: '#f5f3ff' },
+    custom:     { label: 'Saldo a favor', color: '#f59e0b', bg: '#fffbeb' },
+    bono:       { label: 'Bono', color: '#16a34a', bg: '#f0fdf4' },
+    booking:    { label: 'Surf Camp', color: '#0ea5e9', bg: '#f0f9ff' },
+    order:      { label: 'Tienda', color: '#f59e0b', bg: '#fffbeb' },
+  };
+
+  function domainBadge(domain) {
+    const cfg = DOMAIN_CONFIG[domain];
+    if (!cfg) return `<span class="pay-domain-badge" style="background:#f1f5f9;color:#64748b">${domain}</span>`;
+    return `<span class="pay-domain-badge" style="background:${cfg.bg};color:${cfg.color}">${cfg.label}</span>`;
+  }
+
+  // Build unified timeline with domain info
   const timeline = [];
 
-  const RES_TYPE_LABELS = { enrollment: 'Clase', rental: 'Alquiler', custom: 'Saldo a favor' };
   for (const p of payments) {
+    const domain = p.reservation_type || 'otros';
     timeline.push({
       date: p.payment_date || p.created_at,
-      type: RES_TYPE_LABELS[p.reservation_type] || p.reservation_type,
-      concept: p.concept || (p.reservation_type === 'enrollment' ? 'Pago clase' : p.reservation_type === 'custom' ? 'Saldo a favor' : 'Pago alquiler'),
+      domain,
+      concept: p.concept || (domain === 'enrollment' ? 'Pago clase' : domain === 'custom' ? 'Saldo a favor' : 'Pago alquiler'),
       amount: Number(p.amount),
       method: p.payment_method || '—',
       source: 'admin',
@@ -38,7 +54,7 @@ export async function renderPayments(panel) {
   for (const o of orders) {
     timeline.push({
       date: o.created_at,
-      type: 'Pedido online',
+      domain: 'order',
       concept: `Pedido #${o.id.substring(0, 8)}`,
       amount: Number(o.total),
       method: 'online',
@@ -47,10 +63,12 @@ export async function renderPayments(panel) {
   }
 
   timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
-  const totalPaid = timeline.reduce((s, t) => s + t.amount, 0);
+
+  // Split totals by domain category
+  const servicioTotal = timeline.filter(t => ['enrollment', 'rental', 'bono'].includes(t.domain)).reduce((s, t) => s + t.amount, 0);
+  const tiendaTotal = timeline.filter(t => t.domain === 'order').reduce((s, t) => s + t.amount, 0);
 
   // Calculate pending payment from active bonos
-  // For each active bono, check expected price vs total paid
   let totalPending = 0;
   for (const b of activeBonos) {
     const bonoPayments = (b.payments || []);
@@ -64,9 +82,16 @@ export async function renderPayments(panel) {
   let html = `
     <div class="pay-summary-grid">
       <div class="pay-summary-card pay-summary-green">
-        <div class="pay-summary-label">Créditos comprados</div>
-        <div class="pay-summary-value">${formatPrice(totalPaid)}</div>
+        <div class="pay-summary-label">Servicios</div>
+        <div class="pay-summary-value">${formatPrice(servicioTotal)}</div>
+        <div class="pay-summary-hint">Clases, bonos y alquiler</div>
       </div>
+      ${tiendaTotal > 0 ? `
+      <div class="pay-summary-card" style="border-color:#f59e0b;background:#fffbeb">
+        <div class="pay-summary-label" style="color:#92400e">Tienda</div>
+        <div class="pay-summary-value" style="color:#92400e">${formatPrice(tiendaTotal)}</div>
+        <div class="pay-summary-hint" style="color:#92400e">Pedidos de productos</div>
+      </div>` : ''}
       ${totalPending > 0 ? `
       <div class="pay-summary-card" style="border-color:#ef4444;background:#fef2f2">
         <div class="pay-summary-label" style="color:#b91c1c">Pendiente de pago</div>
@@ -101,7 +126,7 @@ export async function renderPayments(panel) {
               ${timeline.map(t => `
                 <tr>
                   <td data-label="Fecha">${formatDate(t.date)}</td>
-                  <td data-label="Tipo">${t.type}</td>
+                  <td data-label="Tipo">${domainBadge(t.domain)}</td>
                   <td data-label="Concepto">${t.concept}</td>
                   <td data-label="Importe" class="pay-amount">+${formatPrice(t.amount)}</td>
                   <td data-label="Método">${METHOD_LABELS[t.method] || t.method}</td>

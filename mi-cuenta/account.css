@@ -982,6 +982,15 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   color: #1d4ed8;
 }
 
+.pay-domain-badge {
+  display: inline-block;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+
 /* ============================================================
    Bono Payment Info
    ============================================================ */

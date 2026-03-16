@@ -1,7 +1,7 @@
 /* ============================================================
    Dashboard Section — Full statistics with date range filtering
    ============================================================ */
-import { fetchDashboardStats } from '../modules/api.js';
+import { fetchDashboardStats, fetchClassesInRange } from '../modules/api.js';
 import { formatCurrency, showToast } from '../modules/ui.js';
 import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js';
 
@@ -34,9 +34,13 @@ export async function renderDashboard(container) {
   async function render() {
     container.innerHTML = '<p style="color:var(--color-muted);padding:24px">Cargando estadísticas…</p>';
 
-    let data;
+    let data, todayClasses;
     try {
-      data = await fetchDashboardStats(dateFrom, dateTo);
+      const todayStr = fmtDate(today);
+      [data, todayClasses] = await Promise.all([
+        fetchDashboardStats(dateFrom, dateTo),
+        fetchClassesInRange(todayStr, todayStr),
+      ]);
     } catch (err) {
       container.innerHTML = `<p style="color:#ef4444;padding:24px">Error al cargar estadísticas: ${err.message}</p>`;
       console.error('Dashboard render error:', err);
@@ -181,7 +185,7 @@ export async function renderDashboard(container) {
           <div class="dash-kpi-sub">${ticketCount} transacciones</div>
         </div>
         <div class="dash-kpi-card">
-          <div class="dash-kpi-label">Reservas</div>
+          <div class="dash-kpi-label">Inscripciones a Clases</div>
           <div class="dash-kpi-value">${totalEnrollments}</div>
           <div class="dash-kpi-sub">${enrollWithBono} con bono · ${enrollWithout} directas</div>
         </div>
@@ -192,18 +196,44 @@ export async function renderDashboard(container) {
         </div>
       </div>
 
+      <!-- Clases Activas Hoy -->
+      <div class="dash-section">
+        <h3 class="dash-section-title">Clases Activas Hoy</h3>
+        ${todayClasses.length > 0 ? `
+          <div class="dash-today-grid">
+            ${todayClasses.map(c => {
+              const ratio = (c.enrolled_count || 0) / (c.max_students || 1);
+              const barColor = ratio >= 1 ? '#ef4444' : ratio >= 0.8 ? '#f59e0b' : '#22c55e';
+              const pct = Math.min(Math.round(ratio * 100), 100);
+              return `
+                <div class="dash-today-card" data-goto="calendario" style="border-left:4px solid ${TYPE_COLORS[c.type] || '#64748b'}">
+                  <div class="dash-today-type">${TYPE_LABELS[c.type] || c.type}</div>
+                  <div class="dash-today-time">${(c.time_start || '').slice(0, 5)} – ${(c.time_end || '').slice(0, 5)}</div>
+                  <div class="dash-today-bar">
+                    <div class="dash-today-bar-track">
+                      <div class="dash-today-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+                    </div>
+                    <span class="dash-today-occupancy">${c.enrolled_count || 0}/${c.max_students || 0} plazas</span>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        ` : '<p class="dash-empty">No hay clases programadas para hoy</p>'}
+      </div>
+
       <!-- Revenue breakdown -->
       <div class="dash-section">
         <h3 class="dash-section-title">Desglose de Ingresos</h3>
         <div class="dash-breakdown-grid">
           <div class="dash-breakdown-card">
-            <h4>Por tipo de actividad</h4>
+            <h4>Por línea de negocio</h4>
             <div class="dash-bar-list">
               ${renderBarList([
-                { label: 'Camps', value: campRevenue, color: '#0ea5e9' },
-                { label: 'Bonos / Packs', value: bonoRevenue, color: '#22c55e' },
-                { label: 'Tienda', value: orderRevenue, color: '#f59e0b' },
-                { label: 'Alquiler material', value: rentalRevenue, color: '#8b5cf6' },
+                { label: 'Clases / Actividades', value: byType['enrollment'] || 0, color: '#22c55e' },
+                { label: 'Bonos / Packs', value: byType['bono'] || 0, color: '#16a34a' },
+                { label: 'Surf Camps', value: byType['booking'] || 0, color: '#0ea5e9' },
+                { label: 'Tienda (productos)', value: byType['order'] || 0, color: '#f59e0b' },
+                { label: 'Alquiler material', value: byType['equipment'] || 0, color: '#8b5cf6' },
               ], totalRevenue)}
             </div>
           </div>
@@ -343,6 +373,11 @@ export async function renderDashboard(container) {
       saveSettings({ ...loadSettings(), iva_pct: ivaPct, comision_pct: comisionPct });
       showToast('Configuración guardada', 'success');
       render();
+    });
+
+    // Today class cards → navigate to calendario
+    container.querySelectorAll('.dash-today-card').forEach(card => {
+      card.addEventListener('click', () => { location.hash = '#calendario'; });
     });
 
     } catch (renderErr) {

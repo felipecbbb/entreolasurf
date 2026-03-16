@@ -416,11 +416,11 @@ export async function renderClientes(container) {
         { id: 'clases', label: 'Historial clases', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' },
         { id: 'bonos', label: 'Bonos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>' },
       ]},
-      { group: 'COMERCIAL', items: [
+      { group: 'ACTIVIDAD COMERCIAL', items: [
         { id: 'pagos', label: 'Historial pagos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>' },
-        { id: 'reservas', label: 'Reservas', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
-        { id: 'alquileres', label: 'Alquileres', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 00-8 0v2"/></svg>' },
-        { id: 'pedidos', label: 'Pedidos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>' },
+        { id: 'reservas', label: 'Surf Camps', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
+        { id: 'alquileres', label: 'Alquiler Material', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 00-8 0v2"/></svg>' },
+        { id: 'pedidos', label: 'Pedidos Tienda', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>' },
       ]},
     ];
 
@@ -1096,27 +1096,38 @@ export async function renderClientes(container) {
         fetchClientOrders(c.id),
       ]);
 
-      // Merge into unified timeline
+      // Merge into unified timeline with domain info
       const timeline = [];
 
-      // Manual/admin payments
-      const RES_TYPE_LABELS = { enrollment: 'Clase', rental: 'Alquiler', custom: 'Saldo a favor' };
+      // Domain colors & labels for type badges
+      const DOMAIN_CONFIG = {
+        enrollment: { label: 'Clase', color: '#22c55e', bg: '#f0fdf4' },
+        rental:     { label: 'Alquiler', color: '#8b5cf6', bg: '#f5f3ff' },
+        custom:     { label: 'Saldo a favor', color: '#f59e0b', bg: '#fffbeb' },
+        bono:       { label: 'Bono', color: '#16a34a', bg: '#f0fdf4' },
+        booking:    { label: 'Surf Camp', color: '#0ea5e9', bg: '#f0f9ff' },
+        order:      { label: 'Tienda', color: '#f59e0b', bg: '#fffbeb' },
+      };
+
       for (const p of payments) {
+        const domain = p.reservation_type || 'otros';
         timeline.push({
           date: p.payment_date || p.created_at,
-          type: RES_TYPE_LABELS[p.reservation_type] || p.reservation_type,
-          concept: p.concept || (p.reservation_type === 'enrollment' ? 'Pago clase' : p.reservation_type === 'custom' ? 'Saldo a favor' : 'Pago alquiler'),
+          domain,
+          type: DOMAIN_CONFIG[domain]?.label || domain,
+          concept: p.concept || (domain === 'enrollment' ? 'Pago clase' : domain === 'custom' ? 'Saldo a favor' : 'Pago alquiler'),
           amount: Number(p.amount),
           method: p.payment_method || '—',
           source: 'admin',
         });
       }
 
-      // Online orders (checkout)
+      // Online orders (checkout) — tienda domain
       for (const o of orders) {
         timeline.push({
           date: o.created_at,
-          type: 'Pedido online',
+          domain: 'order',
+          type: 'Tienda',
           concept: `Pedido #${o.id.substring(0, 8)}`,
           amount: Number(o.total),
           method: 'online',
@@ -1124,17 +1135,26 @@ export async function renderClientes(container) {
         });
       }
 
-      // Sort by date descending
       timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+      // Split totals by domain category
+      const servicioTotal = timeline.filter(t => ['enrollment', 'rental', 'bono'].includes(t.domain)).reduce((s, t) => s + t.amount, 0);
+      const tiendaTotal = timeline.filter(t => t.domain === 'order').reduce((s, t) => s + t.amount, 0);
+      const campTotal = timeline.filter(t => t.domain === 'booking').reduce((s, t) => s + t.amount, 0);
       const totalPaid = timeline.reduce((s, t) => s + t.amount, 0);
       const creditBalance = Number(c.credit_balance || 0);
 
       const METHOD_LABELS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', online: 'Online', saldo: 'Saldo' };
 
+      function domainBadge(domain) {
+        const cfg = DOMAIN_CONFIG[domain];
+        if (!cfg) return `<span style="font-size:.75rem;padding:2px 8px;border-radius:99px;background:#f1f5f9;color:#64748b">${domain}</span>`;
+        return `<span style="font-size:.75rem;padding:2px 8px;border-radius:99px;background:${cfg.bg};color:${cfg.color};font-weight:600">${cfg.label}</span>`;
+      }
+
       const rows = timeline.map(t => `<tr>
         <td>${formatDate(t.date)}</td>
-        <td>${esc(t.type)}</td>
+        <td>${domainBadge(t.domain)}</td>
         <td>${esc(t.concept)}</td>
         <td style="font-weight:600;color:#065f46">+${formatCurrency(t.amount)}</td>
         <td>${METHOD_LABELS[t.method] || t.method}</td>
@@ -1146,11 +1166,21 @@ export async function renderClientes(container) {
           <h3 class="act-detail-section-title" style="margin:0">Historial de pagos (${timeline.length})</h3>
           <button class="btn red" id="cli-add-payment" style="font-size:.82rem;padding:6px 14px">+ Añadir pago</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">
           <div class="act-form-card" style="padding:14px 18px;margin:0;background:#f0fdf4;border-color:#bbf7d0">
-            <div style="font-size:.72rem;text-transform:uppercase;color:#065f46;font-weight:600;margin-bottom:2px">Total pagado</div>
-            <div style="font-size:1.3rem;font-family:'Bebas Neue',sans-serif;color:#065f46">${formatCurrency(totalPaid)}</div>
+            <div style="font-size:.72rem;text-transform:uppercase;color:#065f46;font-weight:600;margin-bottom:2px">Servicios</div>
+            <div style="font-size:1.3rem;font-family:'Bebas Neue',sans-serif;color:#065f46">${formatCurrency(servicioTotal)}</div>
+            <div style="font-size:.7rem;color:#065f46">Clases, bonos, alquiler</div>
           </div>
+          ${campTotal > 0 ? `<div class="act-form-card" style="padding:14px 18px;margin:0;background:#f0f9ff;border-color:#bae6fd">
+            <div style="font-size:.72rem;text-transform:uppercase;color:#0369a1;font-weight:600;margin-bottom:2px">Surf Camps</div>
+            <div style="font-size:1.3rem;font-family:'Bebas Neue',sans-serif;color:#0369a1">${formatCurrency(campTotal)}</div>
+          </div>` : ''}
+          ${tiendaTotal > 0 ? `<div class="act-form-card" style="padding:14px 18px;margin:0;background:#fffbeb;border-color:#fde68a">
+            <div style="font-size:.72rem;text-transform:uppercase;color:#92400e;font-weight:600;margin-bottom:2px">Tienda</div>
+            <div style="font-size:1.3rem;font-family:'Bebas Neue',sans-serif;color:#92400e">${formatCurrency(tiendaTotal)}</div>
+            <div style="font-size:.7rem;color:#92400e">Productos online</div>
+          </div>` : ''}
           <div class="act-form-card" style="padding:14px 18px;margin:0;background:${creditBalance > 0 ? '#fffbeb' : '#f8fafc'};border-color:${creditBalance > 0 ? '#fde68a' : '#e2e8f0'}">
             <div style="font-size:.72rem;text-transform:uppercase;color:${creditBalance > 0 ? '#92400e' : 'var(--color-muted)'};font-weight:600;margin-bottom:2px">Saldo a favor</div>
             <div style="font-size:1.3rem;font-family:'Bebas Neue',sans-serif;color:${creditBalance > 0 ? '#92400e' : 'var(--color-muted)'}">${formatCurrency(creditBalance)}</div>
@@ -1160,7 +1190,7 @@ export async function renderClientes(container) {
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Metodo</th><th>Origen</th>
+                <th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Método</th><th>Origen</th>
               </tr></thead>
               <tbody>${rows}</tbody>
             </table>
@@ -1181,9 +1211,9 @@ export async function renderClientes(container) {
 
       if (!bookings.length) {
         el.innerHTML = `
-          <h3 class="act-detail-section-title">Reservas</h3>
+          <h3 class="act-detail-section-title">Surf Camps</h3>
           <div class="act-form-card">
-            <div class="admin-empty"><p>Este cliente no tiene reservas</p></div>
+            <div class="admin-empty"><p>Este cliente no tiene reservas de surf camp</p></div>
           </div>`;
         return;
       }
@@ -1197,7 +1227,7 @@ export async function renderClientes(container) {
       </tr>`).join('');
 
       el.innerHTML = `
-        <h3 class="act-detail-section-title">Reservas (${bookings.length})</h3>
+        <h3 class="act-detail-section-title">Surf Camps (${bookings.length})</h3>
         <div class="act-form-card" style="padding:0;overflow:hidden">
           <div class="table-wrap">
             <table>
@@ -1264,9 +1294,9 @@ export async function renderClientes(container) {
 
       if (!orders.length) {
         el.innerHTML = `
-          <h3 class="act-detail-section-title">Pedidos</h3>
+          <h3 class="act-detail-section-title">Pedidos Tienda</h3>
           <div class="act-form-card">
-            <div class="admin-empty"><p>Este cliente no tiene pedidos</p></div>
+            <div class="admin-empty"><p>Este cliente no tiene pedidos en la tienda</p></div>
           </div>`;
         return;
       }
@@ -1279,7 +1309,7 @@ export async function renderClientes(container) {
       </tr>`).join('');
 
       el.innerHTML = `
-        <h3 class="act-detail-section-title">Pedidos (${orders.length})</h3>
+        <h3 class="act-detail-section-title">Pedidos Tienda (${orders.length})</h3>
         <div class="act-form-card" style="padding:0;overflow:hidden">
           <div class="table-wrap">
             <table>

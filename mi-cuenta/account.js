@@ -416,8 +416,8 @@ const TAB_TITLES = {
   bonos: { title: 'Mis Bonos', desc: 'Gestiona tus packs de clases' },
   calendario: { title: 'Reservar Clases', desc: 'Consulta el calendario y reserva' },
   clases: { title: 'Mis Clases', desc: 'Consulta tus reservas de clases' },
-  pagos: { title: 'Mis Pagos', desc: 'Historial de pagos y saldo a favor' },
-  pedidos: { title: 'Mis Pedidos', desc: 'Historial de compras en la tienda' },
+  pagos: { title: 'Mis Pagos', desc: 'Historial de pagos de servicios, bonos y compras' },
+  pedidos: { title: 'Mis Pedidos', desc: 'Pedidos de productos en la tienda online' },
 };
 
 // ---- Dashboard view ----

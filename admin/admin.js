@@ -16,6 +16,7 @@ import { renderCalendario } from './sections/calendario.js';
 import { renderActividades } from './sections/actividades.js';
 
 import { renderMaterial } from './sections/material.js';
+import { renderEstadisticas } from './sections/estadisticas.js';
 
 // DOM refs
 const loginView = document.getElementById('login-view');
@@ -56,6 +57,7 @@ register('calendario', renderCalendario);
 register('actividades', renderActividades);
 
 register('material', renderMaterial);
+register('estadisticas', renderEstadisticas);
 
 // ---- Login form ----
 loginForm.addEventListener('submit', async (e) => {

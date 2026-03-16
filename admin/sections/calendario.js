@@ -2197,8 +2197,8 @@ export async function renderCalendario(container) {
     const now = res.createdAt;
     const dateStr = `${DAY_NAMES_FULL[now.getDay()].toLowerCase()}, ${now.getDate()} de ${MONTH_NAMES[now.getMonth()].toLowerCase().replace('.', '')} de ${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const shortId = res.id.slice(0, 24);
-    let statusLabel = res.status === 'paid' ? 'Pagado' : res.pending > 0 ? 'Pendiente' : 'Confirmado';
-    let statusColor = res.status === 'paid' ? '#166534' : res.pending > 0 ? '#b91c1c' : '#0ea5e9';
+    let statusLabel = res.status === 'paid' ? 'Pagado' : res.status === 'partial' ? 'Pago parcial' : res.pending > 0 ? 'Pendiente' : 'Confirmado';
+    let statusColor = res.status === 'paid' ? '#166534' : res.status === 'partial' ? '#d97706' : res.pending > 0 ? '#b91c1c' : '#0ea5e9';
     const pendingColor = res.pending > 0 ? '#b91c1c' : '#166534';
     let activeTab = 'resumen';
 
@@ -2458,16 +2458,26 @@ export async function renderCalendario(container) {
 
         let paymentsListHtml = '';
         if (allPayments.length) {
-          paymentsListHtml = allPayments.map(p => {
+          paymentsListHtml = allPayments.map((p, idx) => {
             const d = new Date(p.date || p.payment_date);
             const methodKey = p.method || p.payment_method;
             const amt = Number(p.amount || 0);
             const creditUsed = Number(p.creditUsed || 0);
             const dateLabel = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            const payId = p.id || '';
+            const isAnticipo = idx === 0 && res.cobrarAnticipo && res.anticipoAmount > 0;
+            const deleteBtn = payId && !isAnticipo
+              ? `<button class="rv-delete-payment-btn" data-payment-id="${payId}" data-payment-amount="${amt}" title="Eliminar pago" style="background:none;border:none;cursor:pointer;color:#94a3b8;padding:2px 4px;margin-left:6px;border-radius:4px;transition:color .15s">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+                </button>`
+              : '';
             return `
-              <div class="rv-pay-row">
-                <span>${dateLabel} · ${METHOD_LABELS[methodKey] || methodKey}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}</span>
-                <strong style="color:#166534">+${amt.toFixed(2)}€</strong>
+              <div class="rv-pay-row" style="align-items:center">
+                <span>${dateLabel} · ${METHOD_LABELS[methodKey] || methodKey}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}${p.concept ? ` · ${p.concept}` : ''}</span>
+                <span style="display:flex;align-items:center;gap:2px">
+                  <strong style="color:#166534">+${amt.toFixed(2)}€</strong>
+                  ${deleteBtn}
+                </span>
               </div>`;
           }).join('');
         } else {
@@ -2659,6 +2669,40 @@ export async function renderCalendario(container) {
       // Add payment buttons
       overlay.querySelector('#rv-add-payment')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
       overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
+
+      // Delete payment buttons
+      overlay.querySelectorAll('.rv-delete-payment-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const paymentId = btn.dataset.paymentId;
+          const paymentAmount = parseFloat(btn.dataset.paymentAmount) || 0;
+          if (!paymentId) return;
+
+          if (!confirm(`¿Eliminar este pago de ${paymentAmount.toFixed(2)}€? El importe se sumará al pendiente.`)) return;
+
+          btn.disabled = true;
+          try {
+            await deletePayment(paymentId);
+
+            // Remove from res.payments
+            const idx = res.payments.findIndex(p => p.id === paymentId);
+            if (idx !== -1) res.payments.splice(idx, 1);
+
+            // Recalculate pending and status
+            res.pending = Math.round((res.pending + paymentAmount) * 100) / 100;
+            const totalPaid = res.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+            const newStatus = totalPaid <= 0 ? 'confirmed' : (res.pending <= 0 ? 'paid' : 'partial');
+            res.status = newStatus;
+            await updateEnrollmentStatus(res.id, newStatus).catch(() => {});
+
+            showToast('Pago eliminado', 'success');
+            renderDetail();
+          } catch (err) {
+            showToast('Error al eliminar: ' + err.message, 'error');
+            btn.disabled = false;
+          }
+        });
+      });
 
       // Bono card clicks — toggle selection
       overlay.querySelectorAll('.rv-bono-card').forEach(card => {
@@ -2916,22 +2960,28 @@ export async function renderCalendario(container) {
             </div>
           </div>
           <div style="padding:24px">
-            <form class="rv-payment-form-el trip-form">
-              <label>Importe</label>
-              <input type="number" class="rv-pay-amount-el" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
-              <label>Método de pago</label>
-              <select name="method" required>
-                <option value="">Seleccionar…</option>
-                <option value="efectivo">Efectivo</option>
-                <option value="tarjeta">Tarjeta</option>
-                <option value="transferencia">Transferencia</option>
-                <option value="voucher">Voucher</option>
-                <option value="saldo">Saldo a favor</option>
-              </select>
+            <form class="rv-payment-form-el trip-form" style="gap:16px">
+              <div>
+                <label style="display:block;margin-bottom:6px">Importe (€)</label>
+                <input type="number" class="rv-pay-amount-el" name="amount" step="0.01" value="${res.pending.toFixed(2)}" required />
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:6px">Método de pago</label>
+                <select name="method" required>
+                  <option value="">Seleccionar…</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="voucher">Voucher</option>
+                  <option value="saldo">Saldo a favor</option>
+                </select>
+              </div>
               ${creditOptionHtml}
-              <label>Notas</label>
-              <input type="text" name="notes" placeholder="Opcional" />
-              <button type="submit" class="bk-final-confirm-btn" style="margin-top:12px">Registrar Pago</button>
+              <div>
+                <label style="display:block;margin-bottom:6px">Notas</label>
+                <input type="text" name="notes" placeholder="Opcional" />
+              </div>
+              <button type="submit" class="bk-final-confirm-btn" style="margin-top:4px">Registrar Pago</button>
             </form>
           </div>
         </div>`;
@@ -2986,7 +3036,7 @@ export async function renderCalendario(container) {
         const effectiveMethod = creditUsed >= amount ? 'saldo' : (method || 'saldo');
 
         // Persist payment to DB
-        await createPayment({
+        const savedPayment = await createPayment({
           reservation_type: 'enrollment',
           reference_id: res.id,
           amount,
@@ -2995,13 +3045,12 @@ export async function renderCalendario(container) {
         });
 
         res.pending = Math.max(0, res.pending - amount);
-        if (res.pending <= 0) res.status = 'paid';
-        res.payments.push({ amount, method: effectiveMethod, creditUsed, date: new Date().toISOString() });
+        res.payments.push({ ...savedPayment, method: effectiveMethod, creditUsed, date: savedPayment.payment_date || new Date().toISOString() });
 
-        // Update enrollment status if fully paid
-        if (res.pending <= 0) {
-          await updateEnrollmentStatus(res.id, 'paid').catch(() => {});
-        }
+        // Update enrollment status based on payment state
+        const newStatus = res.pending <= 0 ? 'paid' : 'partial';
+        res.status = newStatus;
+        await updateEnrollmentStatus(res.id, newStatus).catch(() => {});
 
         modal.remove();
         showToast(`Pago de ${amount.toFixed(2)}€ registrado${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ de saldo)` : ` (${effectiveMethod})`}`, 'success');
@@ -3034,18 +3083,22 @@ export async function renderCalendario(container) {
                 <div style="font-size:.85rem;color:#92400e;font-weight:600">${TYPE_LABELS[bono.class_type] || bono.class_type} · ${bono.total_credits} clases</div>
                 <div style="font-size:.82rem;color:#92400e;margin-top:4px">Pagado: ${bono.totalPaidReal.toFixed(2)}€ / ${bono.expectedPrice.toFixed(2)}€ · <strong>Debe: ${pendingAmount.toFixed(2)}€</strong></div>
               </div>
-              <label>Importe</label>
-              <input type="number" name="amount" step="0.01" value="${pendingAmount.toFixed(2)}" required />
-              <label>Método de pago</label>
-              <select name="method" required>
-                <option value="">Seleccionar…</option>
-                <option value="efectivo">Efectivo</option>
-                <option value="tarjeta">Tarjeta</option>
-                <option value="transferencia">Transferencia</option>
-                <option value="voucher">Voucher</option>
-                <option value="saldo">Saldo a favor</option>
-              </select>
-              <button type="submit" class="bk-final-confirm-btn" style="margin-top:12px">Registrar Pago</button>
+              <div>
+                <label style="display:block;margin-bottom:6px">Importe (€)</label>
+                <input type="number" name="amount" step="0.01" value="${pendingAmount.toFixed(2)}" required />
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:6px">Método de pago</label>
+                <select name="method" required>
+                  <option value="">Seleccionar…</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="voucher">Voucher</option>
+                  <option value="saldo">Saldo a favor</option>
+                </select>
+              </div>
+              <button type="submit" class="bk-final-confirm-btn" style="margin-top:4px">Registrar Pago</button>
             </form>
           </div>
         </div>`;

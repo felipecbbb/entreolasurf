@@ -9,6 +9,7 @@ let titleEl = null;
 
 const sectionTitles = {
   dashboard: 'Dashboard',
+  estadisticas: 'Estadísticas',
   reservas: 'Reservas',
   actividades: 'Actividades',
   camps: 'Surf Camps',
