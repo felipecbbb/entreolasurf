@@ -374,14 +374,20 @@ function getPresetDates(preset) {
       const day = now.getDay();
       const mon = new Date(now);
       mon.setDate(d - (day === 0 ? 6 : day - 1));
-      return { from: fmt(mon), to: fmt(now) };
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      return { from: fmt(mon), to: fmt(sun) };
     }
-    case 'month': return { from: `${y}-${pad(m + 1)}-01`, to: fmt(now) };
+    case 'month': {
+      const lastDay = new Date(y, m + 1, 0);
+      return { from: `${y}-${pad(m + 1)}-01`, to: fmt(lastDay) };
+    }
     case 'quarter': {
       const qStart = new Date(y, Math.floor(m / 3) * 3, 1);
-      return { from: fmt(qStart), to: fmt(now) };
+      const qEnd = new Date(y, Math.floor(m / 3) * 3 + 3, 0);
+      return { from: fmt(qStart), to: fmt(qEnd) };
     }
-    case 'year': return { from: `${y}-01-01`, to: fmt(now) };
+    case 'year': return { from: `${y}-01-01`, to: `${y}-12-31` };
     default: return { from: fmt(now), to: fmt(now) };
   }
 }
@@ -400,12 +406,18 @@ function getDateRangeLabel(from, to) {
   const day = now.getDay();
   const mon = new Date(now);
   mon.setDate(d - (day === 0 ? 6 : day - 1));
-  if (from === fmt(mon) && to === todayStr) return 'Esta semana';
-  if (from === `${y}-${pad(m + 1)}-01` && to === todayStr) return 'Este mes';
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  if (from === fmt(mon) && to === fmt(sun)) return 'Esta semana';
+
+  const lastDay = new Date(y, m + 1, 0);
+  if (from === `${y}-${pad(m + 1)}-01` && to === fmt(lastDay)) return 'Este mes';
 
   const qStart = new Date(y, Math.floor(m / 3) * 3, 1);
-  if (from === fmt(qStart) && to === todayStr) return 'Este trimestre';
-  if (from === `${y}-01-01` && to === todayStr) return 'Este año';
+  const qEnd = new Date(y, Math.floor(m / 3) * 3 + 3, 0);
+  if (from === fmt(qStart) && to === fmt(qEnd)) return 'Este trimestre';
+
+  if (from === `${y}-01-01` && to === `${y}-12-31`) return 'Este año';
 
   return 'Personalizado';
 }
