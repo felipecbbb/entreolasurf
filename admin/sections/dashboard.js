@@ -21,18 +21,26 @@ function getSetting(key, fallback) {
 }
 
 export async function renderDashboard(container) {
-  // Date range state
+  // Date range state (use local timezone, not UTC)
   const today = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmtDate = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  let dateFrom = getSetting('dash_from', monthStart.toISOString().slice(0, 10));
-  let dateTo = getSetting('dash_to', today.toISOString().slice(0, 10));
+  let dateFrom = getSetting('dash_from', fmtDate(monthStart));
+  let dateTo = getSetting('dash_to', fmtDate(today));
   let ivaPct = getSetting('iva_pct', 21);
   let comisionPct = getSetting('comision_pct', 0);
 
   async function render() {
     container.innerHTML = '<p style="color:var(--color-muted);padding:24px">Cargando estadísticas…</p>';
 
-    const data = await fetchDashboardStats(dateFrom, dateTo);
+    let data;
+    try {
+      data = await fetchDashboardStats(dateFrom, dateTo);
+    } catch (err) {
+      container.innerHTML = `<p style="color:#ef4444;padding:24px">Error al cargar estadísticas: ${err.message}</p>`;
+      return;
+    }
 
     // ---- Calculations ----
     const payments = data.payments;

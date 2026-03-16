@@ -676,7 +676,7 @@ export async function renderCalendario(container) {
                     }));
 
                     // If enrollment is linked to a bono, pre-select it
-                    linkedBono = linkedBonoId ? enrichedBonos.find(b => b.id === linkedBonoId) : null;
+                    linkedBono = linkedBonoId ? (enrichedBonos.find(b => b.id === linkedBonoId) || null) : null;
                     personCredits['p1'] = {
                       allBonos: enrichedBonos,
                       useCredit: !!linkedBono,
@@ -722,8 +722,12 @@ export async function renderCalendario(container) {
                   paymentMethod: '',
                 };
 
+                // Remove any existing detail overlay to prevent stacking
+                document.getElementById('rv-detail-overlay')?.remove();
+
                 const overlay = document.createElement('div');
                 overlay.className = 'bk-overlay bk-overlay-fullscreen';
+                overlay.id = 'rv-detail-overlay';
                 overlay.innerHTML = `<div class="bk-panel bk-panel-fullscreen"><div class="bk-panel-header"></div><div class="bk-panel-body"></div></div>`;
                 document.body.appendChild(overlay);
 
@@ -877,9 +881,10 @@ export async function renderCalendario(container) {
 
     // State
     let bookingWeekOffset = 0;
+    let personIdCounter = 1;
     let sessionQuantities = {}; // classId → quantity
     sessionQuantities[cls.id] = 1;
-    let persons = [{ id: Date.now(), nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, sessions: [cls.id] }];
+    let persons = [{ id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, sessions: [cls.id] }];
 
     function getTotalQuantity() {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
@@ -1116,6 +1121,8 @@ export async function renderCalendario(container) {
       bindPanelEvents();
     }
 
+    let weekNavLoading = false;
+
     function getWeekDatesForOffset(baseDateStr, offset) {
       const base = new Date(baseDateStr + 'T00:00:00');
       base.setDate(base.getDate() + offset * 7);
@@ -1146,7 +1153,7 @@ export async function renderCalendario(container) {
             // Ensure we have enough persons for this session qty
             while (persons.length < newQty) {
               persons.push({
-                id: Date.now() + persons.length,
+                id: personIdCounter++,
                 nombre: '', apellidos: '', edad: '', sabeNadar: '',
                 lesion: 'no', lesionDetalle: '', tallaNeopreno: '',
                 nivelSurf: 'principiante', profileId: null, profileName: null,
@@ -1189,31 +1196,39 @@ export async function renderCalendario(container) {
         });
       });
 
-      // Week navigation
+      // Week navigation (with loading guard to prevent race conditions)
       overlay.querySelector('#bk-week-prev')?.addEventListener('click', async () => {
-        bookingWeekOffset--;
-        const wd = getWeekDatesForOffset(cls.date, bookingWeekOffset);
-        const moreClasses = await fetchClassesInRange(getDateStr(wd[0]), getDateStr(wd[6]));
-        moreClasses.filter(c => c.type === cls.type).forEach(c => {
-          if (!sameTypeWeek.find(s => s.id === c.id)) sameTypeWeek.push(c);
-        });
-        renderPanel();
+        if (weekNavLoading) return;
+        weekNavLoading = true;
+        try {
+          bookingWeekOffset--;
+          const wd = getWeekDatesForOffset(cls.date, bookingWeekOffset);
+          const moreClasses = await fetchClassesInRange(getDateStr(wd[0]), getDateStr(wd[6]));
+          moreClasses.filter(c => c.type === cls.type).forEach(c => {
+            if (!sameTypeWeek.find(s => s.id === c.id)) sameTypeWeek.push(c);
+          });
+          renderPanel();
+        } finally { weekNavLoading = false; }
       });
       overlay.querySelector('#bk-week-next')?.addEventListener('click', async () => {
-        bookingWeekOffset++;
-        const wd = getWeekDatesForOffset(cls.date, bookingWeekOffset);
-        const moreClasses = await fetchClassesInRange(getDateStr(wd[0]), getDateStr(wd[6]));
-        moreClasses.filter(c => c.type === cls.type).forEach(c => {
-          if (!sameTypeWeek.find(s => s.id === c.id)) sameTypeWeek.push(c);
-        });
-        renderPanel();
+        if (weekNavLoading) return;
+        weekNavLoading = true;
+        try {
+          bookingWeekOffset++;
+          const wd = getWeekDatesForOffset(cls.date, bookingWeekOffset);
+          const moreClasses = await fetchClassesInRange(getDateStr(wd[0]), getDateStr(wd[6]));
+          moreClasses.filter(c => c.type === cls.type).forEach(c => {
+            if (!sameTypeWeek.find(s => s.id === c.id)) sameTypeWeek.push(c);
+          });
+          renderPanel();
+        } finally { weekNavLoading = false; }
       });
 
       // Add person
       overlay.querySelector('#bk-add-person')?.addEventListener('click', () => {
         const selectedSessions = Object.keys(sessionQuantities).filter(sid => sessionQuantities[sid] > 0);
         persons.push({
-          id: Date.now(),
+          id: personIdCounter++,
           nombre: '',
           apellidos: '',
           edad: '',
@@ -1901,8 +1916,10 @@ export async function renderCalendario(container) {
           if (!contactData.nombre.trim()) { showToast('El nombre de contacto es obligatorio', 'error'); return; }
           if (!contactData.email.trim()) { showToast('El email de contacto es obligatorio', 'error'); return; }
           if (cobrarAnticipo && !paymentMethod) { showToast('Selecciona un método de pago para el anticipo', 'error'); return; }
-          if (cobrarAnticipo && !anticipoAmount) {
-            // Default to full amount if not specified
+          if (cobrarAnticipo && (!anticipoAmount || anticipoAmount <= 0)) {
+            anticipoAmount = getTotal();
+          }
+          if (cobrarAnticipo && anticipoAmount > getTotal()) {
             anticipoAmount = getTotal();
           }
 
@@ -1911,8 +1928,11 @@ export async function renderCalendario(container) {
           btn.textContent = 'Guardando…';
 
           try {
+            // Track accumulated bono credit usage across persons
+            const bonoCreditsUsed = {}; // bonoId → total credits consumed in this booking
+
             // Link contact profile to first person if available from search
-            if (contactData.profileId && !persons[0].profileId) {
+            if (persons.length > 0 && contactData.profileId && !persons[0].profileId) {
               persons[0].profileId = contactData.profileId;
               persons[0].profileName = contactData.nombre;
             }
@@ -1956,6 +1976,12 @@ export async function renderCalendario(container) {
                 if (usingCredit) {
                   // Credit from bono — use selected bono
                   const selectedBono = pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono;
+                  if (!selectedBono) {
+                    showToast(`No hay bono disponible para ${p.profileName || p.nombre || 'persona'}`, 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Confirmar';
+                    return;
+                  }
                   enrollData.bono_id = selectedBono.id;
                   // If bono has pending payment (e.g. only 15€ deposit paid), mark as partial (orange)
                   enrollData.status = selectedBono.isFullyPaid ? 'paid' : 'partial';
@@ -1975,12 +2001,13 @@ export async function renderCalendario(container) {
                 await createEnrollment(enrollData);
               }
 
-              // Consume bono credits
+              // Consume bono credits (accumulate locally to avoid stale values when multiple persons use same bono)
               if (usingCredit) {
                 const selectedBono = pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono;
                 const sessionsUsed = p.sessions.length;
+                bonoCreditsUsed[selectedBono.id] = (bonoCreditsUsed[selectedBono.id] || 0) + sessionsUsed;
                 await supabase.from('bonos').update({
-                  used_credits: selectedBono.used_credits + sessionsUsed,
+                  used_credits: selectedBono.used_credits + bonoCreditsUsed[selectedBono.id],
                   updated_at: new Date().toISOString(),
                 }).eq('id', selectedBono.id);
               }
@@ -3159,6 +3186,9 @@ export async function renderCalendario(container) {
 
   // ======== BOOKING WIZARD ========
   function openBookingWizard() {
+    // Remove existing wizard overlay if any
+    document.getElementById('bkw-overlay')?.remove();
+
     const overlay = document.createElement('div');
     overlay.className = 'bk-overlay bk-overlay-fullscreen';
     overlay.id = 'bkw-overlay';
@@ -3731,8 +3761,12 @@ export async function renderCalendario(container) {
     let rdActiveTab = 'resumen';
     let payments = null; // lazy loaded
 
+    // Remove any existing rental detail overlay
+    document.getElementById('rental-detail-overlay')?.remove();
+
     const overlay = document.createElement('div');
     overlay.className = 'bk-overlay bk-overlay-fullscreen';
+    overlay.id = 'rental-detail-overlay';
     document.body.appendChild(overlay);
 
     function getStatusLabel() { return RENTAL_STATUS_LABELS[currentStatus] || currentStatus; }
