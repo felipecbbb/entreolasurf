@@ -36,12 +36,16 @@ export async function renderDashboard(container) {
 
     let data;
     try {
+      console.log('[Dashboard] Fetching stats:', dateFrom, '→', dateTo);
       data = await fetchDashboardStats(dateFrom, dateTo);
+      console.log('[Dashboard] Data received:', { payments: data.payments.length, classes: data.classes.length, enrollments: data.enrollments.length, bonos: data.bonos.length });
     } catch (err) {
       container.innerHTML = `<p style="color:#ef4444;padding:24px">Error al cargar estadísticas: ${err.message}</p>`;
+      console.error('Dashboard render error:', err);
       return;
     }
 
+    try {
     // ---- Calculations ----
     const payments = data.payments;
     const totalPayments = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -307,26 +311,26 @@ export async function renderDashboard(container) {
     // ---- Bind events ----
     // Date presets
     container.querySelectorAll('.dash-preset-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const preset = btn.dataset.preset;
         const d = getPresetDates(preset);
         dateFrom = d.from;
         dateTo = d.to;
         saveSettings({ ...loadSettings(), dash_from: dateFrom, dash_to: dateTo });
-        render();
+        await render();
       });
     });
 
     // Custom date inputs
-    container.querySelector('#dash-from')?.addEventListener('change', (e) => {
+    container.querySelector('#dash-from')?.addEventListener('change', async (e) => {
       dateFrom = e.target.value;
       saveSettings({ ...loadSettings(), dash_from: dateFrom });
-      render();
+      await render();
     });
-    container.querySelector('#dash-to')?.addEventListener('change', (e) => {
+    container.querySelector('#dash-to')?.addEventListener('change', async (e) => {
       dateTo = e.target.value;
       saveSettings({ ...loadSettings(), dash_to: dateTo });
-      render();
+      await render();
     });
 
     // Settings toggle
@@ -343,6 +347,11 @@ export async function renderDashboard(container) {
       showToast('Configuración guardada', 'success');
       render();
     });
+
+    } catch (renderErr) {
+      console.error('Dashboard render error:', renderErr);
+      container.innerHTML = `<p style="color:#ef4444;padding:24px">Error al renderizar dashboard: ${renderErr.message}</p>`;
+    }
   }
 
   await render();
