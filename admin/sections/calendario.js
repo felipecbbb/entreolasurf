@@ -537,6 +537,21 @@ export async function renderCalendario(container) {
       });
     });
 
+    // Visibility toggle → publish/unpublish class
+    container.querySelectorAll('.cal-session-visibility').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const cls = classes.find(c => c.id === id);
+        if (!cls) return;
+        try {
+          await upsertClass({ id: cls.id, published: !cls.published });
+          showToast(cls.published ? 'Clase ocultada' : 'Clase publicada', 'success');
+          render();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+      });
+    });
+
     // Client row pay icon click → toggle payment status (enrollment or rental)
     container.querySelectorAll('.cal-client-pay-icon').forEach(icon => {
       icon.style.cursor = 'pointer';
