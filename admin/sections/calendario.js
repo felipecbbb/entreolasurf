@@ -545,7 +545,7 @@ export async function renderCalendario(container) {
         const cls = classes.find(c => c.id === id);
         if (!cls) return;
         try {
-          await upsertClass({ id: cls.id, published: !cls.published });
+          await supabase.from('surf_classes').update({ published: !cls.published }).eq('id', cls.id).then(({ error }) => { if (error) throw error; });
           showToast(cls.published ? 'Clase ocultada' : 'Clase publicada', 'success');
           render();
         } catch (err) { showToast('Error: ' + err.message, 'error'); }

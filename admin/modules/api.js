@@ -393,7 +393,7 @@ export async function fetchClassEnrollments(classId) {
   if (userIds.length) {
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, full_name, birth_date')
+      .select('id, full_name')
       .in('id', userIds);
     if (profiles) profiles.forEach(p => { profilesMap[p.id] = p; });
   }
