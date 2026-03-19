@@ -37,24 +37,48 @@ async function fetchBonos(statusFilter) {
 }
 
 async function fetchClassPayments() {
+  // All enrollment payments (includes class + bono payments)
   const { data, error } = await supabase
     .from('payments')
     .select('*')
-    .in('reservation_type', ['enrollment', 'bono'])
+    .eq('reservation_type', 'enrollment')
     .order('payment_date', { ascending: false });
   if (error) { console.warn('fetchClassPayments:', error.message); return []; }
   return data || [];
 }
 
 async function fetchBonoPayments(bonoId) {
-  const { data, error } = await supabase
+  // Bono payments use reservation_type='enrollment' and reference_id=bonoId
+  // Also check enrollments linked to this bono
+  const { data: directPayments } = await supabase
     .from('payments')
     .select('*')
-    .eq('reservation_type', 'bono')
+    .eq('reservation_type', 'enrollment')
     .eq('reference_id', bonoId)
     .order('payment_date', { ascending: false });
-  if (error) return [];
-  return data || [];
+
+  // Also find payments via enrollment IDs linked to this bono
+  const { data: enrollments } = await supabase
+    .from('class_enrollments')
+    .select('id')
+    .eq('bono_id', bonoId);
+
+  let enrollPayments = [];
+  if (enrollments?.length) {
+    const eIds = enrollments.map(e => e.id);
+    const { data } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('reservation_type', 'enrollment')
+      .in('reference_id', eIds);
+    if (data) enrollPayments = data;
+  }
+
+  // Merge and deduplicate
+  const all = [...(directPayments || []), ...enrollPayments];
+  const seen = new Set();
+  return all.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; })
+    .sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date));
 }
 
 async function fetchBonoEnrollments(bonoId) {
@@ -323,7 +347,7 @@ export async function renderReservaClases(container) {
           <div style="min-width:0">
             <div style="font-weight:700;font-size:.95rem;color:var(--color-navy)">${clientName}</div>
             <div style="font-size:.78rem;color:var(--color-muted)">${clientPhone} · ${clientEmail}</div>
-            ${bono.profiles?.id ? `<a href="#clientes" onclick="setTimeout(()=>document.querySelector('.cli-list-card[data-id=\\'${bono.profiles.id}\\']')?.click(),300)" style="font-size:.72rem;color:#0ea5e9;text-decoration:underline;cursor:pointer">Ver ficha de cliente</a>` : ''}
+            ${bono.profiles?.id ? `<a href="#clientes" class="rc-goto-client" data-client-id="${bono.profiles.id}" style="font-size:.72rem;color:#0ea5e9;text-decoration:underline;cursor:pointer">Ver ficha de cliente</a>` : ''}
           </div>
         </div>
 
@@ -388,6 +412,18 @@ export async function renderReservaClases(container) {
         </div>
       </div>
     `);
+
+    // Link to client ficha
+    document.querySelector('.rc-goto-client')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const clientId = e.target.dataset.clientId;
+      closeModal();
+      location.hash = '#clientes';
+      setTimeout(() => {
+        const card = document.querySelector(`.cli-list-card[data-id="${clientId}"]`);
+        if (card) card.click();
+      }, 400);
+    });
   }
 
   await render();

@@ -275,7 +275,7 @@ export async function deleteProduct(id) {
 export const fetchOrders = cached('orders', 30000, async () => {
   const { data, error } = await supabase
     .from('orders')
-    .select('*')
+    .select('*, profiles:user_id(id, full_name, phone, email)')
     .order('created_at', { ascending: false });
   if (error) { console.error('fetchOrders error:', error.message); return []; }
   return data || [];
@@ -284,7 +284,7 @@ export const fetchOrders = cached('orders', 30000, async () => {
 export async function fetchOrderItems(orderId) {
   const { data, error } = await supabase
     .from('order_items')
-    .select('*')
+    .select('*, products:product_id(id, name, price)')
     .eq('order_id', orderId);
   if (error) { console.error('fetchOrderItems error:', error.message); return []; }
   return data || [];
