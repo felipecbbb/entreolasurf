@@ -1,15 +1,29 @@
 /* ============================================================
-   Pedidos Section — Order management
+   Pedidos Section — Product order management (tienda only)
    ============================================================ */
 import { fetchOrders, fetchOrderItems, updateOrderStatus } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
+import { supabase } from '/lib/supabase.js';
 
 const STATUSES = ['pending', 'paid', 'shipped', 'delivered', 'cancelled'];
 
 export async function renderPedidos(container) {
 
   async function render() {
-    const orders = await fetchOrders();
+    const allOrders = await fetchOrders();
+
+    // Filter out orders that are purely bono/camp — only show product orders
+    let bonoOrderIds = new Set();
+    if (allOrders.length) {
+      const { data: bonos } = await supabase
+        .from('bonos')
+        .select('order_id')
+        .not('order_id', 'is', null);
+      if (bonos) bonos.forEach(b => bonoOrderIds.add(b.order_id));
+    }
+    // An order is a product order if it has no bonos linked to it
+    // (camp bookings don't store order_id, so they won't appear here anyway)
+    const orders = allOrders.filter(o => !bonoOrderIds.has(o.id));
 
     const table = renderTable(
       [
