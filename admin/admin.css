@@ -995,6 +995,36 @@ a.admin-nav-item.active .nav-icon {
   100% { background-position: -200% 0; }
 }
 
+/* ---- Tabs (reserva-clases, etc.) ---- */
+.rc-tab {
+  padding: 10px 20px;
+  border: none;
+  background: none;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all .15s;
+}
+.rc-tab:hover { color: var(--color-navy); }
+.rc-tab.active {
+  color: var(--color-navy);
+  border-bottom-color: var(--color-navy);
+}
+
+/* ---- External link in sidebar ---- */
+a.admin-nav-item-external {
+  opacity: .5;
+  font-size: .78rem;
+}
+a.admin-nav-item-external:hover { opacity: .8; }
+a.admin-nav-item-external .nav-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* ---- Empty state ---- */
 .admin-empty {
   text-align: center;

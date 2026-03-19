@@ -10,14 +10,15 @@ let titleEl = null;
 const sectionTitles = {
   dashboard: 'Dashboard',
   estadisticas: 'Estadísticas',
-  reservas: 'Reservas',
+  reservas: 'Reservas Camps',
   actividades: 'Actividades',
   camps: 'Surf Camps',
   calendario: 'Calendario Clases',
   material: 'Material',
   productos: 'Productos',
-  pedidos: 'Pedidos',
-  clientes: 'Clientes'
+  pedidos: 'Pedidos Tienda',
+  clientes: 'Clientes',
+  'reserva-clases': 'Reserva Clases',
 };
 
 // Register a route
