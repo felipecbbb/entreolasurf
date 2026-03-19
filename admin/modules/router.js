@@ -54,7 +54,11 @@ export async function navigate() {
   document.getElementById('admin-overlay')?.classList.remove('open');
 
   if (renderFn && contentEl) {
-    contentEl.innerHTML = '<p style="color:var(--color-muted)">Cargando…</p>';
+    contentEl.innerHTML = `<div class="admin-skeleton">
+      <div class="admin-skeleton-row"><div class="admin-skeleton-block w-md h-lg"></div><div class="admin-skeleton-block w-sm"></div></div>
+      <div class="admin-skeleton-row"><div class="admin-skeleton-block w-full h-card"></div><div class="admin-skeleton-block w-full h-card"></div></div>
+      <div class="admin-skeleton-row"><div class="admin-skeleton-block w-full h-card"></div><div class="admin-skeleton-block w-full h-card"></div></div>
+    </div>`;
     try {
       await renderFn(contentEl);
     } catch (err) {

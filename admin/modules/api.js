@@ -3,6 +3,24 @@
    ============================================================ */
 import { supabase } from '/lib/supabase.js';
 
+// ---- Simple query cache (30s TTL) ----
+const _cache = {};
+function cached(key, ttl, fn) {
+  return async (...args) => {
+    const k = key + JSON.stringify(args);
+    const entry = _cache[k];
+    if (entry && Date.now() - entry.ts < ttl) return entry.data;
+    const data = await fn(...args);
+    _cache[k] = { data, ts: Date.now() };
+    return data;
+  };
+}
+export function invalidateCache(prefix) {
+  for (const k in _cache) {
+    if (!prefix || k.startsWith(prefix)) delete _cache[k];
+  }
+}
+
 // ---- Stats ----
 export async function fetchStats() {
   const [bookings, camps, classes, orders] = await Promise.all([
@@ -178,7 +196,7 @@ export async function fetchEstadisticas(dateFrom, dateTo) {
 }
 
 // ---- Bookings ----
-export async function fetchBookings(statusFilter) {
+export const fetchBookings = cached('bookings', 30000, async (statusFilter) => {
   let query = supabase
     .from('bookings')
     .select('*')
@@ -188,32 +206,35 @@ export async function fetchBookings(statusFilter) {
   const { data, error } = await query;
   if (error) { console.error('fetchBookings error:', error.message); return []; }
   return data || [];
-}
+});
 
 export async function updateBookingStatus(id, status) {
   const { error } = await supabase.from('bookings').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) throw error;
+  invalidateCache('bookings');
 }
 
 // ---- Surf Camps ----
-export async function fetchCamps() {
+export const fetchCamps = cached('camps', 30000, async () => {
   const { data, error } = await supabase
     .from('surf_camps')
     .select('*')
     .order('date_start', { ascending: true });
   if (error) throw error;
   return data || [];
-}
+});
 
 export async function upsertCamp(camp) {
   camp.updated_at = new Date().toISOString();
   const { error } = await supabase.from('surf_camps').upsert(camp);
   if (error) throw error;
+  invalidateCache('camps');
 }
 
 export async function deleteCamp(id) {
   const { error } = await supabase.from('surf_camps').delete().eq('id', id);
   if (error) throw error;
+  invalidateCache('camps');
 }
 
 // ---- Surf Classes ----
@@ -228,35 +249,37 @@ export async function deleteClass(id) {
 }
 
 // ---- Products ----
-export async function fetchProducts() {
+export const fetchProducts = cached('products', 30000, async () => {
   const { data, error } = await supabase
     .from('products')
     .select('*')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
-}
+});
 
 export async function upsertProduct(product) {
   product.updated_at = new Date().toISOString();
   const { error } = await supabase.from('products').upsert(product);
   if (error) throw error;
+  invalidateCache('products');
 }
 
 export async function deleteProduct(id) {
   const { error } = await supabase.from('products').delete().eq('id', id);
   if (error) throw error;
+  invalidateCache('products');
 }
 
 // ---- Orders ----
-export async function fetchOrders() {
+export const fetchOrders = cached('orders', 30000, async () => {
   const { data, error } = await supabase
     .from('orders')
     .select('*')
     .order('created_at', { ascending: false });
   if (error) { console.error('fetchOrders error:', error.message); return []; }
   return data || [];
-}
+});
 
 export async function fetchOrderItems(orderId) {
   const { data, error } = await supabase
@@ -270,6 +293,7 @@ export async function fetchOrderItems(orderId) {
 export async function updateOrderStatus(id, status) {
   const { error } = await supabase.from('orders').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) throw error;
+  invalidateCache('orders');
 }
 
 // ---- Profiles ----
@@ -310,7 +334,7 @@ export async function createClientFromAdmin({ full_name, email, phone }) {
   return { id: userId, full_name, email, phone };
 }
 
-export async function fetchProfiles(search) {
+export const fetchProfiles = cached('profiles', 30000, async (search) => {
   let query = supabase
     .from('profiles')
     .select('*')
@@ -320,7 +344,7 @@ export async function fetchProfiles(search) {
   const { data, error } = await query;
   if (error) throw error;
   return data || [];
-}
+});
 
 // ---- Recent bookings (for dashboard) ----
 export async function fetchRecentBookings(limit = 5) {

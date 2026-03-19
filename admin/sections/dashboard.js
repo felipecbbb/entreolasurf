@@ -32,7 +32,10 @@ export async function renderDashboard(container) {
   let comisionPct = getSetting('comision_pct', 0);
 
   async function render() {
-    container.innerHTML = '<p style="color:var(--color-muted);padding:24px">Cargando estadísticas…</p>';
+    container.innerHTML = `<div class="admin-skeleton" style="padding:24px 0">
+      <div class="admin-skeleton-row"><div class="admin-skeleton-block w-full h-card"></div><div class="admin-skeleton-block w-full h-card"></div><div class="admin-skeleton-block w-full h-card"></div><div class="admin-skeleton-block w-full h-card"></div></div>
+      <div class="admin-skeleton-row"><div class="admin-skeleton-block w-full h-card"></div><div class="admin-skeleton-block w-full h-card"></div></div>
+    </div>`;
 
     let data, todayClasses;
     try {
