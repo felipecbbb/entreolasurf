@@ -45,7 +45,7 @@ export async function navigate() {
   if (titleEl) titleEl.textContent = sectionTitles[hash] || hash;
 
   // Update sidebar active
-  document.querySelectorAll('.admin-nav-item a').forEach(a => {
+  document.querySelectorAll('a.admin-nav-item').forEach(a => {
     a.classList.toggle('active', a.dataset.section === hash);
   });
 
