@@ -1403,10 +1403,8 @@
   gap: 2px;
   margin-left: auto;
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity .15s;
+  opacity: 1;
 }
-.cal-client-row:hover .cal-client-move-btns { opacity: 1; }
 .cal-move-btn {
   display: flex;
   align-items: center;
@@ -4542,6 +4540,38 @@
   flex-direction: column;
   gap: 8px;
 }
+.cli-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.cli-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: .75rem;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.cli-filter-btn:hover {
+  border-color: #cbd5e1;
+  color: #0f2f39;
+  background: #f8fafc;
+}
+.cli-filter-btn.active {
+  background: #0f2f39;
+  color: #fff;
+  border-color: #0f2f39;
+}
+.cli-filter-btn.active svg { stroke: #fff; }
 .cli-list-card {
   background: #fff;
   border: 1px solid #e2e8f0;
@@ -5326,4 +5356,202 @@
   .stat-bono-type-grid { grid-template-columns: 1fr; }
   .stat-kpi-row { grid-template-columns: 1fr; }
   .stat-kpi-big { grid-column: span 1; }
+}
+
+/* ============================================================
+   Global Responsive Adaptation — All Devices
+   Systematic mobile-first fixes for gaps across all sections
+   ============================================================ */
+
+/* -- Tablet (≤1100px): improve content density -- */
+@media (max-width: 1100px) {
+  .admin-content { padding: 24px 28px; }
+  .dash-type-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+}
+
+/* -- Tablet-portrait / small laptop (≤820px): main mobile transition -- */
+@media (max-width: 820px) {
+  /* Overlay: add backdrop blur for polish */
+  .admin-overlay.open {
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  /* Topbar: hide user info to save space, reduce title */
+  .admin-user-info { display: none; }
+  .admin-section-title { font-size: 1.3rem; }
+
+  /* Sidebar: improve touch targets */
+  .admin-nav-item a { padding: 13px 24px; min-height: 44px; }
+  .admin-logout-btn { min-height: 44px; }
+
+  /* Dashboard controls: stack date inputs */
+  .dash-controls { gap: 10px; }
+  .dash-custom-range { flex-wrap: wrap; gap: 6px; }
+  .dash-custom-range input[type="date"] { flex: 1; min-width: 0; }
+  .dash-settings-panel { flex-direction: column; align-items: stretch; }
+  .dash-settings-row input { width: 100%; }
+
+  /* Dashboard type grid: fit smaller screens */
+  .dash-type-grid { grid-template-columns: 1fr; }
+  .dash-detail-grid { grid-template-columns: 1fr; }
+
+  /* Tables: ensure horizontal scroll on all table-like grids */
+  .act-table { min-width: 500px; }
+  .act-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Toast: reposition centered on mobile */
+  .admin-toast-container {
+    right: 12px;
+    left: 12px;
+    top: 12px;
+    align-items: stretch;
+  }
+  .admin-toast { text-align: center; }
+
+  /* Calendar: improve mobile card readability */
+  .cal-session-card { font-size: .78rem; }
+
+  /* Booking panel: full-screen on mobile */
+  .bk-overlay { padding: 0; align-items: stretch; }
+  .bk-panel { border-radius: 0; margin: 0; min-height: 100vh; }
+
+  /* Stat panel: full-width with proper padding */
+  .stat-panel { border-radius: 0; }
+
+  /* Reservas: improve form field touch */
+  .admin-search { min-width: 0; width: 100%; }
+  .admin-filter { width: 100%; }
+}
+
+/* -- Small mobile (≤640px): more aggressive stacking -- */
+@media (max-width: 640px) {
+  .admin-content { padding: 16px; }
+  .admin-topbar { padding: 12px 16px; }
+
+  /* Dashboard KPIs: compact padding */
+  .dash-kpi-card { padding: 16px; }
+  .dash-kpi-value { font-size: 1.7rem; }
+  .dash-breakdown-card { padding: 16px; }
+
+  /* Section subtitle: scale down */
+  .admin-section-sub { font-size: 1.1rem; margin: 20px 0 10px; }
+  .dash-section-title { font-size: .78rem; }
+
+  /* Stats grid: compact */
+  .admin-stat-card { padding: 14px; }
+  .admin-stat-value { font-size: 1.6rem; }
+
+  /* Calendar: single column on small phones */
+  .cal-week-grid { grid-template-columns: 1fr; }
+
+  /* Toolbar: full-width stacked buttons */
+  .admin-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .admin-toolbar .btn { width: 100%; text-align: center; }
+  .admin-toolbar .admin-search { min-width: 0; }
+
+  /* Indicator cards: tighter */
+  .dash-indicator { padding: 10px 12px; }
+  .dash-indicator-value { font-size: 1.2rem; }
+
+  /* Action buttons: touch-friendly */
+  .admin-action-btn { padding: 8px 12px; min-height: 36px; }
+  .admin-actions { flex-wrap: wrap; }
+}
+
+/* -- Extra small (≤520px): tightest layout -- */
+@media (max-width: 520px) {
+  .admin-content { padding: 12px; }
+  .admin-topbar { padding: 10px 12px; }
+  .admin-section-title { font-size: 1.15rem; }
+
+  /* Login card: fit tiny screens */
+  .admin-login-card { padding: 28px 20px; }
+  .admin-login-card h1 { font-size: 1.7rem; }
+
+  /* Dashboard presets: wrap tighter */
+  .dash-preset-btn { padding: 6px 10px; font-size: .72rem; }
+  .dash-custom-range input[type="date"] { font-size: .78rem; padding: 6px 8px; }
+
+  /* Booking wizard: compact */
+  .bkw-step-title { font-size: 1rem; }
+  .bkw-step-desc { font-size: .82rem; }
+
+  /* Calendar top controls: stack fully */
+  .cal-top-left, .cal-top-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* Reservation detail: full mobile treatment */
+  .rv-main { padding: 12px; }
+  .rv-info-card { padding: 12px; }
+
+  /* Empty state: tighter */
+  .admin-empty { padding: 32px 16px; }
+  .admin-empty p { font-size: .88rem; }
+
+  /* Toast: full width on tiny screens */
+  .admin-toast { font-size: .82rem; padding: 10px 14px; }
+}
+
+/* -- Touch & accessibility helpers (all mobile) -- */
+@media (max-width: 820px) {
+  /* Ensure minimum touch targets per WCAG */
+  .admin-hamburger { min-width: 44px; min-height: 44px; }
+  .admin-modal-close { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .bk-panel-close { min-width: 44px; min-height: 44px; }
+
+  /* Prevent zoom on iOS inputs */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  input[type="tel"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Smoother sidebar transitions */
+  .admin-sidebar { transition: left .3s cubic-bezier(.4, 0, .2, 1); }
+
+  /* Better scroll behavior for overlays */
+  .bk-overlay,
+  .admin-modal.open {
+    overscroll-behavior: contain;
+  }
+}
+
+/* -- Landscape phone (short + wide) -- */
+@media (max-height: 500px) and (max-width: 900px) {
+  .admin-sidebar {
+    padding: 12px 0;
+  }
+  .admin-sidebar-logo {
+    padding: 0 24px 12px;
+  }
+  .admin-nav-item a { padding: 8px 24px; }
+  .admin-modal-dialog { max-height: 95vh; }
+  .bk-overlay { padding: 8px; }
+}
+
+/* -- Safe area insets for notched devices -- */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  @media (max-width: 820px) {
+    .admin-sidebar {
+      padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+    .admin-content {
+      padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+    .bk-panel {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  }
 }

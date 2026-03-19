@@ -249,6 +249,20 @@ export async function renderCalendario(container) {
     let clientsHtml = '';
     enrollments.forEach(e => {
       const name = e.guest_name || e.family_members?.full_name || e.profiles?.full_name || 'Sin nombre';
+      const birthDate = e.family_members?.birth_date || e.profiles?.birth_date || null;
+      let ageLabel = '';
+      if (birthDate) {
+        const today = new Date();
+        const birth = new Date(birthDate);
+        let age = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+        ageLabel = ` (${age})`;
+      }
+      let bonoLabel = '';
+      if (e.bono && e.bono.status === 'active') {
+        bonoLabel = `${e.bono.used_credits}/${e.bono.total_credits}`;
+      }
       const isPaid = e.status === 'paid' || e.status === 'completed';
       const isPartial = e.status === 'partial';
       const isAttended = e.status === 'completed';
@@ -266,21 +280,14 @@ export async function renderCalendario(container) {
             <input type="checkbox" class="cal-attendance-check" data-eid="${e.id}" data-type="enrollment" ${isAttended ? 'checked' : ''} />
             <span class="cal-attendance-icon"></span>
           </label>
-          <span class="cal-client-name">${name}</span>
+          <span class="cal-client-name">${name}${ageLabel}</span>
+          ${bonoLabel ? `<span class="cal-client-bono" style="color:#0ea5e9;font-size:.65rem;font-weight:600;white-space:nowrap">${bonoLabel}</span>` : ''}
           <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
-            ${isPaid
-              ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11.5 14.5 16 9.5"/></svg>'
-              : isPartial
-                ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
-                : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
-            }
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${isPaid ? '#16a34a' : isPartial ? '#d97706' : '#dc2626'}" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
           </span>
           <span class="cal-client-move-btns">
-            <button class="cal-move-btn" data-dir="prev" data-eid="${e.id}" data-class-id="${c.id}" title="Mover al día anterior">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <button class="cal-move-btn" data-dir="next" data-eid="${e.id}" data-class-id="${c.id}" title="Mover al día siguiente">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
+            <button class="cal-move-btn" data-eid="${e.id}" data-class-id="${c.id}" title="Mover a otro día">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14l2 2 4-4"/></svg>
             </button>
           </span>
         </div>`;
@@ -746,46 +753,217 @@ export async function renderCalendario(container) {
       });
     });
 
-    // Move enrollment between days (← →)
+    // Move enrollment — open calendar picker
     container.querySelectorAll('.cal-move-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const dir = btn.dataset.dir; // 'prev' or 'next'
         const eid = btn.dataset.eid;
         const classId = btn.dataset.classId;
         const cls = classes.find(c => c.id === classId);
         if (!cls) return;
 
-        const clsDate = new Date(cls.date + 'T00:00:00');
-        const targetDate = new Date(clsDate);
-        targetDate.setDate(targetDate.getDate() + (dir === 'next' ? 1 : -1));
-        const targetDateStr = getDateStr(targetDate);
+        // Remove any existing move picker
+        document.getElementById('cal-move-picker')?.remove();
 
-        // Find a class of the same type on the target date
-        const targetClasses = await fetchClassesInRange(targetDateStr, targetDateStr);
-        const targetClass = targetClasses.find(c => c.type === cls.type && c.id !== classId);
-        if (!targetClass) {
-          showToast(`No hay clase de ${TYPE_LABELS[cls.type] || cls.type} el ${shortDateLabel(targetDateStr)}`, 'error');
-          return;
+        const clientName = btn.closest('.cal-client-row')?.dataset.clientName || 'Alumno';
+        const classType = cls.type;
+        const typeLabel = TYPE_LABELS[classType] || cls.title;
+
+        // State for the picker calendar
+        let pickerDate = new Date(cls.date + 'T00:00:00');
+        let pickerMonth = pickerDate.getMonth();
+        let pickerYear = pickerDate.getFullYear();
+        let availableClasses = []; // fetched classes for current month view
+
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'cal-move-picker';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+
+        const panel = document.createElement('div');
+        panel.style.cssText = 'background:#fff;border-radius:16px;padding:24px;min-width:360px;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)';
+        overlay.appendChild(panel);
+
+        overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+        async function loadMonth() {
+          const firstDay = new Date(pickerYear, pickerMonth, 1);
+          const lastDay = new Date(pickerYear, pickerMonth + 1, 0);
+          const from = getDateStr(firstDay);
+          const to = getDateStr(lastDay);
+          availableClasses = await fetchClassesInRange(from, to);
         }
 
-        // Check capacity
-        const targetEnrollments = await fetchClassEnrollments(targetClass.id);
-        if (targetEnrollments.length >= (targetClass.max_students || 0)) {
-          showToast(`La clase del ${shortDateLabel(targetDateStr)} está llena`, 'error');
-          return;
+        function renderPicker() {
+          const monthLabel = MONTH_NAMES[pickerMonth].replace('.', '') + ' ' + pickerYear;
+          const firstDay = new Date(pickerYear, pickerMonth, 1);
+          const lastDay = new Date(pickerYear, pickerMonth + 1, 0);
+          const startWeekDay = (firstDay.getDay() + 6) % 7; // Monday = 0
+
+          // Build map: dateStr → classes of same type
+          const dateClassMap = {};
+          availableClasses.filter(c => c.type === classType && c.id !== classId).forEach(c => {
+            if (!dateClassMap[c.date]) dateClassMap[c.date] = [];
+            dateClassMap[c.date].push(c);
+          });
+
+          const todayStr = getDateStr(new Date());
+          const currentDateStr = cls.date;
+
+          // Calendar grid
+          let gridHtml = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">';
+          // Day headers
+          ['L', 'M', 'X', 'J', 'V', 'S', 'D'].forEach(d => {
+            gridHtml += `<div style="font-size:.7rem;font-weight:600;color:#94a3b8;padding:6px 0">${d}</div>`;
+          });
+          // Empty cells before first day
+          for (let i = 0; i < startWeekDay; i++) {
+            gridHtml += '<div></div>';
+          }
+          // Day cells
+          for (let day = 1; day <= lastDay.getDate(); day++) {
+            const ds = getDateStr(new Date(pickerYear, pickerMonth, day));
+            const dayClasses = dateClassMap[ds] || [];
+            const hasClasses = dayClasses.length > 0;
+            const isToday = ds === todayStr;
+            const isCurrent = ds === currentDateStr;
+            const isPast = ds < todayStr;
+
+            let cellStyle = 'padding:6px 2px;border-radius:8px;font-size:.8rem;cursor:default;position:relative;';
+            let dotHtml = '';
+
+            if (isCurrent) {
+              cellStyle += 'background:#0f2f39;color:#fff;font-weight:700;';
+            } else if (hasClasses && !isPast) {
+              cellStyle += 'background:#e0f2fe;color:#0369a1;font-weight:600;cursor:pointer;';
+              // Show capacity info
+              const totalSpots = dayClasses.reduce((s, c) => s + (c.max_students || 0), 0);
+              const enrolledCount = dayClasses.reduce((s, c) => s + (c.enrolled_count || 0), 0);
+              const spotsLeft = totalSpots - enrolledCount;
+              dotHtml = `<div style="font-size:.55rem;color:${spotsLeft > 0 ? '#16a34a' : '#dc2626'};line-height:1">${spotsLeft > 0 ? spotsLeft + ' plaza' + (spotsLeft !== 1 ? 's' : '') : 'Lleno'}</div>`;
+            } else if (isToday) {
+              cellStyle += 'border:2px solid #0ea5e9;font-weight:600;';
+            } else if (isPast) {
+              cellStyle += 'color:#cbd5e1;';
+            } else {
+              cellStyle += 'color:#64748b;';
+            }
+
+            const clickable = hasClasses && !isPast && !isCurrent;
+            gridHtml += `<div class="move-picker-day" ${clickable ? `data-date="${ds}"` : ''} style="${cellStyle}">
+              ${day}${dotHtml}
+            </div>`;
+          }
+          gridHtml += '</div>';
+
+          panel.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+              <h3 style="margin:0;font-size:.95rem;color:#0f2f39">Mover a <span style="color:#0ea5e9">${clientName}</span></h3>
+              <button id="move-picker-close" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem">✕</button>
+            </div>
+            <div style="font-size:.75rem;color:#64748b;margin-bottom:16px">
+              Actual: <strong>${shortDateLabel(currentDateStr)}</strong> · ${typeLabel} ${cls.time_start?.slice(0,5)}–${cls.time_end?.slice(0,5)}
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <button class="move-picker-nav" data-dir="prev" style="background:none;border:none;cursor:pointer;padding:4px">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0f2f39" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <span style="font-size:.85rem;font-weight:700;color:#0f2f39;text-transform:capitalize">${monthLabel}</span>
+              <button class="move-picker-nav" data-dir="next" style="background:none;border:none;cursor:pointer;padding:4px">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0f2f39" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
+              </button>
+            </div>
+            ${gridHtml}
+            <div id="move-picker-classes" style="margin-top:16px"></div>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+              <span style="font-size:.6rem;display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:3px;background:#0f2f39;display:inline-block"></span>Actual</span>
+              <span style="font-size:.6rem;display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:3px;background:#e0f2fe;display:inline-block"></span>Disponible</span>
+            </div>
+          `;
+
+          // Close button
+          panel.querySelector('#move-picker-close').addEventListener('click', () => overlay.remove());
+
+          // Month navigation
+          panel.querySelectorAll('.move-picker-nav').forEach(navBtn => {
+            navBtn.addEventListener('click', async () => {
+              if (navBtn.dataset.dir === 'prev') {
+                pickerMonth--;
+                if (pickerMonth < 0) { pickerMonth = 11; pickerYear--; }
+              } else {
+                pickerMonth++;
+                if (pickerMonth > 11) { pickerMonth = 0; pickerYear++; }
+              }
+              await loadMonth();
+              renderPicker();
+            });
+          });
+
+          // Click on available day → show classes for that day
+          panel.querySelectorAll('.move-picker-day[data-date]').forEach(dayCell => {
+            dayCell.addEventListener('click', () => {
+              const ds = dayCell.dataset.date;
+              const dayClasses = dateClassMap[ds] || [];
+              const classesDiv = panel.querySelector('#move-picker-classes');
+
+              // Highlight selected day
+              panel.querySelectorAll('.move-picker-day').forEach(d => {
+                if (d.dataset.date && d !== dayCell) d.style.outline = 'none';
+              });
+              dayCell.style.outline = '2px solid #0369a1';
+
+              classesDiv.innerHTML = `
+                <div style="font-size:.75rem;font-weight:600;color:#0f2f39;margin-bottom:8px">${shortDateLabel(ds)}</div>
+                ${dayClasses.map(tc => {
+                  const enrolled = tc.enrolled_count || 0;
+                  const max = tc.max_students || 0;
+                  const full = enrolled >= max;
+                  return `
+                    <div class="move-picker-class" data-target-id="${tc.id}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;margin-bottom:6px;background:${full ? '#fef2f2' : '#f0f9ff'};cursor:${full ? 'not-allowed' : 'pointer'};border:1px solid ${full ? '#fecaca' : '#bae6fd'};transition:all .15s">
+                      <div>
+                        <div style="font-size:.8rem;font-weight:600;color:${full ? '#dc2626' : '#0f2f39'}">${tc.time_start?.slice(0,5)} – ${tc.time_end?.slice(0,5)}</div>
+                        <div style="font-size:.7rem;color:#64748b">${TYPE_LABELS[tc.type] || tc.title}</div>
+                      </div>
+                      <div style="text-align:right">
+                        <div style="font-size:.75rem;font-weight:600;color:${full ? '#dc2626' : '#16a34a'}">${enrolled}/${max}</div>
+                        <div style="font-size:.6rem;color:#94a3b8">${full ? 'Llena' : 'Disponible'}</div>
+                      </div>
+                    </div>`;
+                }).join('')}
+              `;
+
+              // Click on a class to move
+              classesDiv.querySelectorAll('.move-picker-class').forEach(classCard => {
+                classCard.addEventListener('click', async () => {
+                  const targetId = classCard.dataset.targetId;
+                  const targetCls = dayClasses.find(tc => tc.id === targetId);
+                  if (!targetCls) return;
+                  const enrolled = targetCls.enrolled_count || 0;
+                  const max = targetCls.max_students || 0;
+                  if (enrolled >= max) {
+                    showToast('Esta clase está llena', 'error');
+                    return;
+                  }
+
+                  try {
+                    await moveEnrollment(eid, targetId);
+                    showToast(`Alumno movido al ${shortDateLabel(ds)} ${targetCls.time_start?.slice(0,5)}`, 'success');
+                    delete enrollmentsCache[classId];
+                    delete enrollmentsCache[targetId];
+                    overlay.remove();
+                    render();
+                  } catch (err) {
+                    showToast('Error al mover: ' + err.message, 'error');
+                  }
+                });
+              });
+            });
+          });
         }
 
-        try {
-          await moveEnrollment(eid, targetClass.id);
-          showToast(`Alumno movido al ${shortDateLabel(targetDateStr)}`, 'success');
-          // Clear caches for both classes
-          delete enrollmentsCache[classId];
-          delete enrollmentsCache[targetClass.id];
-          render();
-        } catch (err) {
-          showToast('Error al mover: ' + err.message, 'error');
-        }
+        await loadMonth();
+        document.body.appendChild(overlay);
+        renderPicker();
       });
     });
 
@@ -2314,7 +2492,7 @@ export async function renderCalendario(container) {
                     ${badgeHtml}
                   </div>
                   <div class="rv-bono-details">
-                    <span>${TYPE_LABELS[b.class_type] || b.class_type} · ${remaining}/${b.total_credits} clases</span>
+                    <span>${TYPE_LABELS[b.class_type] || b.class_type} · ${b.used_credits}/${b.total_credits} clases</span>
                   </div>
                   <div class="rv-bono-pay-row">
                     <div class="rv-bono-bar"><div class="rv-bono-bar-fill" style="width:${paidPct}%;background:${b.isFullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
@@ -2399,30 +2577,77 @@ export async function renderCalendario(container) {
         const prof = res.profile;
         const fm = res.familyMember;
         let buyerHtml = '';
+        // Helper: compute age from birth_date
+        function computeAge(bd) {
+          if (!bd) return null;
+          const today = new Date();
+          const birth = new Date(bd);
+          let age = today.getFullYear() - birth.getFullYear();
+          const m = today.getMonth() - birth.getMonth();
+          if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+          return age;
+        }
+        const swimLabel = (v) => v === true ? 'Sí' : v === false ? 'No' : 'Sin definir';
+        const injuryLabel = (v) => v ? 'Sí' : 'No';
+
+        // Build health & equipment section for a profile or family member
+        function buildHealthSection(data) {
+          if (!data) return '';
+          return `
+            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:24px 0 12px">Salud y equipamiento</h3>
+            <div class="bk-contact-fields">
+              <div class="bk-contact-field"><label>¿Sabe nadar?</label><input type="text" value="${swimLabel(data.can_swim)}" readonly /></div>
+              <div class="bk-contact-field"><label>¿Tiene lesión?</label><input type="text" value="${injuryLabel(data.has_injury)}" readonly /></div>
+              ${data.has_injury ? `<div class="bk-contact-field"><label>Detalle lesión</label><input type="text" value="${data.injury_detail || ''}" readonly /></div>` : ''}
+              <div class="bk-contact-field"><label>Talla neopreno</label><input type="text" value="${data.wetsuit_size || 'Sin definir'}" readonly /></div>
+              ${data.level ? `<div class="bk-contact-field"><label>Nivel</label><input type="text" value="${data.level}" readonly /></div>` : ''}
+              ${data.notes ? `<div class="bk-contact-field"><label>Notas</label><input type="text" value="${data.notes}" readonly /></div>` : ''}
+            </div>`;
+        }
+
         if (fm) {
+          const fmAge = computeAge(fm.birth_date);
           buyerHtml = `
             <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:0 0 12px">Beneficiario (familiar)</h3>
-            <div class="bk-contact-fields" style="margin-bottom:24px">
+            <div class="bk-contact-fields" style="margin-bottom:0">
               <div class="bk-contact-field"><label>Nombre</label><input type="text" value="${fm.full_name || fm.name || ''}" readonly /></div>
-              <div class="bk-contact-field"><label>Edad</label><input type="text" value="${fm.age != null ? fm.age + ' años' : (fm.birth_date || '')}" readonly /></div>
+              <div class="bk-contact-field"><label>Apellidos</label><input type="text" value="${fm.last_name || ''}" readonly /></div>
+              <div class="bk-contact-field"><label>Edad</label><input type="text" value="${fmAge != null ? fmAge + ' años' : (fm.birth_date || '')}" readonly /></div>
+              <div class="bk-contact-field"><label>Fecha nacimiento</label><input type="text" value="${fm.birth_date || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Relación</label><input type="text" value="${fm.relationship || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Nivel</label><input type="text" value="${fm.level || ''}" readonly /></div>
             </div>
-            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:0 0 12px">Titular de la cuenta</h3>
+            ${buildHealthSection(fm)}
+
+            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:24px 0 12px">Titular de la cuenta</h3>
             <div class="bk-contact-fields">
               <div class="bk-contact-field"><label>Nombre completo</label><input type="text" value="${prof?.full_name || res.contact.nombre + ' ' + res.contact.apellidos}" readonly /></div>
+              <div class="bk-contact-field"><label>Apellidos</label><input type="text" value="${prof?.last_name || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Email</label><input type="email" value="${prof?.email || res.contact.email || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Teléfono</label><input type="tel" value="${prof?.phone || res.contact.telefono || ''}" readonly /></div>
+            </div>
+            ${buildHealthSection(prof)}
+            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:24px 0 12px">Dirección</h3>
+            <div class="bk-contact-fields">
               <div class="bk-contact-field"><label>Dirección</label><input type="text" value="${prof?.address || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Ciudad</label><input type="text" value="${prof?.city || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Código postal</label><input type="text" value="${prof?.postal_code || ''}" readonly /></div>
             </div>`;
         } else {
+          const profAge = computeAge(prof?.birth_date);
           buyerHtml = `
+            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:0 0 12px">Datos personales</h3>
             <div class="bk-contact-fields">
               <div class="bk-contact-field"><label>Nombre completo</label><input type="text" value="${prof?.full_name || res.contact.nombre + ' ' + res.contact.apellidos}" readonly /></div>
+              <div class="bk-contact-field"><label>Apellidos</label><input type="text" value="${prof?.last_name || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Email</label><input type="email" value="${prof?.email || res.contact.email || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Teléfono</label><input type="tel" value="${prof?.phone || res.contact.telefono || ''}" readonly /></div>
+              ${profAge != null ? `<div class="bk-contact-field"><label>Edad</label><input type="text" value="${profAge} años" readonly /></div>` : ''}
+              <div class="bk-contact-field"><label>Rol</label><input type="text" value="${prof?.role === 'admin' ? 'Admin' : 'Cliente'}" readonly /></div>
+            </div>
+            ${buildHealthSection(prof)}
+            <h3 style="font-size:.85rem;font-weight:700;color:#0f2f39;margin:24px 0 12px">Dirección</h3>
+            <div class="bk-contact-fields">
               <div class="bk-contact-field"><label>Dirección</label><input type="text" value="${prof?.address || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Ciudad</label><input type="text" value="${prof?.city || ''}" readonly /></div>
               <div class="bk-contact-field"><label>Código postal</label><input type="text" value="${prof?.postal_code || ''}" readonly /></div>

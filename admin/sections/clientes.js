@@ -200,6 +200,7 @@ const LEVEL_LABELS = {
 
 export async function renderClientes(container) {
   let searchTerm = '';
+  let activeFilter = ''; // '', 'pending_pay', 'pending_assign', 'paid', 'cancelled'
   let debounceTimer = null;
   let selectedClient = null;
   let activeTab = 'datos';
@@ -212,9 +213,9 @@ export async function renderClientes(container) {
     selectedClient = null;
     const profiles = await fetchProfiles(searchTerm || undefined);
 
-    // Batch-fetch emails and family members for all listed profiles
+    // Batch-fetch emails, family members, and enrollments for all listed profiles
     const profileIds = profiles.map(p => p.id);
-    const [, familyRes] = await Promise.all([
+    const [, familyRes, enrollRes] = await Promise.all([
       (async () => {
         for (const p of profiles) {
           if (emailCache[p.id] === undefined) {
@@ -226,22 +227,47 @@ export async function renderClientes(container) {
       profileIds.length
         ? supabase.from('family_members').select('id, user_id, full_name, last_name').in('user_id', profileIds).order('created_at', { ascending: true })
         : { data: [] },
+      profileIds.length
+        ? supabase.from('class_enrollments').select('id, user_id, status, class_id').in('user_id', profileIds)
+        : { data: [] },
     ]);
     const allFamilyMembers = familyRes.data || [];
+    const allEnrollments = enrollRes.data || [];
     for (const p of profiles) {
       p._family = allFamilyMembers.filter(m => m.user_id === p.id);
+      p._enrollments = allEnrollments.filter(e => e.user_id === p.id);
     }
 
+    // Apply filter
+    let filtered = profiles;
+    if (activeFilter === 'pending_pay') {
+      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'confirmed' || e.status === 'pending'));
+    } else if (activeFilter === 'pending_assign') {
+      filtered = profiles.filter(p => p._enrollments.some(e => !e.class_id));
+    } else if (activeFilter === 'paid') {
+      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'paid' || e.status === 'completed'));
+    } else if (activeFilter === 'cancelled') {
+      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'cancelled' || e.status === 'no_show'));
+    }
+
+    const filterBtn = (key, label, icon) => `<button class="cli-filter-btn ${activeFilter === key ? 'active' : ''}" data-filter="${key}">${icon} ${label}</button>`;
     const toolbar = `
       <div class="admin-toolbar">
         <input type="text" class="admin-search" id="clientes-search"
                placeholder="Buscar por nombre…" value="${searchTerm}" />
         <button class="btn red" id="new-client-btn">+ Nuevo Cliente</button>
+      </div>
+      <div class="cli-filters">
+        ${filterBtn('', 'Todos', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>')}
+        ${filterBtn('pending_pay', 'Pago pendiente', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>')}
+        ${filterBtn('pending_assign', 'Sin asignar', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>')}
+        ${filterBtn('paid', 'Pagado', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11.5 14.5 16 9.5"/></svg>')}
+        ${filterBtn('cancelled', 'Canceladas', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>')}
       </div>`;
 
-    const listHtml = !profiles.length
+    const listHtml = !filtered.length
       ? '<div class="admin-empty"><p>No hay clientes</p></div>'
-      : `<div class="cli-list">${profiles.map(r => {
+      : `<div class="cli-list">${filtered.map(r => {
         const fullName = esc(r.full_name) + (r.last_name ? ' ' + esc(r.last_name) : '');
         const familyHtml = (r._family || []).map(m =>
           `<div class="cli-family-tag" data-client-id="${r.id}" data-member-id="${m.id}">` +
@@ -294,6 +320,14 @@ export async function renderClientes(container) {
       searchInput.focus();
       searchInput.setSelectionRange(searchTerm.length, searchTerm.length);
     }
+
+    // Filter buttons
+    container.querySelectorAll('.cli-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeFilter = btn.dataset.filter;
+        renderList();
+      });
+    });
 
     // New client
     container.querySelector('#new-client-btn').addEventListener('click', () => openNewClientModal());

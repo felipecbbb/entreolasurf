@@ -369,7 +369,7 @@ export async function fetchClassEnrollments(classId) {
   if (userIds.length) {
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, full_name')
+      .select('id, full_name, birth_date')
       .in('id', userIds);
     if (profiles) profiles.forEach(p => { profilesMap[p.id] = p; });
   }
@@ -380,16 +380,28 @@ export async function fetchClassEnrollments(classId) {
   if (familyIds.length) {
     const { data: members } = await supabase
       .from('family_members')
-      .select('id, full_name')
+      .select('id, full_name, birth_date')
       .in('id', familyIds);
     if (members) members.forEach(m => { familyMap[m.id] = m; });
   }
 
-  // Merge profile/family names into enrollments
+  // Fetch active bonos for enrollments that have bono_id
+  const bonoIds = [...new Set(data.filter(e => e.bono_id).map(e => e.bono_id))];
+  let bonoMap = {};
+  if (bonoIds.length) {
+    const { data: bonos } = await supabase
+      .from('bonos')
+      .select('id, total_credits, used_credits, status')
+      .in('id', bonoIds);
+    if (bonos) bonos.forEach(b => { bonoMap[b.id] = b; });
+  }
+
+  // Merge profile/family names + bono into enrollments
   return data.map(e => ({
     ...e,
     family_members: e.family_member_id ? familyMap[e.family_member_id] || null : null,
     profiles: e.user_id ? profilesMap[e.user_id] || null : null,
+    bono: e.bono_id ? bonoMap[e.bono_id] || null : null,
     // Set guest_name from family member or profile if not already set
     guest_name: e.guest_name
       || (e.family_member_id && familyMap[e.family_member_id]?.full_name)
