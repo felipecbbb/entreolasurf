@@ -610,7 +610,7 @@ body.internal-page.no-hero .dropdown a {
   justify-content: space-between;
   gap: 8px;
   border-top: 1px solid #d8d2bf;
-  border-bottom: 1px solid #d8d2bf;
+  border-bottom: none;
   padding: 11px 14px;
   font-family: 'Space Grotesk', sans-serif;
   font-size: .78rem;
