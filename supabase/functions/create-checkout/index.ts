@@ -15,7 +15,6 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    // Get user from auth header
     const authHeader = req.headers.get("Authorization")?.replace("Bearer ", "");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -32,12 +31,33 @@ Deno.serve(async (req) => {
 
     if (!items?.length) {
       return new Response(JSON.stringify({ error: "Carrito vacío" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Validate coupon if provided
+    // Store cart in a temporary DB row to avoid Stripe metadata 500-char limit
+    const pendingOrder = {
+      user_id: userId,
+      status: "pending",
+      total: 0,
+      shipping_address: [customer?.address, customer?.city, customer?.postalCode].filter(Boolean).join(", ") || null,
+      notes: customer?.notes || null,
+    };
+    const { data: order, error: orderErr } = await supabase
+      .from("orders")
+      .insert(pendingOrder)
+      .select()
+      .single();
+
+    if (orderErr) throw orderErr;
+
+    // Store cart JSON in order notes temporarily (will be replaced by webhook)
+    const cartJson = JSON.stringify(items);
+    await supabase.from("orders").update({
+      notes: `__cart__:${cartJson}|__customer__:${JSON.stringify(customer || {})}`,
+    }).eq("id", order.id);
+
+    // Validate coupon
     let coupon: any = null;
     let stripeDiscounts: Stripe.Checkout.SessionCreateParams.Discount[] = [];
 
@@ -58,7 +78,6 @@ Deno.serve(async (req) => {
 
         if (valid) {
           coupon = couponData;
-          // Create Stripe coupon on the fly
           const stripeCoupon = await stripe.coupons.create(
             couponData.discount_type === "percentage"
               ? { percent_off: Number(couponData.discount_value), duration: "once" }
@@ -71,47 +90,30 @@ Deno.serve(async (req) => {
 
     // Build line items
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = items.map((item: any) => {
-      const unitAmount = Math.round(Number(item.price) * 100);
       let name = item.name;
-
-      if (item.type === "class_reservation") {
-        name = `${item.name} (anticipo)`;
-      } else if (item.type === "camp_reservation") {
-        name = `${item.name} (señal)`;
-      }
+      if (item.type === "class_reservation") name = `${item.name} (anticipo)`;
+      else if (item.type === "camp_reservation") name = `${item.name} (señal)`;
 
       return {
         price_data: {
           currency: "eur",
-          product_data: {
-            name,
-            metadata: {
-              type: item.type,
-              itemId: item.id,
-              ...(item.metadata || {}),
-            },
-          },
-          unit_amount: unitAmount,
+          product_data: { name },
+          unit_amount: Math.round(Number(item.price) * 100),
         },
         quantity: item.quantity || 1,
       };
     });
 
-    // Metadata for webhook to process the order
+    // Metadata: only short references (under 500 chars each)
     const metadata: Record<string, string> = {
-      cart: JSON.stringify(items),
+      orderId: order.id,
       userId: userId || "",
       couponId: coupon?.id || "",
       couponCode: coupon?.code || "",
     };
 
     if (customer?.phone) metadata.phone = customer.phone;
-    if (customer?.address) metadata.address = customer.address;
-    if (customer?.city) metadata.city = customer.city;
-    if (customer?.postalCode) metadata.postalCode = customer.postalCode;
-    if (customer?.notes) metadata.notes = customer.notes;
 
-    // Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -124,14 +126,18 @@ Deno.serve(async (req) => {
       locale: "es",
     });
 
+    // Save stripe session ID to order
+    await supabase.from("orders").update({
+      notes: `__cart__:${cartJson}|__customer__:${JSON.stringify(customer || {})}|stripe_session:${session.id}`,
+    }).eq("id", order.id);
+
     return new Response(JSON.stringify({ url: session.url, sessionId: session.id }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
     console.error("create-checkout error:", err);
     return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

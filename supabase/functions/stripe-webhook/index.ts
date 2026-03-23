@@ -37,59 +37,67 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const meta = session.metadata || {};
-
-    let cart: any[] = [];
-    try {
-      cart = JSON.parse(meta.cart || "[]");
-    } catch {
-      console.error("Failed to parse cart from metadata");
-      return new Response("Bad cart data", { status: 400 });
-    }
-
+    const orderId = meta.orderId;
     const userId = meta.userId || null;
-    if (!userId) {
-      console.error("No userId in metadata");
-      return new Response("No user", { status: 400 });
+
+    if (!orderId || !userId) {
+      console.error("Missing orderId or userId in metadata");
+      return new Response("Missing metadata", { status: 400 });
     }
 
-    const totalPaid = (session.amount_total || 0) / 100;
-
     try {
+      // Fetch the pending order to get cart data
+      const { data: pendingOrder, error: fetchErr } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", orderId)
+        .single();
+
+      if (fetchErr || !pendingOrder) throw new Error("Order not found: " + orderId);
+
+      // Parse cart and customer from notes
+      const notes = pendingOrder.notes || "";
+      let cart: any[] = [];
+      let customer: any = {};
+
+      const cartMatch = notes.match(/__cart__:(.*?)(?:\|__customer__|$)/);
+      if (cartMatch) {
+        try { cart = JSON.parse(cartMatch[1]); } catch { console.error("Failed to parse cart"); }
+      }
+
+      const custMatch = notes.match(/__customer__:(.*?)(?:\|stripe_session:|$)/);
+      if (custMatch) {
+        try { customer = JSON.parse(custMatch[1]); } catch {}
+      }
+
+      const totalPaid = (session.amount_total || 0) / 100;
+
+      // Update order: mark as paid, clean up notes
+      const finalNotes = [
+        customer.notes || "",
+        `Stripe: ${session.id}`,
+        meta.couponCode ? `Cupon: ${meta.couponCode}` : "",
+      ].filter(Boolean).join(" | ") || null;
+
+      await supabase.from("orders").update({
+        status: "paid",
+        total: totalPaid,
+        notes: finalNotes,
+      }).eq("id", orderId);
+
       // Save address/phone to profile
       const profileUpdate: Record<string, any> = {};
-      if (meta.phone) profileUpdate.phone = meta.phone;
-      if (meta.address) profileUpdate.address = meta.address;
-      if (meta.city) profileUpdate.city = meta.city;
-      if (meta.postalCode) profileUpdate.postal_code = meta.postalCode;
-
+      if (customer.phone) profileUpdate.phone = customer.phone;
+      if (customer.address) profileUpdate.address = customer.address;
+      if (customer.city) profileUpdate.city = customer.city;
+      if (customer.postalCode) profileUpdate.postal_code = customer.postalCode;
       if (Object.keys(profileUpdate).length) {
         await supabase.from("profiles").update(profileUpdate).eq("id", userId);
       }
 
-      // Create order
-      const shippingParts = [meta.address, meta.city, meta.postalCode].filter(Boolean);
-      const { data: order, error: orderErr } = await supabase
-        .from("orders")
-        .insert({
-          user_id: userId,
-          status: "paid",
-          total: totalPaid,
-          shipping_address: shippingParts.join(", ") || null,
-          notes: [
-            meta.notes || "",
-            `Stripe: ${session.id}`,
-            meta.couponCode ? `Cupon: ${meta.couponCode}` : "",
-          ].filter(Boolean).join(" | ") || null,
-        })
-        .select()
-        .single();
-
-      if (orderErr) throw orderErr;
-
       // ---- Process CAMP reservations ----
       const camps = cart.filter((i: any) => i.type === "camp_reservation");
       for (const camp of camps) {
-        // campId can be in metadata.campId or extracted from item id "camp-{uuid}"
         const campId = camp.metadata?.campId || camp.id?.replace("camp-", "") || null;
         if (campId) {
           await supabase.from("bookings").insert({
@@ -98,7 +106,7 @@ Deno.serve(async (req) => {
             deposit_amount: camp.price,
             total_amount: camp.metadata?.totalAmount || camp.price,
             status: "deposit_paid",
-            notes: `Pedido #${order.id.slice(0, 8)} | Stripe: ${session.id}`,
+            notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}`,
           });
         }
       }
@@ -110,7 +118,7 @@ Deno.serve(async (req) => {
         const sessions = cls.metadata?.sessions || 1;
         await supabase.from("bonos").insert({
           user_id: userId,
-          order_id: order.id,
+          order_id: orderId,
           class_type: classType,
           total_credits: sessions * (cls.quantity || 1),
           used_credits: 0,
@@ -123,24 +131,19 @@ Deno.serve(async (req) => {
       // ---- Process PRODUCT order items ----
       const products = cart.filter((i: any) => i.type === "product");
       for (const prod of products) {
-        // product id in cart is the product uuid
         const productId = prod.metadata?.productId || prod.id || null;
         if (productId) {
           await supabase.from("order_items").insert({
-            order_id: order.id,
+            order_id: orderId,
             product_id: productId,
             quantity: prod.quantity || 1,
             unit_price: prod.price,
           });
           // Decrease stock
           const { data: product } = await supabase
-            .from("products")
-            .select("stock")
-            .eq("id", productId)
-            .single();
+            .from("products").select("stock").eq("id", productId).single();
           if (product && product.stock !== null) {
-            await supabase
-              .from("products")
+            await supabase.from("products")
               .update({ stock: Math.max((product.stock || 0) - (prod.quantity || 1), 0) })
               .eq("id", productId);
           }
@@ -158,7 +161,7 @@ Deno.serve(async (req) => {
             date_end: rental.metadata.dateEnd || new Date().toISOString().slice(0, 10),
             total_amount: rental.price * (rental.quantity || 1),
             status: "confirmed",
-            notes: `Pedido #${order.id.slice(0, 8)} | Stripe: ${session.id}`,
+            notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}`,
           });
         }
       }
@@ -170,7 +173,7 @@ Deno.serve(async (req) => {
         payment_method: "stripe",
         payment_date: new Date().toISOString(),
         reservation_type: "order",
-        reference_id: order.id,
+        reference_id: orderId,
         notes: `Stripe session: ${session.id}`,
       });
 
@@ -179,7 +182,14 @@ Deno.serve(async (req) => {
         await supabase.rpc("increment_coupon_usage", { p_coupon_id: meta.couponId });
       }
 
-      console.log(`Order ${order.id} created for user ${userId}, total: ${totalPaid}€, items: ${cart.length}`);
+      // ---- Clean up Stripe coupon created on-the-fly ----
+      if (session.total_details?.breakdown?.discounts?.length) {
+        for (const d of session.total_details.breakdown.discounts) {
+          try { await stripe.coupons.del(d.discount.coupon.id); } catch {}
+        }
+      }
+
+      console.log(`Order ${orderId} completed for user ${userId}, total: ${totalPaid}€, items: ${cart.length}`);
     } catch (err: any) {
       console.error("Webhook processing error:", err);
       return new Response(`Processing error: ${err.message}`, { status: 500 });
