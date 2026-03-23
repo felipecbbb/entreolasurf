@@ -24,9 +24,11 @@ export async function renderPedidos(container) {
         .not('order_id', 'is', null);
       if (bonos) bonos.forEach(b => bonoOrderIds.add(b.order_id));
     }
-    // An order is a product order if it has no bonos linked to it
-    // (camp bookings don't store order_id, so they won't appear here anyway)
-    let orders = allOrders.filter(o => !bonoOrderIds.has(o.id));
+    // A product order must have order_items AND not be a bono order
+    // Orders with no items and no bonos are camp shell orders — skip them
+    let orders = allOrders.filter(o =>
+      !bonoOrderIds.has(o.id) && (o.order_items || []).length > 0
+    );
 
     // Apply status filter
     if (_statusFilter) orders = orders.filter(o => o.status === _statusFilter);

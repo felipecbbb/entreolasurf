@@ -9,7 +9,7 @@ export async function renderPayments(panel) {
 
   const [paymentsRes, ordersRes, bookingsRes, profileRes, bonosRes] = await Promise.all([
     supabase.rpc('get_user_payments', { p_user_id: user.id }),
-    supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+    supabase.from('orders').select('*, order_items(id)').eq('user_id', user.id).order('created_at', { ascending: false }),
     supabase.from('bookings').select('*, surf_camps:camp_id(title)').eq('user_id', user.id).order('created_at', { ascending: false }),
     supabase.from('profiles').select('credit_balance').eq('id', user.id).single(),
     supabase.from('bonos').select('*, payments:payments(amount)').eq('user_id', user.id).eq('status', 'active'),
@@ -74,10 +74,14 @@ export async function renderPayments(panel) {
     });
   }
 
-  // Orders — only product orders (exclude bono orders which are class purchases)
+  // Orders — categorize by type
   for (const o of orders) {
-    if (bonoOrderIds.has(o.id)) {
-      // This is a bono/class purchase order
+    if (o.status === 'pending') continue; // skip unpaid
+    const hasItems = (o.order_items || []).length > 0;
+    const hasBonos = bonoOrderIds.has(o.id);
+
+    if (hasBonos) {
+      // Bono/class purchase
       timeline.push({
         date: o.created_at,
         domain: 'bono',
@@ -86,8 +90,8 @@ export async function renderPayments(panel) {
         method: o.notes?.includes('Stripe') ? 'stripe' : 'online',
         source: 'web',
       });
-    } else if (o.status !== 'pending') {
-      // Pure product order
+    } else if (hasItems) {
+      // Product order (has order_items)
       timeline.push({
         date: o.created_at,
         domain: 'order',
@@ -97,6 +101,7 @@ export async function renderPayments(panel) {
         source: 'web',
       });
     }
+    // Orders with no items AND no bonos = camp shell orders → skip (shown via bookings)
   }
 
   timeline.sort((a, b) => new Date(b.date) - new Date(a.date));

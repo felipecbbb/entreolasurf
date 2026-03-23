@@ -372,7 +372,7 @@ export async function deleteProduct(id) {
 export const fetchOrders = cached('orders', 30000, async () => {
   const { data, error } = await supabase
     .from('orders')
-    .select('*, profiles:user_id(id, full_name, phone, email)')
+    .select('*, profiles:user_id(id, full_name, phone, email), order_items(id)')
     .order('created_at', { ascending: false });
   if (error) { console.error('fetchOrders error:', error.message); return []; }
   return data || [];
