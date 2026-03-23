@@ -16,8 +16,8 @@ function loadSettings() {
 function saveSettings(s) { localStorage.setItem('eos_admin_settings', JSON.stringify(s)); }
 function getSetting(key, fallback) { return loadSettings()[key] ?? fallback; }
 
-const BONO_STATUS = { active: 'Activo', expired: 'Expirado', fully_used: 'Agotado', cancelled: 'Cancelado' };
-const BONO_COLORS = { active: '#22c55e', expired: '#ef4444', fully_used: '#6b7280', cancelled: '#f59e0b' };
+const BONO_STATUS = { active: 'Activo', expired: 'Expirado', exhausted: 'Agotado', cancelled: 'Cancelado' };
+const BONO_COLORS = { active: '#22c55e', expired: '#ef4444', exhausted: '#6b7280', cancelled: '#f59e0b' };
 const ORDER_STATUS = { pending: 'Pendiente', paid: 'Pagado', shipped: 'Enviado', delivered: 'Entregado', cancelled: 'Cancelado' };
 const BOOKING_STATUS = { pending: 'Pendiente', deposit_paid: 'Señal pagada', fully_paid: 'Pagado', cancelled: 'Cancelado', refunded: 'Reembolsado' };
 const EQUIP_STATUS = { pending: 'Pendiente', confirmed: 'Confirmado', active: 'Activo', returned: 'Devuelto', cancelled: 'Cancelado' };

@@ -16,98 +16,176 @@ function esc(str) {
   return d.innerHTML;
 }
 
-// Expiry rules: surf classes = 180 days, other activities = 365 days
-function getBonoExpiry(classType) {
-  const days = ['grupal', 'individual'].includes(classType) ? 180 : 365;
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString();
-}
-
 async function init() {
+  // Check for success return from Stripe
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('success') === '1') {
+    clearCart();
+    updateCartPill();
+    mainEl.innerHTML = `
+      <section class="section" style="padding-top:120px"><div class="container">
+        <div class="card confirmation-card">
+          <h2>Pago completado</h2>
+          <p>Tu pedido ha sido procesado correctamente.</p>
+          <p>Recibiras un email de confirmacion con los detalles.</p>
+          <div class="hero-actions" style="justify-content:center;margin-top:18px">
+            <a class="btn red" href="/">Volver al inicio</a>
+            <a class="btn line" href="/mi-cuenta/">Ver mis pedidos</a>
+          </div>
+        </div>
+      </div></section>`;
+    return;
+  }
+
   const cart = getCart();
   if (!cart.length) {
     mainEl.innerHTML = `
       <section class="section" style="padding-top:120px"><div class="container">
         <div class="cart-empty">
           <h2>No hay nada que pagar</h2>
-          <p>Tu carrito está vacío.</p>
+          <p>Tu carrito esta vacio.</p>
           <a class="btn red" href="/tienda-2/">Ir a la tienda</a>
         </div>
       </div></section>`;
     return;
   }
 
-  // Check if cart has class packs and user is not logged in
   const session = await getSession();
   const hasClassPacks = cart.some(i => i.type === 'class_reservation');
 
   if (hasClassPacks && !session) {
     const bar = document.getElementById('guest-bar');
     if (bar) bar.style.display = 'flex';
-    // Show login requirement message
     const msgEl = document.createElement('div');
     msgEl.className = 'card';
     msgEl.style.cssText = 'background:#fff8d6;border:1px solid var(--color-red);padding:16px 20px;margin-bottom:20px;border-radius:var(--radius-md)';
     msgEl.innerHTML = `
       <p style="margin:0;font-weight:600;color:var(--color-navy)">Necesitas una cuenta para comprar packs de clases</p>
-      <p style="margin:6px 0 0;font-size:.9rem">Los bonos de créditos se vinculan a tu cuenta para que puedas reservar clases. <a href="/mi-cuenta/" style="color:var(--color-navy);text-decoration:underline">Inicia sesión o crea una cuenta</a> y vuelve aquí.</p>`;
+      <p style="margin:6px 0 0;font-size:.9rem">Los bonos se vinculan a tu cuenta. <a href="/mi-cuenta/" style="color:var(--color-navy);text-decoration:underline">Inicia sesion o crea una cuenta</a> y vuelve aqui.</p>`;
     if (formWrap) formWrap.prepend(msgEl);
   }
 
-  // Pre-fill if logged in
   let profile = null;
   if (session) {
     profile = await getProfile();
   }
 
-  // Credit balance logic
-  const creditBalance = Number(profile?.credit_balance || 0);
   const cartTotal = getCartTotal();
-  let useCredit = false;
-  let creditApplied = 0;
-  let finalTotal = cartTotal;
+  let appliedCoupon = null;
+  let discount = 0;
 
   // Render summary
-  const summaryItems = cart.map(i => {
-    const isClass = i.type === 'class_reservation';
-    const name = esc(i.name);
-    const label = isClass ? `${name} (anticipo)` : `${name} × ${i.quantity}`;
-    return `<div class="summary-item"><span class="name">${label}</span><span class="amt">${formatPrice(i.price * i.quantity)}</span></div>`;
-  }).join('');
-
   function renderSummary() {
-    creditApplied = useCredit ? Math.min(creditBalance, cartTotal) : 0;
-    finalTotal = cartTotal - creditApplied;
+    const summaryItems = cart.map(i => {
+      const isClass = i.type === 'class_reservation';
+      const name = esc(i.name);
+      const label = isClass ? `${name} (anticipo)` : `${name} × ${i.quantity}`;
+      return `<div class="summary-item"><span class="name">${label}</span><span class="amt">${formatPrice(i.price * i.quantity)}</span></div>`;
+    }).join('');
+
+    const finalTotal = Math.max(cartTotal - discount, 0);
 
     summaryWrap.innerHTML = `
       <h3>Resumen del pedido</h3>
       ${summaryItems}
       <div class="summary-total"><span>Subtotal</span><span>${formatPrice(cartTotal)}</span></div>
-      ${creditBalance > 0 && session ? `
-        <div class="credit-option">
-          <label class="credit-toggle">
-            <input type="checkbox" id="use-credit-cb" ${useCredit ? 'checked' : ''}>
-            <span>Usar saldo a favor <strong>(${formatPrice(creditBalance)})</strong></span>
-          </label>
-          ${useCredit ? `<div class="credit-discount"><span>Saldo aplicado</span><span>-${formatPrice(creditApplied)}</span></div>` : ''}
-        </div>
-      ` : ''}
+      ${appliedCoupon ? `
+        <div class="summary-item" style="color:#166534;font-weight:600">
+          <span>Cupon ${esc(appliedCoupon.code)}</span>
+          <span>-${formatPrice(discount)}</span>
+        </div>` : ''}
       <div class="summary-total summary-final"><span>Total a pagar</span><span>${formatPrice(finalTotal)}</span></div>
-      ${useCredit && finalTotal === 0 ? '<p class="credit-full-msg">El saldo cubre el total. No se realizará cobro adicional.</p>' : ''}`;
 
-    // Bind checkbox
-    const cb = document.getElementById('use-credit-cb');
-    if (cb) {
-      cb.addEventListener('change', () => {
-        useCredit = cb.checked;
-        renderSummary();
+      <div class="coupon-form" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--color-line)">
+        <label style="font-family:'Space Grotesk',sans-serif;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--color-muted);display:block;margin-bottom:6px">Codigo de descuento</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="coupon-input" placeholder="CODIGO" style="flex:1;border:1px solid var(--color-line);border-radius:8px;padding:8px 12px;font-family:'Manrope',sans-serif;font-size:.88rem;text-transform:uppercase" value="${appliedCoupon?.code || ''}" ${appliedCoupon ? 'disabled' : ''} />
+          ${appliedCoupon
+            ? '<button type="button" id="coupon-remove" class="btn line" style="font-size:.82rem;padding:8px 14px">Quitar</button>'
+            : '<button type="button" id="coupon-apply" class="btn line" style="font-size:.82rem;padding:8px 14px">Aplicar</button>'}
+        </div>
+        <div id="coupon-msg" style="font-size:.82rem;margin-top:6px"></div>
+      </div>`;
+
+    // Coupon events
+    document.getElementById('coupon-apply')?.addEventListener('click', async () => {
+      const code = document.getElementById('coupon-input')?.value.trim().toUpperCase();
+      if (!code) return;
+      const msgEl = document.getElementById('coupon-msg');
+
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .eq('code', code)
+        .eq('active', true)
+        .single();
+
+      if (error || !data) {
+        msgEl.textContent = 'Cupon no valido';
+        msgEl.style.color = '#b91c1c';
+        return;
+      }
+
+      const now = new Date();
+      if (data.starts_at && new Date(data.starts_at) > now) {
+        msgEl.textContent = 'Este cupon aun no esta activo';
+        msgEl.style.color = '#b91c1c';
+        return;
+      }
+      if (data.expires_at && new Date(data.expires_at) < now) {
+        msgEl.textContent = 'Este cupon ha expirado';
+        msgEl.style.color = '#b91c1c';
+        return;
+      }
+      if (data.max_uses && data.used_count >= data.max_uses) {
+        msgEl.textContent = 'Este cupon se ha agotado';
+        msgEl.style.color = '#b91c1c';
+        return;
+      }
+      if (data.min_amount && cartTotal < Number(data.min_amount)) {
+        msgEl.textContent = `Importe minimo: ${Number(data.min_amount).toFixed(2)}€`;
+        msgEl.style.color = '#b91c1c';
+        return;
+      }
+
+      // Check applies_to
+      const hasMatchingItem = cart.some(i => {
+        if (data.applies_to === 'all') return true;
+        if (data.applies_to === 'camps' && i.type === 'camp_reservation') return true;
+        if (data.applies_to === 'classes' && i.type === 'class_reservation') {
+          if (data.activity_type) return i.metadata?.classType === data.activity_type;
+          return true;
+        }
+        if (data.applies_to === 'products' && i.type === 'product') return true;
+        if (data.applies_to === 'rentals' && i.type === 'rental') return true;
+        return false;
       });
-    }
+
+      if (!hasMatchingItem) {
+        msgEl.textContent = 'Este cupon no aplica a los productos de tu carrito';
+        msgEl.style.color = '#b91c1c';
+        return;
+      }
+
+      appliedCoupon = data;
+      discount = data.discount_type === 'percentage'
+        ? cartTotal * (Number(data.discount_value) / 100)
+        : Number(data.discount_value);
+      discount = Math.min(discount, cartTotal);
+
+      renderSummary();
+    });
+
+    document.getElementById('coupon-remove')?.addEventListener('click', () => {
+      appliedCoupon = null;
+      discount = 0;
+      renderSummary();
+    });
   }
 
   renderSummary();
 
+  // Pre-fill form
   if (profile) {
     const f = document.getElementById('co-form');
     if (f) {
@@ -120,138 +198,55 @@ async function init() {
     }
   }
 
-  // Handle submit
+  // Handle submit → redirect to Stripe Checkout
   document.getElementById('co-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     const submitBtn = f.querySelector('button[type="submit"]');
 
-    // Block checkout if class packs and not logged in
     if (hasClassPacks && !session) {
-      alert('Necesitas iniciar sesión para comprar packs de clases. Ve a "Mi cuenta" para registrarte o iniciar sesión.');
+      alert('Necesitas iniciar sesion para comprar packs de clases.');
+      return;
+    }
+
+    if (!session) {
+      alert('Necesitas iniciar sesion para completar la compra.');
       return;
     }
 
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Procesando…';
-
-    // orders table only has: user_id, status, total, shipping_address, notes
-    if (!session) {
-      alert('Necesitas iniciar sesión para completar la compra.');
-      submitBtn.disabled = false; submitBtn.textContent = 'Confirmar pedido';
-      return;
-    }
-
-    // Recalculate credit at submit time
-    const appliedCredit = useCredit ? Math.min(creditBalance, cartTotal) : 0;
-    const totalToPay = cartTotal - appliedCredit;
-
-    const orderNotes = [
-      f.notas?.value || '',
-      appliedCredit > 0 ? `Saldo aplicado: ${formatPrice(appliedCredit)}` : '',
-    ].filter(Boolean).join(' | ') || null;
-
-    const orderData = {
-      user_id: session.user.id,
-      status: 'paid',
-      total: totalToPay,
-      shipping_address: [f.direccion?.value, f.ciudad?.value, f.cp?.value].filter(Boolean).join(', ') || null,
-      notes: orderNotes,
-    };
+    submitBtn.textContent = 'Redirigiendo a pago…';
 
     try {
-      // Save address/phone to profile for future orders
-      const profileUpdate = {};
-      if (f.telefono?.value) profileUpdate.phone = f.telefono.value;
-      if (f.direccion?.value) profileUpdate.address = f.direccion.value;
-      if (f.ciudad?.value) profileUpdate.city = f.ciudad.value;
-      if (f.cp?.value) profileUpdate.postal_code = f.cp.value;
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const token = authSession?.access_token;
 
-      // Deduct credit balance if used
-      if (appliedCredit > 0) {
-        profileUpdate.credit_balance = creditBalance - appliedCredit;
-      }
+      const response = await supabase.functions.invoke('create-checkout', {
+        body: {
+          items: cart,
+          customer: {
+            email: f.email?.value,
+            phone: f.telefono?.value,
+            address: f.direccion?.value,
+            city: f.ciudad?.value,
+            postalCode: f.cp?.value,
+            notes: f.notas?.value,
+          },
+          couponCode: appliedCoupon?.code || null,
+        },
+      });
 
-      if (Object.keys(profileUpdate).length) {
-        const { error: profileErr } = await supabase.from('profiles').update(profileUpdate).eq('id', session.user.id);
-        if (profileErr) throw profileErr;
-      }
+      if (response.error) throw new Error(response.error.message || 'Error creando sesion de pago');
 
-      // Create order
-      const { data: order, error } = await supabase
-        .from('orders')
-        .insert(orderData)
-        .select()
-        .single();
-      if (error) throw error;
+      const { url } = response.data;
+      if (!url) throw new Error('No se recibio URL de pago');
 
-      // Create bookings for camp reservations
-      const camps = cart.filter(i => i.type === 'camp_reservation');
-      for (const camp of camps) {
-        const booking = {
-          user_id: session.user.id,
-          camp_id: camp.metadata?.campId,
-          deposit_amount: camp.price,
-          total_amount: camp.metadata?.totalAmount || camp.price,
-          status: 'deposit_paid',
-          notes: `Pedido #${order.id.slice(0, 8)}`,
-        };
-        if (booking.camp_id) {
-          await supabase.from('bookings').insert(booking);
-        }
-      }
-
-      // Create BONOS for class reservations (instead of class_bookings)
-      const classes = cart.filter(i => i.type === 'class_reservation');
-      for (const cls of classes) {
-        const classType = cls.metadata?.classType || 'grupal';
-        const sessions = cls.metadata?.sessions || 1;
-        const bono = {
-          user_id: session.user.id,
-          order_id: order.id,
-          class_type: classType,
-          total_credits: sessions * cls.quantity,
-          used_credits: 0,
-          total_paid: cls.price * cls.quantity,
-          status: 'active',
-          expires_at: getBonoExpiry(classType),
-        };
-        const { error: bonoErr } = await supabase.from('bonos').insert(bono);
-        if (bonoErr) throw bonoErr;
-      }
-
-      // Create payment record when credit is applied
-      if (appliedCredit > 0) {
-        const { error: payErr } = await supabase.from('payments').insert({
-          order_id: order.id,
-          user_id: session.user.id,
-          amount: appliedCredit,
-          method: 'credit_balance',
-          status: 'completed',
-        });
-        if (payErr) throw payErr;
-      }
-
-      clearCart();
-      updateCartPill();
-
-      mainEl.innerHTML = `
-        <section class="section" style="padding-top:120px"><div class="container">
-          <div class="card confirmation-card">
-            <h2>Pedido confirmado</h2>
-            <p>Tu pedido <strong>#${order.id.slice(0, 8)}</strong> ha sido registrado correctamente.</p>
-            <p>Recibirás un email de confirmación en <strong>${f.email.value}</strong>.</p>
-            ${classes.length ? '<p style="margin-top:8px"><strong>Tus bonos de clases</strong> ya están activos. Ve a <a href="/mi-cuenta/" style="color:var(--color-navy);text-decoration:underline">Mi cuenta</a> para reservar tus clases en el calendario.</p>' : ''}
-            <div class="hero-actions" style="justify-content:center;margin-top:18px">
-              <a class="btn red" href="/">Volver al inicio</a>
-              <a class="btn line" href="/mi-cuenta/">Ver mis pedidos</a>
-            </div>
-          </div>
-        </div></section>`;
+      // Redirect to Stripe Checkout
+      window.location.href = url;
     } catch (err) {
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Confirmar pedido';
-      alert('Error al crear el pedido: ' + err.message);
+      submitBtn.textContent = 'Pagar con tarjeta';
+      alert('Error: ' + err.message);
     }
   });
 }

@@ -8,14 +8,14 @@ import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js'
 const BONO_STATUSES = {
   active: 'Activo',
   expired: 'Expirado',
-  fully_used: 'Agotado',
+  exhausted: 'Agotado',
   cancelled: 'Cancelado',
 };
 
 const BONO_STATUS_COLORS = {
   active: '#22c55e',
   expired: '#ef4444',
-  fully_used: '#6b7280',
+  exhausted: '#6b7280',
   cancelled: '#f59e0b',
 };
 

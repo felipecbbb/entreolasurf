@@ -18,6 +18,7 @@ import { renderActividades } from './sections/actividades.js';
 import { renderMaterial } from './sections/material.js';
 import { renderEstadisticas } from './sections/estadisticas.js';
 import { renderReservaClases } from './sections/reserva-clases.js';
+import { renderCupones } from './sections/cupones.js';
 
 // DOM refs
 const loginView = document.getElementById('login-view');
@@ -60,6 +61,7 @@ register('actividades', renderActividades);
 register('material', renderMaterial);
 register('estadisticas', renderEstadisticas);
 register('reserva-clases', renderReservaClases);
+register('cupones', renderCupones);
 
 // ---- Login form ----
 loginForm.addEventListener('submit', async (e) => {

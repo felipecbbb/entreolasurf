@@ -307,6 +307,33 @@ export async function uploadCampImage(file, slug) {
   return publicData.publicUrl;
 }
 
+// ---- Coupons ----
+export const fetchCoupons = cached('coupons', 30000, async () => {
+  const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+});
+
+export async function upsertCoupon(coupon) {
+  coupon.updated_at = new Date().toISOString();
+  let error;
+  if (coupon.id) {
+    const id = coupon.id;
+    delete coupon.id;
+    ({ error } = await supabase.from('coupons').update(coupon).eq('id', id));
+  } else {
+    ({ error } = await supabase.from('coupons').insert(coupon));
+  }
+  if (error) throw error;
+  invalidateCache('coupons');
+}
+
+export async function deleteCoupon(id) {
+  const { error } = await supabase.from('coupons').delete().eq('id', id);
+  if (error) throw error;
+  invalidateCache('coupons');
+}
+
 // ---- Surf Classes ----
 export async function upsertClass(cls) {
   const { error } = await supabase.from('surf_classes').upsert(cls);

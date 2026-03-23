@@ -143,6 +143,7 @@ async function init() {
       name: product.name,
       price: Number(product.price),
       quantity: 1,
+      metadata: { productId: product.id },
     });
 
     updateCartPill();
