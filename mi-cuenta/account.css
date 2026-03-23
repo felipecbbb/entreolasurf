@@ -803,9 +803,33 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   .pay-summary-grid {
     grid-template-columns: 1fr !important;
   }
-  .pay-table-wrap { overflow-x: auto; }
+  .pay-table-wrap { overflow-x: hidden; }
   .pay-table { font-size: .8rem; }
-  .pay-table th, .pay-table td { padding: 8px 10px; }
+  .pay-table thead { display: none; }
+  .pay-table, .pay-table tbody, .pay-table tr, .pay-table td {
+    display: block;
+    width: 100%;
+  }
+  .pay-table tr {
+    padding: 12px 14px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .pay-table td {
+    padding: 3px 0;
+    border: none;
+    display: flex;
+    justify-content: space-between;
+    font-size: .84rem;
+  }
+  .pay-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: .72rem;
+    text-transform: uppercase;
+    color: var(--color-muted, #888);
+    font-family: 'Space Grotesk', sans-serif;
+    margin-right: 8px;
+  }
 
   /* Bono cards */
   .bono-card {
