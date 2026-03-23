@@ -900,6 +900,88 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   /* Auth page small */
   .auth-field input:not([type="checkbox"]), .auth-field select { padding: 12px 14px; }
   .auth-submit-btn { padding: 13px; }
+
+  /* Bonos tab */
+  .bono-card { padding: 12px 14px; }
+  .bono-card .bono-type-badge { font-size: .65rem; }
+
+  /* Calendar tab */
+  .date-strip-day { min-width: 38px; padding: 4px 6px; font-size: .72rem; }
+  .credit-card { padding: 8px 12px; }
+  .credit-card strong { font-size: .88rem; }
+  .cal-type-btn { font-size: .7rem; padding: 5px 8px; }
+  .class-slot-footer { flex-direction: column; gap: 6px; }
+  .class-slot-footer .btn { width: 100%; text-align: center; }
+
+  /* Enrollments tab */
+  .booking-card-item { flex-direction: column; gap: 8px; }
+  .booking-card-item .btn { min-height: 44px; padding: 10px 14px; }
+
+  /* Family tab */
+  .family-member-actions {
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+  .family-member-actions .btn {
+    width: 100%;
+    text-align: center;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .family-form { padding: 12px; }
+
+  /* All buttons: enforce touch targets */
+  .tab-panel .btn,
+  .tab-panel button {
+    min-height: 44px;
+  }
+
+  /* Text overflow safety */
+  .bono-card,
+  .booking-card-item,
+  .family-member-card,
+  .pay-summary-card {
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+}
+
+/* --- Responsive: Booking modal + payment table at 520px --- */
+@media (max-width: 520px) {
+  .booking-modal-content { max-width: 90vw; }
+  .bono-upgrade-modal { max-width: 90vw; }
+  .booking-modal-content label { padding: 12px 14px; }
+
+  .pay-summary-grid { grid-template-columns: 1fr; }
+
+  .pay-table thead { display: none; }
+  .pay-table, .pay-table tbody, .pay-table tr, .pay-table td {
+    display: block;
+    width: 100%;
+  }
+  .pay-table tr {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .pay-table td {
+    padding: 3px 0;
+    border: none;
+    display: flex;
+    justify-content: space-between;
+    font-size: .82rem;
+  }
+  .pay-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: .72rem;
+    text-transform: uppercase;
+    color: var(--color-muted, #888);
+    font-family: 'Space Grotesk', sans-serif;
+    margin-right: 8px;
+  }
 }
 
 /* ============================================================
@@ -1124,3 +1206,35 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 }
 
 .bono-pay-detail-highlight .bono-pay-detail-value { color: #92400e; }
+
+/* ============================================================
+   Booking Modal (calendar tab) — Mobile fixes
+   ============================================================ */
+.booking-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0,0,0,.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.booking-modal-content {
+  background: #fff;
+  border-radius: var(--radius-md, 14px);
+  max-width: 420px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 480px) {
+  .booking-modal { padding: 10px; }
+  .booking-modal-content {
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 12px;
+  }
+}
