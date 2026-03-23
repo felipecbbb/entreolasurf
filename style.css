@@ -3060,3 +3060,42 @@ td a {
   .bono-upgrade-sessions { font-size: 1rem; }
   .bono-upgrade-diff { font-size: .8rem; }
 }
+
+/* ---- Mobile 375px fixes ---- */
+@media (max-width: 480px) {
+  /* Cart: stack rows instead of table */
+  .cart-table thead { display: none; }
+  .cart-table, .cart-table tbody, .cart-table tr { display: block; width: 100%; }
+  .cart-table tr { padding: 14px; border-bottom: 1px solid var(--color-line); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .cart-table td { display: inline; border: none; padding: 0; }
+  .cart-table td:nth-child(1) { flex: 1 1 60%; font-weight: 600; }
+  .cart-table td:nth-child(2) { font-weight: 700; }
+  .cart-table td:nth-child(4) { display: none; }
+  .qty-controls button { min-width: 36px; min-height: 36px; }
+
+  /* Checkout: stack city/postal */
+  .checkout-form .row-2 { grid-template-columns: 1fr; gap: 12px; }
+  .order-summary-card { position: static; }
+
+  /* Hero: tighter */
+  .hero { min-height: 70vh; padding-top: 100px; }
+  .hero .page-title { font-size: clamp(2rem, 8vw, 3.5rem); }
+  .hero .lead { font-size: .92rem; }
+
+  /* Camp cards on overview */
+  .camps-grid { grid-template-columns: 1fr; gap: 16px; }
+  .camp-card .camp-actions { flex-direction: column; gap: 8px; }
+  .camp-card .camp-actions .btn { width: 100%; text-align: center; }
+
+  /* FAQ */
+  .faq-accordion-list { grid-template-columns: 1fr; }
+
+  /* Footer */
+  .footer-row { flex-direction: column; gap: 12px; text-align: center; }
+  .footer-links { justify-content: center; }
+
+  /* General spacing */
+  .section { padding: 48px 0; }
+  .container { padding-left: 16px; padding-right: 16px; }
+  .page-intro .title { font-size: clamp(1.8rem, 7vw, 2.5rem); }
+}

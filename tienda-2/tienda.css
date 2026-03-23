@@ -396,7 +396,18 @@
   .shop-filters { top: 56px; }
 }
 
-@media (max-width: 420px) {
-  .shop-grid { grid-template-columns: 1fr; max-width: 340px; margin: 0 auto; }
+@media (max-width: 480px) {
+  .shop-filters { padding: 10px 0; }
+  .shop-filter-bar { padding: 0 16px; }
+  .shop-filter-pill { padding: 6px 14px; font-size: .68rem; }
+  .shop-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .shop-card-body { padding: 10px 12px 14px; }
+  .shop-card-add { min-height: 44px; }
+  .shop-hero { min-height: 32vh; }
+  .shop-hero h1 { font-size: 1.8rem; }
+}
+
+@media (max-width: 360px) {
+  .shop-grid { grid-template-columns: 1fr; max-width: 100%; }
   .shop-card-desc { display: -webkit-box; }
 }

@@ -6415,6 +6415,20 @@ a.admin-nav-item-external .nav-icon svg {
   .rv-booking-date { display: none; }
 }
 @media (max-width: 520px) {
-  .rv-booking-row { grid-template-columns: 1fr; }
+  .rv-booking-row { grid-template-columns: 1fr; padding: 12px 14px; }
   .rv-booking-amounts { text-align: left; }
+  .rv-camp-stats { gap: 16px; }
+  .rv-camp-header { padding: 14px 14px; }
+
+  /* Camp cards */
+  .sc-grid { grid-template-columns: 1fr; }
+  .sc-card-thumb { height: 100px; }
+
+  /* Coupons */
+  .cp-table-row { padding: 12px 14px; gap: 6px 10px; }
+  .cp-code-badge { font-size: .7rem; padding: 2px 8px; }
+
+  /* Admin general */
+  .admin-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .admin-toolbar .admin-filter { width: 100%; }
 }
