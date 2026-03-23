@@ -129,8 +129,7 @@
 
 .account-content-header {
   margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid var(--color-navy);
+  padding-bottom: 0;
   display: flex;
   align-items: baseline;
   gap: 16px;
@@ -749,7 +748,7 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
     padding: 0 4px;
     flex-direction: column;
     gap: 4px;
-    border-bottom-width: 2px;
+    padding-bottom: 0;
   }
   .account-content-header h2 { font-size: 1.5rem; }
 
