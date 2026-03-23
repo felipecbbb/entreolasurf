@@ -697,21 +697,20 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 
   .account-avatar {
     flex-direction: row;
-    gap: 12px;
+    gap: 10px;
     padding: 12px 16px;
     margin-bottom: 0;
     border-bottom: none;
   }
 
   .account-avatar-circle {
-    width: 40px;
-    height: 40px;
-    font-size: 1rem;
-    margin-bottom: 0;
+    width: 36px;
+    height: 36px;
+    font-size: .95rem;
   }
 
-  .account-avatar-name { text-align: left; font-size: .88rem; }
-  .account-avatar-email { text-align: left; }
+  .account-avatar-name { text-align: left; font-size: .82rem; }
+  .account-avatar-email { text-align: left; font-size: .7rem; }
 
   .account-nav {
     display: flex;
@@ -719,7 +718,8 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     border-bottom: 1px solid var(--color-line);
-    padding: 0 8px;
+    padding: 0 12px;
+    gap: 2px;
   }
   .account-nav::-webkit-scrollbar { display: none; }
 
@@ -730,22 +730,27 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
     border-left: none;
     border-bottom: 3px solid transparent;
     flex-shrink: 0;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
   }
   .account-nav-item.active {
     border-left-color: transparent;
     border-bottom-color: var(--color-yellow, #f3c900);
+    background: transparent;
   }
+  .account-nav-item svg { display: none; }
 
   .account-nav-divider { display: none; }
   .account-nav-item.danger { border-bottom: none; }
 
   .account-content {
-    padding: 16px 0;
+    padding: 20px 16px;
   }
 
   .account-content-header {
     margin-bottom: 16px;
-    padding: 0 4px;
+    padding: 0;
     flex-direction: column;
     gap: 4px;
     padding-bottom: 0;
@@ -759,6 +764,13 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   .account-form-card {
     padding: 18px 14px;
     border-radius: 10px;
+  }
+
+  .account-field input,
+  .account-field select,
+  .account-field textarea {
+    padding: 13px 14px;
+    font-size: .95rem;
   }
 
   /* Auth page responsive */
@@ -800,18 +812,26 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 /* --- Responsive: Small phone --- */
 @media (max-width: 480px) {
   .account-content-header h2 { font-size: 1.3rem; }
-  .account-content-header p { font-size: .82rem; }
+  .account-content-header p { font-size: .8rem; }
+
+  .account-content { padding: 16px 12px; }
 
   .account-form-card {
     padding: 14px 12px;
+    margin-bottom: 12px;
   }
 
+  .account-avatar { padding: 10px 12px; }
+  .account-avatar-circle { width: 32px; height: 32px; font-size: .85rem; }
+  .account-avatar-name { font-size: .78rem; }
+  .account-avatar-email { display: none; }
+
+  .account-nav { padding: 0 8px; }
   .account-nav-item {
     padding: 8px 10px;
     font-size: .72rem;
-    gap: 6px;
+    min-height: 44px;
   }
-  .account-nav-item svg { width: 14px; height: 14px; }
 
   /* Payment table → stacked cards on very small screens */
   .pay-table thead { display: none; }
