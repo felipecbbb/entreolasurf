@@ -226,7 +226,18 @@ export const fetchCamps = cached('camps', 30000, async () => {
 
 export async function upsertCamp(camp) {
   camp.updated_at = new Date().toISOString();
-  const { error } = await supabase.from('surf_camps').upsert(camp);
+  delete camp.duration_days;
+  delete camp.photos;
+  delete camp.testimonials;
+  delete camp.faqs;
+  let error;
+  if (camp.id) {
+    const id = camp.id;
+    delete camp.id;
+    ({ error } = await supabase.from('surf_camps').update(camp).eq('id', id));
+  } else {
+    ({ error } = await supabase.from('surf_camps').insert(camp));
+  }
   if (error) throw error;
   invalidateCache('camps');
 }
@@ -235,6 +246,65 @@ export async function deleteCamp(id) {
   const { error } = await supabase.from('surf_camps').delete().eq('id', id);
   if (error) throw error;
   invalidateCache('camps');
+}
+
+// ---- Camp Full (with photos, testimonials, faqs) ----
+export async function fetchCampFull(id) {
+  const [camp, photos, testimonials, faqs] = await Promise.all([
+    supabase.from('surf_camps').select('*').eq('id', id).single(),
+    supabase.from('camp_photos').select('*').eq('camp_id', id).order('sort_order'),
+    supabase.from('camp_testimonials').select('*').eq('camp_id', id).order('sort_order'),
+    supabase.from('camp_faqs').select('*').eq('camp_id', id).order('sort_order'),
+  ]);
+  if (camp.error) throw camp.error;
+  return {
+    ...camp.data,
+    photos: photos.data || [],
+    testimonials: testimonials.data || [],
+    faqs: faqs.data || [],
+  };
+}
+
+export async function upsertCampPhoto(photo) {
+  const { data, error } = await supabase.from('camp_photos').upsert(photo).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCampPhoto(id) {
+  const { error } = await supabase.from('camp_photos').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function upsertCampTestimonial(t) {
+  const { data, error } = await supabase.from('camp_testimonials').upsert(t).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCampTestimonial(id) {
+  const { error } = await supabase.from('camp_testimonials').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function upsertCampFaq(f) {
+  const { data, error } = await supabase.from('camp_faqs').upsert(f).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCampFaq(id) {
+  const { error } = await supabase.from('camp_faqs').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function uploadCampImage(file, slug) {
+  const ext = file.name.split('.').pop();
+  const path = `camps/${slug}/${Date.now()}.${ext}`;
+  const { data, error } = await supabase.storage.from('activity-photos').upload(path, file);
+  if (error) throw error;
+  const { data: publicData } = supabase.storage.from('activity-photos').getPublicUrl(data.path);
+  return publicData.publicUrl;
 }
 
 // ---- Surf Classes ----

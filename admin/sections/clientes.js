@@ -185,7 +185,7 @@ async function updateProfile(id, updates) {
 }
 
 async function deleteProfile(id) {
-  const { error } = await supabase.from('profiles').delete().eq('id', id);
+  const { error } = await supabase.rpc('delete_user', { p_user_id: id });
   if (error) throw error;
 }
 
