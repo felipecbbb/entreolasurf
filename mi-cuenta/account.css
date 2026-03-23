@@ -6,10 +6,11 @@
 /* --- Dashboard Layout --- */
 .account-dashboard {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 32px;
+  grid-template-columns: 220px 1fr;
+  gap: 28px;
   align-items: start;
   min-height: 60vh;
+  max-width: 1200px;
 }
 
 /* --- Sidebar --- */
@@ -17,48 +18,50 @@
   background: #fff;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-md);
-  padding: 24px 0;
+  padding: 20px 0;
   position: sticky;
   top: 100px;
 }
 
 .account-avatar {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  padding: 0 20px 20px;
+  gap: 12px;
+  padding: 0 18px 16px;
   border-bottom: 1px solid var(--color-line);
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .account-avatar-circle {
-  width: 64px;
-  height: 64px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: var(--color-yellow, #f3c900);
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 1.6rem;
+  font-size: 1.2rem;
   color: var(--color-navy);
-  margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .account-avatar-name {
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 700;
-  font-size: .95rem;
+  font-size: .85rem;
   color: var(--color-navy);
-  text-align: center;
+  text-align: left;
+  line-height: 1.2;
 }
 
 .account-avatar-email {
-  font-size: .78rem;
+  font-size: .72rem;
   color: var(--color-muted);
-  margin-top: 2px;
+  margin-top: 1px;
   word-break: break-all;
-  text-align: center;
+  text-align: left;
 }
 
 .account-nav {
@@ -70,10 +73,10 @@
 .account-nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 24px;
+  gap: 9px;
+  padding: 9px 18px;
   font-family: 'Space Grotesk', sans-serif;
-  font-size: .82rem;
+  font-size: .8rem;
   font-weight: 600;
   color: var(--color-muted);
   cursor: pointer;
@@ -125,19 +128,26 @@
 }
 
 .account-content-header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--color-navy);
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .account-content-header h2 {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 2rem;
+  font-size: 1.8rem;
   color: var(--color-navy);
-  margin: 0 0 4px;
+  margin: 0;
+  line-height: 1;
 }
 
 .account-content-header p {
   color: var(--color-muted);
-  font-size: .88rem;
+  font-size: .82rem;
   margin: 0;
 }
 
@@ -145,9 +155,9 @@
 .account-form-card {
   background: #fff;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  padding: 28px 28px 24px;
-  margin-bottom: 20px;
+  border-radius: 14px;
+  padding: 24px;
+  margin-bottom: 16px;
 }
 
 .account-form-card h3 {
@@ -737,6 +747,9 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   .account-content-header {
     margin-bottom: 16px;
     padding: 0 4px;
+    flex-direction: column;
+    gap: 4px;
+    border-bottom-width: 2px;
   }
   .account-content-header h2 { font-size: 1.5rem; }
 
@@ -875,7 +888,7 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
    ============================================================ */
 .pay-summary-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -883,8 +896,8 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 .pay-summary-card {
   background: #fff;
   border: 1px solid var(--color-line, #e5e7eb);
-  border-radius: var(--radius-md, 10px);
-  padding: 18px 20px;
+  border-radius: 14px;
+  padding: 16px 18px;
 }
 
 .pay-summary-green {
