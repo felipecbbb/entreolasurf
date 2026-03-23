@@ -713,36 +713,41 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   .account-avatar-email { text-align: left; font-size: .7rem; }
 
   .account-nav {
-    display: flex;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--color-line);
-    padding: 0 12px;
-    gap: 2px;
   }
-  .account-nav::-webkit-scrollbar { display: none; }
 
   .account-nav-item {
-    padding: 10px 14px;
-    font-size: .75rem;
+    padding: 10px 8px;
+    font-size: .7rem;
     white-space: nowrap;
     border-left: none;
-    border-bottom: 3px solid transparent;
-    flex-shrink: 0;
-    min-height: 44px;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    min-height: 42px;
     display: flex;
     align-items: center;
+    justify-content: center;
+    text-align: center;
+    background: #fff;
   }
   .account-nav-item.active {
-    border-left-color: transparent;
-    border-bottom-color: var(--color-yellow, #f3c900);
-    background: transparent;
+    border-color: var(--color-yellow, #f3c900);
+    background: #fef9e7;
+    color: var(--color-navy);
   }
   .account-nav-item svg { display: none; }
 
   .account-nav-divider { display: none; }
-  .account-nav-item.danger { border-bottom: none; }
+  .account-nav-item.danger {
+    grid-column: 1 / -1;
+    background: none;
+    border-color: #fecaca;
+    color: #b91c1c;
+  }
 
   .account-content {
     padding: 20px 16px;
@@ -826,12 +831,30 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   .account-avatar-name { font-size: .78rem; }
   .account-avatar-email { display: none; }
 
-  .account-nav { padding: 0 8px; }
-  .account-nav-item {
-    padding: 8px 10px;
-    font-size: .72rem;
-    min-height: 44px;
+  .account-nav {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
+    padding: 10px 12px;
   }
+  .account-nav-item {
+    padding: 8px 6px;
+    font-size: .65rem;
+    min-height: 40px;
+  }
+
+  /* Full-width save/action buttons */
+  .account-form-card .btn,
+  .account-form-card button[type="submit"] {
+    width: 100%;
+    text-align: center;
+    min-height: 48px;
+    font-size: .88rem;
+  }
+
+  /* Footer full width */
+  .site-footer { text-align: center; }
+  .site-footer .footer-row { flex-direction: column; gap: 8px; }
+  .site-footer .footer-links { justify-content: center; }
 
   /* Payment table → stacked cards on very small screens */
   .pay-table thead { display: none; }
