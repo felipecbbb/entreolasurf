@@ -189,6 +189,15 @@
   color: #fff;
 }
 
+.shop-card--sold-out {
+  opacity: .55;
+  pointer-events: none;
+}
+.shop-card--sold-out .shop-card-add {
+  pointer-events: auto;
+  cursor: not-allowed;
+}
+
 .shop-card-body {
   padding: 18px 18px 20px;
   display: flex;

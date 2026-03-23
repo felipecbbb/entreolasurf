@@ -45,8 +45,8 @@ function formatPrice(price) {
 // ---- Render product card ----
 function renderCard(product) {
   const hasImage = !!product.image_url;
-  const isOutOfStock = product.stock <= 0;
-  const isLowStock = product.stock > 0 && product.stock <= 3;
+  const isOutOfStock = product.stock !== null && product.stock <= 0;
+  const isLowStock = product.stock !== null && product.stock > 0 && product.stock <= 3;
 
   let badgeHtml = '';
   if (isOutOfStock) badgeHtml = '<span class="shop-card-badge out-of-stock">Agotado</span>';
@@ -72,7 +72,7 @@ function renderCard(product) {
       </button>`;
 
   return `
-    <article class="shop-card" data-category="${product.category || ''}">
+    <article class="shop-card${isOutOfStock ? ' shop-card--sold-out' : ''}" data-category="${product.category || ''}">
       <div class="shop-card-img">
         ${imgHtml}
         ${badgeHtml}
