@@ -650,14 +650,20 @@ function renderDatos(session, profile) {
 // ---- Tab: Mis pedidos ----
 async function renderPedidos(session) {
   const pedidosPanel = document.getElementById('tab-pedidos');
-  const { data: orders } = await supabase
-    .from('orders')
-    .select('*')
-    .eq('user_id', session.user.id)
-    .order('created_at', { ascending: false });
+  const [ordersRes, bonosRes] = await Promise.all([
+    supabase.from('orders').select('*, order_items(id)').eq('user_id', session.user.id).order('created_at', { ascending: false }),
+    supabase.from('bonos').select('order_id').eq('user_id', session.user.id).not('order_id', 'is', null),
+  ]);
+  const allOrders = ordersRes.data || [];
+  const bonoOrderIds = new Set((bonosRes.data || []).map(b => b.order_id));
 
-  if (!orders?.length) {
-    pedidosPanel.innerHTML = '<div class="account-form-card"><p style="color:var(--color-muted);margin:0">No tienes pedidos todavía.</p></div>';
+  // Only show product orders (has order_items, not a bono order, not pending)
+  const orders = allOrders.filter(o =>
+    o.status !== 'pending' && !bonoOrderIds.has(o.id) && (o.order_items || []).length > 0
+  );
+
+  if (!orders.length) {
+    pedidosPanel.innerHTML = '<div class="account-form-card"><p style="color:var(--color-muted);margin:0">No tienes pedidos de productos todavia.</p></div>';
   } else {
     pedidosPanel.innerHTML = orders.map(o => `
       <div class="order-card">
@@ -666,7 +672,7 @@ async function renderPedidos(session) {
           ${statusBadge(o.status)}
         </div>
         <p class="meta">${formatDate(o.created_at)} · ${formatPrice(o.total)}</p>
-        ${o.items ? `<p style="font-size:.88rem">${o.items.map(i => i.name).join(', ')}</p>` : ''}
+        ${o.shipping_address ? `<p style="font-size:.82rem;color:var(--color-muted)">Envio: ${esc(o.shipping_address)}</p>` : ''}
       </div>`).join('');
   }
 }
