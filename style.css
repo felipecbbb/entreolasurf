@@ -679,15 +679,29 @@ body.internal-page.no-hero .dropdown a {
   font-weight: 700;
 }
 
-/* Next camp highlight — subtle golden accent */
+/* Next camp highlight */
 .camp-card-next {
   border-color: var(--color-red);
-  box-shadow: 0 8px 28px rgba(255,204,1,.18), 0 8px 22px rgba(0,0,0,.09);
+  box-shadow: 0 8px 28px rgba(255,204,1,.22), 0 8px 22px rgba(0,0,0,.09);
+  position: relative;
+  overflow: visible;
 }
 
-.camp-card-next .camp-meta span:first-child::before {
-  content: '★ ';
-  color: var(--color-red);
+.camp-card-next .camp-cover::before {
+  content: 'Próximo';
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  background: var(--color-red);
+  color: #1a1a1a;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 4px 12px;
+  border-radius: 99px;
 }
 
 /* Old price strikethrough */
