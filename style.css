@@ -683,8 +683,6 @@ body.internal-page.no-hero .dropdown a {
 .camp-card-next {
   border-color: var(--color-red);
   box-shadow: 0 8px 28px rgba(255,204,1,.22), 0 8px 22px rgba(0,0,0,.09);
-  position: relative;
-  overflow: visible;
 }
 
 .camp-card-next .camp-cover::before {
