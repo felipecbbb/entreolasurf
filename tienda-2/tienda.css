@@ -17,7 +17,7 @@
   inset: 0;
   background:
     linear-gradient(180deg, rgba(15,47,57,.15) 0%, rgba(15,47,57,.75) 100%),
-    url('https://entreolasurf.com/wp-content/uploads/2025/12/Gemini_Generated_Image_104whd104whd104w-scaled.png') center / cover no-repeat;
+    url('/uploads/2025/12/Gemini_Generated_Image_104whd104whd104w-scaled.png') center / cover no-repeat;
   transform: scale(1.03);
 }
 
