@@ -107,6 +107,18 @@ if (autoVideos.length && 'IntersectionObserver' in window) {
   autoVideos.forEach((video) => videoObserver.observe(video));
 }
 
+/* ---------- Mailto forms — avoid mixed content warning ---------- */
+document.querySelectorAll('form[data-mailto]').forEach(form => {
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const to = form.dataset.mailto;
+    const data = new FormData(form);
+    const body = [...data.entries()].map(([k, v]) => `${k}: ${v}`).join('\n');
+    const subject = encodeURIComponent('Consulta desde entreolasurf.com');
+    window.location.href = `mailto:${to}?subject=${subject}&body=${encodeURIComponent(body)}`;
+  });
+});
+
 document.querySelectorAll('[data-toggle-audio]').forEach((toggle) => {
   const videoId = toggle.getAttribute('data-video');
   if (!videoId) return;
