@@ -3,6 +3,7 @@
    ============================================================ */
 import { fetchBookings, fetchCamps, updateBookingStatus } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
+import { supabase } from '/lib/supabase.js';
 
 const STATUSES = ['pending', 'deposit_paid', 'fully_paid', 'cancelled', 'refunded'];
 const STATUS_LABELS = {
@@ -156,6 +157,24 @@ export async function renderReservas(container) {
       const newStatus = document.getElementById('modal-status').value;
       try {
         await updateBookingStatus(booking.id, newStatus);
+        // Fire-and-forget email notification
+        if (newStatus === 'cancelled') {
+          try {
+            const { data: emailData } = await supabase.rpc('get_user_email', { p_user_id: booking.user_id });
+            if (emailData) {
+              supabase.functions.invoke('send-email', {
+                body: {
+                  to: emailData,
+                  type: 'camp_cancelled',
+                  data: {
+                    customerName: booking.profiles?.full_name,
+                    orderId: booking.id,
+                  },
+                },
+              });
+            }
+          } catch {}
+        }
         closeModal();
         showToast('Estado actualizado', 'success');
         render();

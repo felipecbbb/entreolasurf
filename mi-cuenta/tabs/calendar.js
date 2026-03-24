@@ -272,6 +272,19 @@ export async function renderCalendar(panel) {
         try {
           await cancelEnrollment(btn.dataset.enrollmentId);
           showToast('Reserva cancelada. Crédito restablecido.');
+          // Fire-and-forget email notification
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user?.email) {
+              supabase.functions.invoke('send-email', {
+                body: {
+                  to: user.email,
+                  type: 'class_cancelled',
+                  data: { customerName: user.user_metadata?.full_name || user.email },
+                },
+              });
+            }
+          } catch {}
           render();
         } catch (err) {
           alert('Error al cancelar: ' + err.message);
@@ -380,6 +393,26 @@ export async function renderCalendar(panel) {
         }
         modal.style.display = 'none';
         showToast(`${checkedPersons.length} plaza${checkedPersons.length > 1 ? 's' : ''} reservada${checkedPersons.length > 1 ? 's' : ''}`);
+        // Fire-and-forget email notification
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.email) {
+            const cls = allClasses.find(c => c.id === classId);
+            supabase.functions.invoke('send-email', {
+              body: {
+                to: user.email,
+                type: 'class_booked',
+                data: {
+                  customerName: user.user_metadata?.full_name || user.email,
+                  classTitle: cls?.title || TYPE_LABELS[classType] || classType,
+                  classDate: cls?.date,
+                  classTime: cls ? formatTime(cls.time_start) + ' — ' + formatTime(cls.time_end) : '',
+                  spots: checkedPersons.length,
+                },
+              },
+            });
+          }
+        } catch {}
         render();
       } catch (err) {
         alert('Error al reservar: ' + err.message);

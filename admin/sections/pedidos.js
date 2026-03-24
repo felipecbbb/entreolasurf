@@ -173,6 +173,25 @@ export async function renderPedidos(container) {
       const newStatus = document.getElementById('modal-order-status').value;
       try {
         await updateOrderStatus(order.id, newStatus);
+        // Fire-and-forget email notification
+        if (newStatus === 'cancelled' || newStatus === 'shipped') {
+          const emailTo = order.profiles?.email;
+          if (emailTo) {
+            try {
+              supabase.functions.invoke('send-email', {
+                body: {
+                  to: emailTo,
+                  type: newStatus === 'cancelled' ? 'order_cancelled' : 'order_shipped',
+                  data: {
+                    customerName: order.profiles?.full_name,
+                    orderId: order.id,
+                    total: order.total,
+                  },
+                },
+              });
+            } catch {}
+          }
+        }
         closeModal();
         showToast('Estado actualizado', 'success');
         render();
