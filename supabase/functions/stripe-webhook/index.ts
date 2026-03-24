@@ -189,43 +189,38 @@ Deno.serve(async (req) => {
         }
       }
 
-      // ---- Send confirmation email ----
-      try {
-        const userEmail = session.customer_email || session.customer_details?.email;
-        if (userEmail) {
-          // Determine type
-          const hasCamps = camps.length > 0;
-          const hasClasses = classes.length > 0;
-          const hasProducts = products.length > 0;
-          const emailType = hasCamps ? "camp" : hasClasses ? "bono" : hasProducts ? "order" : "order";
-
-          const emailItems = cart.map((i: any) => ({
-            name: i.name,
-            quantity: i.quantity || 1,
-            price: i.price,
-          }));
-
-          // Get customer name from profile
-          const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", userId).single();
-
+      // ---- Send confirmation emails ----
+      const sendEmail = async (to: string, type: string, emailData: any) => {
+        try {
           await fetch(`${supabaseUrl}/functions/v1/send-email`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${supabaseServiceKey}`,
-            },
-            body: JSON.stringify({
-              to: userEmail,
-              type: emailType,
-              data: {
-                customerName: profile?.full_name || "",
-                orderId,
-                items: emailItems,
-                total: totalPaid,
-              },
-            }),
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseServiceKey}` },
+            body: JSON.stringify({ to, type, data: emailData }),
           });
+        } catch (e: any) { console.error(`Email to ${to} failed:`, e.message); }
+      };
+
+      try {
+        const userEmail = session.customer_email || session.customer_details?.email;
+        const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", userId).single();
+        const customerName = profile?.full_name || "";
+        const emailItems = cart.map((i: any) => ({ name: i.name, quantity: i.quantity || 1, price: i.price }));
+        const emailData = { customerName, orderId, items: emailItems, total: totalPaid, customerEmail: userEmail };
+
+        if (userEmail) {
+          // Send one email per type in the cart
+          if (camps.length > 0) await sendEmail(userEmail, "camp", emailData);
+          if (classes.length > 0) await sendEmail(userEmail, "bono", emailData);
+          if (products.length > 0) await sendEmail(userEmail, "order", emailData);
+          // If cart has mixed types, each gets its own email. If only one type, one email.
+          if (!camps.length && !classes.length && !products.length) {
+            await sendEmail(userEmail, "order", emailData);
+          }
         }
+
+        // Notify admin
+        const adminEmail = Deno.env.get("ADMIN_EMAIL") || "entreolasurf@gmail.com";
+        await sendEmail(adminEmail, "admin_new_order", emailData);
       } catch (emailErr: any) {
         console.error("Email sending failed (non-blocking):", emailErr.message);
       }
