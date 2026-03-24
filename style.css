@@ -508,6 +508,8 @@ body.internal-page.no-hero .dropdown a {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
+  width: min(1500px, 96vw);
+  margin: 0 auto;
 }
 
 .camp-card {
