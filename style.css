@@ -504,12 +504,15 @@ body.internal-page.no-hero .dropdown a {
   background: #ece8d7;
 }
 
+.surf-camp-dates .camps-grid {
+  width: min(1500px, 96vw);
+  margin: 0 auto;
+}
+
 .camps-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
-  width: min(1500px, 96vw);
-  margin: 0 auto;
 }
 
 .camp-card {
