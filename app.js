@@ -1,5 +1,6 @@
 import { updateCartPill } from '/lib/cart.js';
 import { supabase } from '/lib/supabase.js';
+import '/lib/cookie-banner.js';
 updateCartPill();
 
 /* ---------- Hide nav links for deactivated activities ---------- */
