@@ -267,6 +267,25 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
       ].join(""), false),
     };
 
+    case "contact": {
+      const fields = Object.entries(d)
+        .filter(([k]) => !["customerName", "page"].includes(k))
+        .map(([k, v]) => `<p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0"><strong style="color:#0f2f39">${k}:</strong> ${v}</p>`)
+        .join("");
+      return {
+        subject: `Nuevo mensaje de contacto — ${d.nombre || "Sin nombre"}`,
+        html: emailWrap(logoDefault(), [
+          heading("Nuevo mensaje de contacto"),
+          sub(`Enviado desde ${d.page || "la web"}`),
+          `<table width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td style="background-color:#f3ecdd;border-radius:10px;padding:18px 20px">
+              ${fields}
+            </td>
+          </tr></table>`,
+        ].join(""), false),
+      };
+    }
+
     case "admin_new_order": return {
       subject: `Nueva venta: ${(d.total || 0).toFixed(2)}E - ${d.customerName || "Cliente"}`,
       html: emailWrap(logoDefault(), [

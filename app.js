@@ -107,15 +107,40 @@ if (autoVideos.length && 'IntersectionObserver' in window) {
   autoVideos.forEach((video) => videoObserver.observe(video));
 }
 
-/* ---------- Mailto forms — avoid mixed content warning ---------- */
+/* ---------- Contact forms — send via Supabase Edge Function ---------- */
 document.querySelectorAll('form[data-mailto]').forEach(form => {
-  form.addEventListener('submit', e => {
+  form.addEventListener('submit', async e => {
     e.preventDefault();
-    const to = form.dataset.mailto;
-    const data = new FormData(form);
-    const body = [...data.entries()].map(([k, v]) => `${k}: ${v}`).join('\n');
-    const subject = encodeURIComponent('Consulta desde entreolasurf.com');
-    window.location.href = `mailto:${to}?subject=${subject}&body=${encodeURIComponent(body)}`;
+    const btn = form.querySelector('button[type="submit"]');
+    const originalText = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+
+    const fd = new FormData(form);
+    const fields = Object.fromEntries(fd.entries());
+    const page = window.location.pathname;
+
+    try {
+      const res = await supabase.functions.invoke('send-email', {
+        body: {
+          to: form.dataset.mailto,
+          type: 'contact',
+          data: { ...fields, page, customerName: fields.nombre || '' },
+        },
+      });
+
+      if (res.error) throw res.error;
+      form.reset();
+      if (btn) { btn.textContent = '¡Enviado!'; btn.style.background = '#22c55e'; }
+      setTimeout(() => {
+        if (btn) { btn.textContent = originalText; btn.style.background = ''; btn.disabled = false; }
+      }, 3000);
+    } catch (err) {
+      console.error('Contact form error:', err);
+      // Fallback: open mailto
+      const body = [...Object.entries(fields)].map(([k, v]) => `${k}: ${v}`).join('\n');
+      window.location.href = `mailto:${form.dataset.mailto}?subject=${encodeURIComponent('Consulta desde entreolasurf.com')}&body=${encodeURIComponent(body)}`;
+      if (btn) { btn.textContent = originalText; btn.disabled = false; }
+    }
   });
 });
 
