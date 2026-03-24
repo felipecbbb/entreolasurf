@@ -506,7 +506,7 @@ body.internal-page.no-hero .dropdown a {
 
 .camps-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
 }
 
@@ -653,6 +653,59 @@ body.internal-page.no-hero .dropdown a {
 
 .camp-card-soon .camp-cover::after {
   background: linear-gradient(180deg, rgba(10, 16, 19, 0.14) 0%, rgba(10, 16, 19, 0.72) 100%);
+}
+
+/* Sold out card */
+.camp-card-soldout {
+  opacity: .55;
+  filter: grayscale(.3);
+  pointer-events: none;
+}
+
+.camp-badge-soldout {
+  background: #b91c1c !important;
+  color: #fff !important;
+}
+
+/* Offer badge */
+.camp-badge-offer {
+  background: var(--color-red) !important;
+  color: #1a1a1a !important;
+  font-weight: 700;
+}
+
+/* Next camp highlight */
+.camp-card-next {
+  border-color: var(--color-red);
+  box-shadow: 0 0 0 2px var(--color-red), 0 12px 32px rgba(0,0,0,.12);
+  position: relative;
+}
+
+.camp-card-next::before {
+  content: 'Próximo camp';
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-red);
+  color: #1a1a1a;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 4px 14px;
+  border-radius: 99px;
+  z-index: 2;
+  white-space: nowrap;
+}
+
+/* Old price strikethrough */
+.camp-from .old-price,
+.camp-overlay .old-price {
+  text-decoration: line-through;
+  opacity: .6;
+  font-size: .85em;
 }
 
 .camp-reviews-video {
