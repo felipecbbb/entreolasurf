@@ -189,6 +189,47 @@ Deno.serve(async (req) => {
         }
       }
 
+      // ---- Send confirmation email ----
+      try {
+        const userEmail = session.customer_email || session.customer_details?.email;
+        if (userEmail) {
+          // Determine type
+          const hasCamps = camps.length > 0;
+          const hasClasses = classes.length > 0;
+          const hasProducts = products.length > 0;
+          const emailType = hasCamps ? "camp" : hasClasses ? "bono" : hasProducts ? "order" : "order";
+
+          const emailItems = cart.map((i: any) => ({
+            name: i.name,
+            quantity: i.quantity || 1,
+            price: i.price,
+          }));
+
+          // Get customer name from profile
+          const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", userId).single();
+
+          await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+            },
+            body: JSON.stringify({
+              to: userEmail,
+              type: emailType,
+              data: {
+                customerName: profile?.full_name || "",
+                orderId,
+                items: emailItems,
+                total: totalPaid,
+              },
+            }),
+          });
+        }
+      } catch (emailErr: any) {
+        console.error("Email sending failed (non-blocking):", emailErr.message);
+      }
+
       console.log(`Order ${orderId} completed for user ${userId}, total: ${totalPaid}€, items: ${cart.length}`);
     } catch (err: any) {
       console.error("Webhook processing error:", err);
