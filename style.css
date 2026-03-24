@@ -679,30 +679,15 @@ body.internal-page.no-hero .dropdown a {
   font-weight: 700;
 }
 
-/* Next camp highlight */
+/* Next camp highlight — subtle golden accent */
 .camp-card-next {
   border-color: var(--color-red);
-  box-shadow: 0 0 0 2px var(--color-red), 0 12px 32px rgba(0,0,0,.12);
-  position: relative;
+  box-shadow: 0 8px 28px rgba(255,204,1,.18), 0 8px 22px rgba(0,0,0,.09);
 }
 
-.camp-card-next::before {
-  content: 'Próximo camp';
-  position: absolute;
-  top: -13px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--color-red);
-  color: #1a1a1a;
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: .7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  padding: 4px 14px;
-  border-radius: 99px;
-  z-index: 2;
-  white-space: nowrap;
+.camp-card-next .camp-meta span:first-child::before {
+  content: '★ ';
+  color: var(--color-red);
 }
 
 /* Old price strikethrough */
@@ -1384,7 +1369,7 @@ td a {
   }
 
   .camps-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .reviews-feature-wrap {
@@ -1394,6 +1379,12 @@ td a {
 
   .faq-acc-body {
     font-size: .96rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .camps-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
