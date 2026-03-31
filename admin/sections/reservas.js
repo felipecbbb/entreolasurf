@@ -101,7 +101,7 @@ export async function renderReservas(container) {
 
             <div class="rv-bookings-list">
               ${group.bookings.map(b => `
-                <div class="rv-booking-row">
+                <div class="rv-booking-row rv-booking-clickable" data-id="${b.id}" style="cursor:pointer">
                   <div class="rv-booking-client">
                     <strong>${esc(b.profiles?.full_name || 'Sin nombre')}</strong>
                     <span class="rv-booking-phone">${esc(b.profiles?.phone || '')}</span>
@@ -127,10 +127,158 @@ export async function renderReservas(container) {
     container.querySelector('#rv-status-filter')?.addEventListener('change', e => { statusFilter = e.target.value; render(); });
 
     container.querySelectorAll('.rv-status-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const booking = filtered.find(b => b.id === btn.dataset.id);
         if (booking) openStatusModal(booking);
       });
+    });
+
+    container.querySelectorAll('.rv-booking-clickable').forEach(row => {
+      row.addEventListener('click', () => {
+        const booking = filtered.find(b => b.id === row.dataset.id);
+        if (booking) openBookingFicha(booking);
+      });
+    });
+  }
+
+  async function openBookingFicha(booking) {
+    const p = booking.profiles || {};
+    const camp = booking.surf_camps || {};
+    const clientName = esc(p.full_name || 'Sin nombre');
+    const clientLastName = esc(p.last_name || '');
+    const fullName = clientLastName ? `${clientName} ${clientLastName}` : clientName;
+    const clientPhone = esc(p.phone || '—');
+    const clientEmail = esc(p.email || '—');
+    const clientAddress = [p.address, p.city, p.postal_code].filter(Boolean).join(', ');
+
+    // Fetch email from auth.users via RPC
+    let email = '—';
+    if (booking.user_id) {
+      try {
+        const { data } = await supabase.rpc('get_user_email', { p_user_id: booking.user_id });
+        email = data || '—';
+      } catch {}
+    }
+    const safeEmail = esc(email);
+
+    const statusColor = {
+      pending: '#f59e0b', deposit_paid: '#0ea5e9', fully_paid: '#22c55e',
+      cancelled: '#ef4444', refunded: '#6b7280',
+    }[booking.status] || '#6b7280';
+
+    const depositPaid = Number(booking.deposit_amount || 0);
+    const totalAmount = Number(booking.total_amount || 0);
+    const pendingAmount = Math.max(0, totalAmount - depositPaid);
+    const isFullyPaid = booking.status === 'fully_paid' || pendingAmount <= 0;
+
+    // Health info
+    const healthItems = [];
+    if (p.can_swim === true) healthItems.push('Sabe nadar');
+    if (p.can_swim === false) healthItems.push('<span style="color:#ef4444;font-weight:600">No sabe nadar</span>');
+    if (p.has_injury) healthItems.push(`<span style="color:#f59e0b;font-weight:600">Lesión: ${esc(p.injury_detail || 'Sí')}</span>`);
+    if (p.wetsuit_size) healthItems.push(`Neopreno: ${esc(p.wetsuit_size)}`);
+
+    const waLink = clientPhone !== '—' ? `https://wa.me/${clientPhone.replace(/[^0-9+]/g, '')}` : null;
+
+    openModal(`Ficha de Reserva — ${esc(camp.title || 'Camp')}`, `
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <!-- Client info -->
+        <div style="display:flex;gap:16px;align-items:center;padding:16px;background:#f8fafc;border-radius:10px">
+          <div style="width:42px;height:42px;border-radius:50%;background:#0f2f39;display:flex;align-items:center;justify-content:center;color:#FFCC01;font-weight:700;font-size:1rem;flex-shrink:0">
+            ${(p.full_name || '?').charAt(0).toUpperCase()}
+          </div>
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:.95rem;color:var(--color-navy)">${fullName}</div>
+            <div style="font-size:.78rem;color:var(--color-muted)">${safeEmail}</div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+              <span style="font-size:.78rem;color:var(--color-muted)">${clientPhone}</span>
+              ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;font-size:.72rem;color:#25D366;text-decoration:none;font-weight:600">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.126.553 4.12 1.521 5.855L0 24l6.335-1.652A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.75c-1.875 0-3.633-.506-5.15-1.387l-.37-.218-3.83.999 1.02-3.72-.24-.38A9.7 9.7 0 012.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75z"/></svg>
+                WhatsApp
+              </a>` : ''}
+            </div>
+            ${clientAddress ? `<div style="font-size:.75rem;color:var(--color-muted);margin-top:2px">${esc(clientAddress)}</div>` : ''}
+            ${p.id ? `<a href="#clientes" class="rv-goto-client" data-client-id="${p.id}" style="font-size:.72rem;color:#0ea5e9;text-decoration:underline;cursor:pointer;margin-top:4px;display:inline-block">Ver ficha de cliente</a>` : ''}
+          </div>
+        </div>
+
+        <!-- Camp info -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600;margin-bottom:4px">Surf Camp</div>
+            <div style="font-weight:700;font-size:.92rem;color:var(--color-navy)">${esc(camp.title || '—')}</div>
+            <div style="font-size:.78rem;color:var(--color-muted)">${camp.date_start ? formatDate(camp.date_start) + ' — ' + formatDate(camp.date_end) : '—'}</div>
+          </div>
+          <div>
+            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600;margin-bottom:4px">Estado</div>
+            <span class="admin-badge" style="--badge-bg:${statusColor}18;--badge-color:${statusColor}">${STATUS_LABELS[booking.status] || booking.status}</span>
+          </div>
+        </div>
+
+        <!-- Payment info -->
+        <div style="padding:16px;border-radius:10px;background:${isFullyPaid ? '#f0fdf4' : '#fef2f2'};border:1px solid ${isFullyPaid ? '#bbf7d0' : '#fecaca'}">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-weight:700;color:${isFullyPaid ? '#166534' : '#b91c1c'};font-size:.88rem">
+                ${isFullyPaid ? 'Pagado completamente' : 'Pendiente de pago'}
+              </div>
+              <div style="font-size:.78rem;color:${isFullyPaid ? '#15803d' : '#dc2626'};margin-top:2px">
+                Señal: ${formatCurrency(depositPaid)} · Total: ${formatCurrency(totalAmount)}
+              </div>
+            </div>
+            ${!isFullyPaid && pendingAmount > 0 ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:#b91c1c">${formatCurrency(pendingAmount)}</div>` : ''}
+          </div>
+        </div>
+
+        <!-- Health & equipment -->
+        ${healthItems.length ? `
+        <div>
+          <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600;margin-bottom:8px">Salud y equipamiento</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            ${healthItems.map(h => `<span style="font-size:.82rem;padding:4px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">${h}</span>`).join('')}
+          </div>
+        </div>` : ''}
+
+        <!-- Notes -->
+        ${booking.notes ? `
+        <div>
+          <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600;margin-bottom:4px">Notas</div>
+          <div style="font-size:.85rem;color:var(--color-navy);padding:10px 14px;background:#f8fafc;border-radius:8px">${esc(booking.notes)}</div>
+        </div>` : ''}
+
+        <!-- Actions -->
+        <div style="display:flex;gap:8px;padding-top:8px;border-top:1px solid #f3f4f6">
+          <button class="btn red rv-ficha-status-btn" data-id="${booking.id}" style="font-size:.82rem">Cambiar estado</button>
+          ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" class="btn line" style="font-size:.82rem;display:inline-flex;align-items:center;gap:6px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.126.553 4.12 1.521 5.855L0 24l6.335-1.652A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.75c-1.875 0-3.633-.506-5.15-1.387l-.37-.218-3.83.999 1.02-3.72-.24-.38A9.7 9.7 0 012.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75z"/></svg>
+            Contactar
+          </a>` : ''}
+        </div>
+
+        <!-- Meta -->
+        <div style="font-size:.72rem;color:#b0b8c1;padding-top:8px;border-top:1px solid #f3f4f6">
+          ID: ${booking.id.slice(0, 8)} · Reservado: ${formatDate(booking.created_at)}${booking.updated_at ? ` · Actualizado: ${formatDate(booking.updated_at)}` : ''}
+        </div>
+      </div>
+    `);
+
+    // Link to client ficha
+    document.querySelector('.rv-goto-client')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const clientId = e.target.dataset.clientId;
+      closeModal();
+      location.hash = '#clientes';
+      setTimeout(() => {
+        const card = document.querySelector(`.cli-list-card[data-id="${clientId}"]`);
+        if (card) card.click();
+      }, 400);
+    });
+
+    // Status change from ficha
+    document.querySelector('.rv-ficha-status-btn')?.addEventListener('click', () => {
+      closeModal();
+      openStatusModal(booking);
     });
   }
 

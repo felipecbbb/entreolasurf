@@ -286,6 +286,49 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
       };
     }
 
+    case "admin_class_booked": return {
+      subject: `Nueva reserva de clase: ${d.className || ""} — ${d.customerName || "Cliente"}`,
+      html: emailWrap(logoDefault(), [
+        heading("Nueva reserva de clase"),
+        sub(`${d.customerName || "Un cliente"} ha reservado una clase.`),
+        `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+          <td style="background-color:#f3ecdd;border-radius:10px;padding:14px 20px">
+            <p style="font-family:${F};font-size:13px;color:#64757d;margin:0">Cliente: <strong style="color:#0f2f39">${d.customerName || ""}</strong></p>
+            <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Email: <strong style="color:#0f2f39">${d.customerEmail || ""}</strong></p>
+          </td>
+        </tr></table>`,
+        `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+          <td style="background-color:#ffffff;border:1px solid #d7d0c2;border-radius:10px;padding:18px 20px">
+            <p style="font-family:${F};font-size:18px;font-weight:700;color:#0f2f39;margin:0 0 4px">${d.className || ""}</p>
+            <p style="font-family:${F};font-size:14px;color:#64757d;margin:0">${d.classDate || ""} &middot; ${d.classTime || ""}</p>
+            ${d.classType ? `<p style="font-family:${F};font-size:13px;color:#64757d;margin:6px 0 0">Tipo: <strong style="color:#0f2f39">${d.classType}</strong></p>` : ""}
+            ${d.instructor ? `<p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Instructor: <strong style="color:#0f2f39">${d.instructor}</strong></p>` : ""}
+            ${d.spots ? `<p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Plazas: <strong style="color:#0f2f39">${d.spots}</strong></p>` : ""}
+          </td>
+        </tr></table>`,
+      ].join(""), false),
+    };
+
+    case "admin_class_cancelled": return {
+      subject: `Cancelacion de clase: ${d.className || ""} — ${d.customerName || "Cliente"}`,
+      html: emailWrap(logoDefault(), [
+        heading("Cancelacion de reserva"),
+        sub(`${d.customerName || "Un cliente"} ha cancelado su reserva.`),
+        `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+          <td style="background-color:#f3ecdd;border-radius:10px;padding:14px 20px">
+            <p style="font-family:${F};font-size:13px;color:#64757d;margin:0">Cliente: <strong style="color:#0f2f39">${d.customerName || ""}</strong></p>
+            <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Email: <strong style="color:#0f2f39">${d.customerEmail || ""}</strong></p>
+          </td>
+        </tr></table>`,
+        `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+          <td style="background-color:#ffffff;border:1px solid #d7d0c2;border-radius:10px;padding:18px 20px">
+            <p style="font-family:${F};font-size:18px;font-weight:700;color:#0f2f39;margin:0 0 4px">${d.className || "Clase"}</p>
+            <p style="font-family:${F};font-size:14px;color:#64757d;margin:0">${d.classDate || ""} &middot; ${d.classTime || ""}</p>
+          </td>
+        </tr></table>`,
+      ].join(""), false),
+    };
+
     case "admin_new_order": return {
       subject: `Nueva venta: ${(d.total || 0).toFixed(2)}E - ${d.customerName || "Cliente"}`,
       html: emailWrap(logoDefault(), [

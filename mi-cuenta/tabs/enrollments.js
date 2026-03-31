@@ -1,6 +1,7 @@
 import { fetchUserEnrollments, cancelEnrollment } from '/lib/booking.js';
 import { formatDate, TYPE_LABELS } from '/lib/utils.js';
 import { supabase } from '/lib/supabase.js';
+import { ADMIN_EMAIL } from '/lib/shared-constants.js';
 
 function formatTime(t) { return t?.slice(0, 5) || ''; }
 
@@ -102,18 +103,30 @@ export async function renderEnrollments(panel) {
         if (!confirm('¿Cancelar esta reserva? El crédito se devolverá a tu bono.')) return;
         try {
           await cancelEnrollment(btn.dataset.id);
-          // Fire-and-forget email notification
+          // Fire-and-forget email notifications
           try {
             const { data: { user } } = await supabase.auth.getUser();
+            const enrollment = enrollments.find(e => e.id === btn.dataset.id);
+            const cls = enrollment?.surf_classes;
+            const customerName = user?.user_metadata?.full_name || user?.email || '';
+            const emailData = {
+              customerName,
+              className: cls?.title || 'Clase',
+              classDate: cls?.date || '',
+              classTime: cls ? formatTime(cls.time_start) + ' — ' + formatTime(cls.time_end) : '',
+            };
             if (user?.email) {
               supabase.functions.invoke('send-email', {
-                body: {
-                  to: user.email,
-                  type: 'class_cancelled',
-                  data: { customerName: user.user_metadata?.full_name || user.email },
-                },
+                body: { to: user.email, type: 'class_cancelled', data: emailData },
               });
             }
+            supabase.functions.invoke('send-email', {
+              body: {
+                to: ADMIN_EMAIL,
+                type: 'admin_class_cancelled',
+                data: { ...emailData, customerEmail: user?.email || '' },
+              },
+            });
           } catch {}
           render();
         } catch (err) {

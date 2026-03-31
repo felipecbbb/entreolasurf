@@ -3,7 +3,7 @@ import { fetchActiveBonos, fetchUserBonos } from '/lib/bonos.js';
 import { fetchFamilyMembers } from '/lib/family.js';
 import { supabase } from '/lib/supabase.js';
 import { TYPE_LABELS, showToast } from '/lib/utils.js';
-import { LEVEL_OPTIONS, AUDIENCE_OPTIONS } from '/lib/shared-constants.js';
+import { LEVEL_OPTIONS, AUDIENCE_OPTIONS, ADMIN_EMAIL } from '/lib/shared-constants.js';
 
 const TYPE_COLORS = {
   grupal: '#0ea5e9',
@@ -272,18 +272,32 @@ export async function renderCalendar(panel) {
         try {
           await cancelEnrollment(btn.dataset.enrollmentId);
           showToast('Reserva cancelada. Crédito restablecido.');
-          // Fire-and-forget email notification
+          // Fire-and-forget email notifications
           try {
             const { data: { user } } = await supabase.auth.getUser();
+            const enrollmentId = btn.dataset.enrollmentId;
+            const enrollment = userEnrollments.find(e => e.id === enrollmentId);
+            const cls = enrollment ? allClasses.find(c => c.id === enrollment.class_id) : null;
+            const customerName = user?.user_metadata?.full_name || user?.email || '';
+            const emailData = {
+              customerName,
+              className: cls?.title || 'Clase',
+              classDate: cls?.date || '',
+              classTime: cls ? formatTime(cls.time_start) + ' — ' + formatTime(cls.time_end) : '',
+            };
             if (user?.email) {
               supabase.functions.invoke('send-email', {
-                body: {
-                  to: user.email,
-                  type: 'class_cancelled',
-                  data: { customerName: user.user_metadata?.full_name || user.email },
-                },
+                body: { to: user.email, type: 'class_cancelled', data: emailData },
               });
             }
+            // Notificar al admin
+            supabase.functions.invoke('send-email', {
+              body: {
+                to: ADMIN_EMAIL,
+                type: 'admin_class_cancelled',
+                data: { ...emailData, customerEmail: user?.email || '' },
+              },
+            });
           } catch {}
           render();
         } catch (err) {
@@ -393,25 +407,34 @@ export async function renderCalendar(panel) {
         }
         modal.style.display = 'none';
         showToast(`${checkedPersons.length} plaza${checkedPersons.length > 1 ? 's' : ''} reservada${checkedPersons.length > 1 ? 's' : ''}`);
-        // Fire-and-forget email notification
+        // Fire-and-forget email notifications
         try {
           const { data: { user } } = await supabase.auth.getUser();
+          const cls = allClasses.find(c => c.id === classId);
+          const customerName = user?.user_metadata?.full_name || user?.email || '';
+          const emailData = {
+            customerName,
+            className: cls?.title || TYPE_LABELS[classType] || classType,
+            classDate: cls?.date || '',
+            classTime: cls ? formatTime(cls.time_start) + ' — ' + formatTime(cls.time_end) : '',
+            classType: TYPE_LABELS[classType] || classType,
+            instructor: cls?.instructor || '',
+            spots: checkedPersons.length,
+          };
+          // Email al cliente
           if (user?.email) {
-            const cls = allClasses.find(c => c.id === classId);
             supabase.functions.invoke('send-email', {
-              body: {
-                to: user.email,
-                type: 'class_booked',
-                data: {
-                  customerName: user.user_metadata?.full_name || user.email,
-                  classTitle: cls?.title || TYPE_LABELS[classType] || classType,
-                  classDate: cls?.date,
-                  classTime: cls ? formatTime(cls.time_start) + ' — ' + formatTime(cls.time_end) : '',
-                  spots: checkedPersons.length,
-                },
-              },
+              body: { to: user.email, type: 'class_booked', data: emailData },
             });
           }
+          // Email al admin
+          supabase.functions.invoke('send-email', {
+            body: {
+              to: ADMIN_EMAIL,
+              type: 'admin_class_booked',
+              data: { ...emailData, customerEmail: user?.email || '' },
+            },
+          });
         } catch {}
         render();
       } catch (err) {
