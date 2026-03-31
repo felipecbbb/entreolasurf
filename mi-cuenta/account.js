@@ -68,12 +68,8 @@ function renderAuth() {
                 <input type="tel" id="reg-phone" name="phone" placeholder="+34 600 000 000" required>
               </div>
               <div class="auth-field">
-                <label for="reg-email">Email *</label>
-                <input type="email" id="reg-email" name="email" placeholder="tu@email.com" required>
-              </div>
-              <div class="auth-field">
-                <label for="reg-birthdate">Fecha de nacimiento</label>
-                <input type="date" id="reg-birthdate" name="birth_date">
+                <label for="reg-birthdate">Fecha de nacimiento *</label>
+                <input type="date" id="reg-birthdate" name="birth_date" required>
               </div>
               <div class="auth-field">
                 <label for="reg-address">Dirección</label>
@@ -134,8 +130,8 @@ function renderAuth() {
             <!-- Step 2: Create account (password) -->
             <form id="register-step2" class="auth-form" style="display:none">
               <div class="auth-field">
-                <label for="reg2-email">Email</label>
-                <input type="email" id="reg2-email" disabled>
+                <label for="reg2-email">Email *</label>
+                <input type="email" id="reg2-email" name="email" placeholder="tu@email.com" required>
               </div>
               <div class="auth-field">
                 <label for="reg2-pass">Contraseña *</label>
@@ -231,7 +227,7 @@ function renderAuth() {
     regStep1Data = {
       fullname: e.target.fullname.value.trim(),
       phone: e.target.phone.value.trim(),
-      email: e.target.email.value.trim(),
+      birth_date: e.target.birth_date.value || null,
       address: e.target.address?.value?.trim() || null,
       postal_code: e.target.postal_code?.value?.trim() || null,
       level: e.target.level.value,
@@ -243,7 +239,6 @@ function renderAuth() {
 
     document.getElementById('register-step1').style.display = 'none';
     document.getElementById('register-step2').style.display = '';
-    document.getElementById('reg2-email').value = regStep1Data.email;
   });
 
   // Back button
@@ -259,6 +254,7 @@ function renderAuth() {
     const btn = e.target.querySelector('button[type="submit"]');
     errEl.textContent = '';
 
+    const email = e.target.email.value.trim();
     const pass = e.target.password.value;
     const pass2 = e.target.password2.value;
     if (pass !== pass2) {
@@ -268,7 +264,7 @@ function renderAuth() {
 
     btn.disabled = true; btn.textContent = 'Creando cuenta…';
     try {
-      const result = await signUp(regStep1Data.email, pass, regStep1Data.fullname);
+      const result = await signUp(email, pass, regStep1Data.fullname);
       if (result?.session || result?.user) {
         // Save profile data from step 1
         const now = new Date().toISOString();
