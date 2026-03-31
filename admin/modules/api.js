@@ -199,7 +199,7 @@ export async function fetchEstadisticas(dateFrom, dateTo) {
 export const fetchBookings = cached('bookings', 30000, async (statusFilter) => {
   let query = supabase
     .from('bookings')
-    .select('*, profiles:user_id(id, full_name, last_name, phone, address, city, postal_code, can_swim, has_injury, injury_detail, wetsuit_size), surf_camps:camp_id(id, title, slug, date_start, date_end, max_spots, spots_taken)')
+    .select('*, profiles:user_id(id, full_name, last_name, phone, birth_date, address, city, postal_code, can_swim, has_injury, injury_detail, wetsuit_size), surf_camps:camp_id(id, title, slug, date_start, date_end, max_spots, spots_taken)')
     .order('created_at', { ascending: false });
 
   if (statusFilter) query = query.eq('status', statusFilter);
