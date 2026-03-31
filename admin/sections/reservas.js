@@ -212,142 +212,153 @@ export async function renderReservas(container) {
     overlay.innerHTML = `
       <style>
         #rv-ficha-overlay {
-          position:fixed;inset:0;z-index:9999;background:rgba(15,47,57,.5);display:flex;justify-content:center;align-items:stretch;
-          overscroll-behavior:contain;
+          position:fixed;inset:0;z-index:9999;background:rgba(15,47,57,.55);
+          display:flex;justify-content:flex-end;align-items:stretch;
+          overscroll-behavior:contain;backdrop-filter:blur(2px);
         }
         .rv-ficha {
-          background:#fff;width:100%;max-width:720px;overflow-y:auto;-webkit-overflow-scrolling:touch;
-          padding:32px;display:flex;flex-direction:column;gap:24px;
-          animation:rvSlideIn .25s ease;
+          background:#fffdf7;width:100%;max-width:600px;overflow-y:auto;-webkit-overflow-scrolling:touch;
+          padding:0;display:flex;flex-direction:column;
+          animation:rvSlideIn .3s cubic-bezier(.22,1,.36,1);
+          box-shadow:-8px 0 40px rgba(15,47,57,.15);
         }
-        @keyframes rvSlideIn { from{transform:translateX(40px);opacity:0} to{transform:translateX(0);opacity:1} }
+        @keyframes rvSlideIn { from{transform:translateX(100%)} to{transform:translateX(0)} }
         .rv-ficha-topbar {
-          display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;
-          padding-bottom:16px;border-bottom:1px solid #e5e7eb;margin:-32px -32px 0;padding:20px 32px 16px;z-index:1;
+          display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;
+          background:#0f2f39;padding:20px 28px;z-index:1;flex-shrink:0;
         }
+        .rv-ficha-topbar-title { font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:#fff;line-height:1.1; }
+        .rv-ficha-topbar-sub { font-size:.78rem;color:rgba(255,255,255,.5);margin-top:2px; }
         .rv-ficha-close {
-          width:40px;height:40px;border-radius:50%;border:none;background:#f3f4f6;cursor:pointer;font-size:1.3rem;
-          display:flex;align-items:center;justify-content:center;color:#64748b;flex-shrink:0;
+          width:36px;height:36px;border-radius:50%;border:none;background:rgba(255,255,255,.1);cursor:pointer;font-size:1.2rem;
+          display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.7);flex-shrink:0;transition:background .15s;
         }
-        .rv-ficha-close:hover { background:#e5e7eb; }
-        .rv-field { display:flex;flex-direction:column;gap:2px; }
+        .rv-ficha-close:hover { background:rgba(255,255,255,.2);color:#fff; }
+        .rv-ficha-body { padding:24px 28px 32px;display:flex;flex-direction:column;gap:24px; }
+        .rv-field { display:flex;flex-direction:column;gap:3px; }
+        .rv-field-label { font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;color:var(--color-muted);font-weight:600;font-family:'Space Grotesk',sans-serif; }
+        .rv-field-value { font-size:.88rem;color:var(--color-navy); }
         .rv-grid { display:grid;grid-template-columns:1fr 1fr;gap:16px; }
         .rv-grid-3 { display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px; }
-        .rv-section { padding-top:20px;border-top:1px solid #f3f4f6; }
-        .rv-tag { font-size:.82rem;padding:5px 14px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;display:inline-flex;align-items:center;gap:6px; }
+        .rv-card { background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px 20px; }
+        .rv-section { padding-top:20px;border-top:1px solid #f0ece3; }
+        .rv-tag { font-size:.82rem;padding:6px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;display:inline-flex;align-items:center;gap:6px; }
         .rv-actions { display:flex;gap:10px;flex-wrap:wrap; }
 
         @media (max-width:640px) {
-          .rv-ficha { padding:20px 16px;max-width:100%; }
-          .rv-ficha-topbar { margin:-20px -16px 0;padding:16px 16px 12px; }
+          .rv-ficha { max-width:100%; }
+          .rv-ficha-body { padding:20px 16px 28px; }
+          .rv-ficha-topbar { padding:16px; }
           .rv-grid, .rv-grid-3 { grid-template-columns:1fr; }
           .rv-actions { flex-direction:column; }
-          .rv-actions .btn { width:100%;justify-content:center; }
+          .rv-actions .btn { width:100%;justify-content:center;text-align:center; }
         }
       </style>
       <div class="rv-ficha">
         <!-- Top bar -->
         <div class="rv-ficha-topbar">
           <div>
-            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;color:var(--color-navy);line-height:1.1">Ficha de Reserva</div>
-            <div style="font-size:.78rem;color:var(--color-muted)">${esc(camp.title || 'Surf Camp')}</div>
+            <div class="rv-ficha-topbar-title">Ficha de Reserva</div>
+            <div class="rv-ficha-topbar-sub">${esc(camp.title || 'Surf Camp')}</div>
           </div>
           <button class="rv-ficha-close" id="rv-ficha-close-btn">&times;</button>
         </div>
 
-        <!-- Client card -->
-        <div style="display:flex;gap:16px;align-items:flex-start;padding:20px;background:#f8fafc;border-radius:12px">
-          <div style="width:52px;height:52px;border-radius:50%;background:#0f2f39;display:flex;align-items:center;justify-content:center;color:#FFCC01;font-weight:700;font-size:1.2rem;flex-shrink:0">
-            ${firstName.charAt(0).toUpperCase()}
-          </div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline">
-              <span style="font-weight:700;font-size:1.05rem;color:var(--color-navy)">${firstName}</span>
-              ${lastName ? `<span style="font-weight:400;font-size:1.05rem;color:var(--color-navy)">${lastName}</span>` : ''}
+        <div class="rv-ficha-body">
+          <!-- Client card -->
+          <div class="rv-card" style="display:flex;gap:16px;align-items:flex-start">
+            <div style="width:52px;height:52px;border-radius:50%;background:#0f2f39;display:flex;align-items:center;justify-content:center;color:#FFCC01;font-weight:700;font-size:1.2rem;flex-shrink:0">
+              ${firstName.charAt(0).toUpperCase()}
             </div>
-            <div style="font-size:.82rem;color:var(--color-muted);margin-top:2px">${safeEmail}</div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:6px">
-              <span style="font-size:.82rem;color:var(--color-muted)">${clientPhone}</span>
-              ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:#25D366;text-decoration:none;font-weight:600">${waSvg} WhatsApp</a>` : ''}
-            </div>
-            ${clientAddress ? `<div style="font-size:.78rem;color:var(--color-muted);margin-top:4px">${esc(clientAddress)}</div>` : ''}
-            ${p.id ? `<a href="#clientes" class="rv-goto-client" data-client-id="${p.id}" style="font-size:.75rem;color:#0ea5e9;text-decoration:underline;cursor:pointer;margin-top:6px;display:inline-block">Ver ficha completa del cliente</a>` : ''}
-          </div>
-        </div>
-
-        <!-- Personal data grid -->
-        <div class="rv-grid-3">
-          <div class="rv-field">
-            ${lbl('Fecha de nacimiento')}
-            <span style="font-size:.88rem;color:var(--color-navy)">${birthStr || '—'}${age !== null ? ` <span style="color:var(--color-muted)">(${age} años)</span>` : ''}</span>
-          </div>
-          <div class="rv-field">
-            ${lbl('Teléfono')}
-            <span style="font-size:.88rem;color:var(--color-navy)">${clientPhone}</span>
-          </div>
-          <div class="rv-field">
-            ${lbl('Email')}
-            <span style="font-size:.88rem;color:var(--color-navy);word-break:break-all">${safeEmail}</span>
-          </div>
-        </div>
-
-        <!-- Camp info + status -->
-        <div class="rv-section">
-          <div class="rv-grid">
-            <div class="rv-field">
-              ${lbl('Surf Camp')}
-              <div style="font-weight:700;font-size:.95rem;color:var(--color-navy)">${esc(camp.title || '—')}</div>
-              <div style="font-size:.78rem;color:var(--color-muted)">${camp.date_start ? formatDate(camp.date_start) + ' — ' + formatDate(camp.date_end) : '—'}</div>
-            </div>
-            <div class="rv-field">
-              ${lbl('Estado')}
-              <span class="admin-badge" style="--badge-bg:${statusColor}18;--badge-color:${statusColor};align-self:flex-start">${STATUS_LABELS[booking.status] || booking.status}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Payment -->
-        <div style="padding:18px 20px;border-radius:12px;background:${isFullyPaid ? '#f0fdf4' : '#fef2f2'};border:1px solid ${isFullyPaid ? '#bbf7d0' : '#fecaca'}">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-            <div>
-              <div style="font-weight:700;color:${isFullyPaid ? '#166534' : '#b91c1c'};font-size:.92rem">
-                ${isFullyPaid ? 'Pagado completamente' : 'Pendiente de pago'}
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:700;font-size:1.1rem;color:var(--color-navy)">${firstName}</div>
+              ${lastName ? `<div style="font-size:1rem;color:var(--color-navy);margin-top:1px">${lastName}</div>` : ''}
+              <div style="font-size:.82rem;color:var(--color-muted);margin-top:6px">${safeEmail}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:6px">
+                <span style="font-size:.82rem;color:var(--color-muted)">${clientPhone}</span>
+                ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:#25D366;text-decoration:none;font-weight:600">${waSvg} WhatsApp</a>` : ''}
               </div>
-              <div style="font-size:.82rem;color:${isFullyPaid ? '#15803d' : '#dc2626'};margin-top:4px">
-                Señal: <strong>${formatCurrency(depositPaid)}</strong> · Total: <strong>${formatCurrency(totalAmount)}</strong>
+              ${clientAddress ? `<div style="font-size:.78rem;color:var(--color-muted);margin-top:4px">${esc(clientAddress)}</div>` : ''}
+              ${p.id ? `<a href="#clientes" class="rv-goto-client" data-client-id="${p.id}" style="font-size:.75rem;color:#0ea5e9;text-decoration:none;cursor:pointer;margin-top:8px;display:inline-block">Ver ficha completa →</a>` : ''}
+            </div>
+          </div>
+
+          <!-- Personal data -->
+          <div class="rv-card">
+            <div class="rv-grid-3">
+              <div class="rv-field">
+                <span class="rv-field-label">Fecha de nacimiento</span>
+                <span class="rv-field-value">${birthStr || '—'}${age !== null ? ` <span style="color:var(--color-muted);font-size:.8rem">(${age} años)</span>` : ''}</span>
+              </div>
+              <div class="rv-field">
+                <span class="rv-field-label">Teléfono</span>
+                <span class="rv-field-value">${clientPhone}</span>
+              </div>
+              <div class="rv-field">
+                <span class="rv-field-label">Email</span>
+                <span class="rv-field-value" style="word-break:break-all">${safeEmail}</span>
               </div>
             </div>
-            ${!isFullyPaid && pendingAmount > 0 ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.7rem;color:#b91c1c">${formatCurrency(pendingAmount)}</div>` : ''}
           </div>
-        </div>
 
-        <!-- Health & equipment -->
-        ${healthItems.length ? `
-        <div class="rv-section">
-          ${lbl('Salud y equipamiento')}
-          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-            ${healthItems.map(h => `<span class="rv-tag">${h}</span>`).join('')}
+          <!-- Camp + status -->
+          <div class="rv-card">
+            <div class="rv-grid">
+              <div class="rv-field">
+                <span class="rv-field-label">Surf Camp</span>
+                <div style="font-weight:700;font-size:.95rem;color:var(--color-navy)">${esc(camp.title || '—')}</div>
+                <div style="font-size:.78rem;color:var(--color-muted);margin-top:2px">${camp.date_start ? formatDate(camp.date_start) + ' — ' + formatDate(camp.date_end) : '—'}</div>
+              </div>
+              <div class="rv-field">
+                <span class="rv-field-label">Estado</span>
+                <span class="admin-badge" style="--badge-bg:${statusColor}18;--badge-color:${statusColor};align-self:flex-start;margin-top:4px">${STATUS_LABELS[booking.status] || booking.status}</span>
+              </div>
+            </div>
           </div>
-        </div>` : ''}
 
-        <!-- Notes -->
-        ${booking.notes ? `
-        <div class="rv-section">
-          ${lbl('Notas')}
-          <div style="font-size:.88rem;color:var(--color-navy);padding:12px 16px;background:#f8fafc;border-radius:10px;margin-top:6px">${esc(booking.notes)}</div>
-        </div>` : ''}
+          <!-- Payment -->
+          <div style="padding:18px 20px;border-radius:12px;background:${isFullyPaid ? '#f0fdf4' : '#fef2f2'};border:1px solid ${isFullyPaid ? '#bbf7d0' : '#fecaca'}">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+              <div>
+                <div style="font-weight:700;color:${isFullyPaid ? '#166534' : '#b91c1c'};font-size:.92rem">
+                  ${isFullyPaid ? 'Pagado completamente' : 'Pendiente de pago'}
+                </div>
+                <div style="font-size:.82rem;color:${isFullyPaid ? '#15803d' : '#dc2626'};margin-top:4px">
+                  Señal: <strong>${formatCurrency(depositPaid)}</strong> · Total: <strong>${formatCurrency(totalAmount)}</strong>
+                </div>
+              </div>
+              ${!isFullyPaid && pendingAmount > 0 ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.7rem;color:#b91c1c">${formatCurrency(pendingAmount)}</div>` : ''}
+            </div>
+          </div>
 
-        <!-- Actions -->
-        <div class="rv-section rv-actions">
-          <button class="btn red rv-ficha-status-btn" data-id="${booking.id}" style="font-size:.85rem;padding:10px 20px">Cambiar estado</button>
-          ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" class="btn line" style="font-size:.85rem;padding:10px 20px;display:inline-flex;align-items:center;gap:8px">
-            ${waSvg} Contactar por WhatsApp
-          </a>` : ''}
-        </div>
+          <!-- Health & equipment -->
+          ${healthItems.length ? `
+          <div>
+            <span class="rv-field-label" style="display:block;margin-bottom:10px">Salud y equipamiento</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              ${healthItems.map(h => `<span class="rv-tag">${h}</span>`).join('')}
+            </div>
+          </div>` : ''}
 
-        <!-- Meta -->
-        <div style="font-size:.72rem;color:#b0b8c1;padding-top:12px;border-top:1px solid #f3f4f6">
-          ID: ${booking.id.slice(0, 8)} · Reservado: ${formatDate(booking.created_at)}${booking.updated_at ? ` · Actualizado: ${formatDate(booking.updated_at)}` : ''}
+          <!-- Notes -->
+          ${booking.notes ? `
+          <div>
+            <span class="rv-field-label" style="display:block;margin-bottom:6px">Notas</span>
+            <div class="rv-card" style="font-size:.85rem;color:var(--color-navy)">${esc(booking.notes)}</div>
+          </div>` : ''}
+
+          <!-- Actions -->
+          <div class="rv-section rv-actions">
+            <button class="btn red rv-ficha-status-btn" data-id="${booking.id}" style="font-size:.85rem;padding:11px 24px">Cambiar estado</button>
+            ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" class="btn line" style="font-size:.85rem;padding:11px 24px;display:inline-flex;align-items:center;gap:8px">
+              ${waSvg} Contactar por WhatsApp
+            </a>` : ''}
+          </div>
+
+          <!-- Meta -->
+          <div style="font-size:.72rem;color:#b0b8c1;padding-top:12px;border-top:1px solid #f0ece3">
+            ID: ${booking.id.slice(0, 8)} · Reservado: ${formatDate(booking.created_at)}${booking.updated_at ? ` · Actualizado: ${formatDate(booking.updated_at)}` : ''}
+          </div>
         </div>
       </div>
     `;

@@ -597,6 +597,12 @@ export async function renderClientes(container) {
             <input type="tel" class="act-form-input" id="cli-phone" value="${esc(c.phone)}" placeholder="+34 600 000 000" />
           </div>
           <div class="act-form-field">
+            <label class="act-form-label">FECHA DE NACIMIENTO</label>
+            <input type="date" class="act-form-input" id="cli-birthdate" value="${c.birth_date || ''}" />
+          </div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field">
             <label class="act-form-label">ROL</label>
             <select class="act-form-input" id="cli-role" style="cursor:pointer">
               <option value="client" ${c.role === 'client' ? 'selected' : ''}>Cliente</option>
@@ -1370,6 +1376,7 @@ export async function renderClientes(container) {
     const hasInjuryEl = container.querySelector('#cli-has-injury');
     const injuryDetailEl = container.querySelector('#cli-injury-detail');
     const wetsuitSizeEl = container.querySelector('#cli-wetsuit-size');
+    const birthdateEl = container.querySelector('#cli-birthdate');
 
     if (!fullnameEl) {
       showToast('Ve a la pestaña "Datos personales" para editar', 'error');
@@ -1387,6 +1394,7 @@ export async function renderClientes(container) {
     const has_injury = hasInjuryEl?.value === 'true';
     const injury_detail = injuryDetailEl?.value?.trim() || null;
     const wetsuit_size = wetsuitSizeEl?.value || null;
+    const birth_date = birthdateEl?.value || null;
 
     if (!fullname) {
       showToast('El nombre es obligatorio', 'error');
@@ -1406,6 +1414,7 @@ export async function renderClientes(container) {
         has_injury,
         injury_detail,
         wetsuit_size,
+        birth_date,
       });
       // Update local copy
       c.full_name = fullname;
@@ -1419,6 +1428,7 @@ export async function renderClientes(container) {
       c.has_injury = has_injury;
       c.injury_detail = injury_detail;
       c.wetsuit_size = wetsuit_size;
+      c.birth_date = birth_date;
       showToast('Cliente actualizado', 'success');
       renderDetail();
     } catch (err) {

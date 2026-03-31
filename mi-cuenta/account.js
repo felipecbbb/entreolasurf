@@ -72,6 +72,10 @@ function renderAuth() {
                 <input type="email" id="reg-email" name="email" placeholder="tu@email.com" required>
               </div>
               <div class="auth-field">
+                <label for="reg-birthdate">Fecha de nacimiento</label>
+                <input type="date" id="reg-birthdate" name="birth_date">
+              </div>
+              <div class="auth-field">
                 <label for="reg-address">Dirección</label>
                 <input type="text" id="reg-address" name="address" placeholder="Calle, número, ciudad">
               </div>
@@ -270,6 +274,7 @@ function renderAuth() {
         const now = new Date().toISOString();
         await updateProfile({
           phone: regStep1Data.phone,
+          birth_date: regStep1Data.birth_date || null,
           address: regStep1Data.address,
           postal_code: regStep1Data.postal_code,
           level: regStep1Data.level,
