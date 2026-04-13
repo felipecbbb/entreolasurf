@@ -13,6 +13,7 @@ create table public.profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
   full_name   text not null,
   phone       text,
+  email       text,
   role        text not null default 'client' check (role in ('admin','client')),
   avatar_url  text,
   created_at  timestamptz not null default now(),
@@ -25,11 +26,12 @@ comment on table public.profiles is 'Datos extra de cada usuario (admin o client
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, full_name, phone)
+  insert into public.profiles (id, full_name, phone, email)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', ''),
-    coalesce(new.raw_user_meta_data->>'phone', '')
+    coalesce(new.raw_user_meta_data->>'phone', ''),
+    new.email
   );
   return new;
 end;
