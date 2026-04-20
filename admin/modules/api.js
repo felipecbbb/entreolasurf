@@ -252,6 +252,70 @@ export async function deleteCamp(id) {
   invalidateCache('camps');
 }
 
+// ---- Duplicate Camp (clones surf_camps + camp_photos + camp_testimonials + camp_faqs) ----
+export async function duplicateCamp(sourceId) {
+  // Fetch full source
+  const full = await fetchCampFull(sourceId);
+  if (!full) throw new Error('Camp no encontrado');
+
+  // Generate unique slug by appending -copia or -copia-N
+  const { data: existing } = await supabase.from('surf_camps').select('slug');
+  const takenSlugs = new Set((existing || []).map(c => c.slug));
+  let baseSlug = `${full.slug}-copia`;
+  let newSlug = baseSlug;
+  let n = 2;
+  while (takenSlugs.has(newSlug)) { newSlug = `${baseSlug}-${n}`; n++; }
+
+  // Build clone: drop id / timestamps / generated cols, override slug + title
+  const clone = { ...full };
+  delete clone.id;
+  delete clone.created_at;
+  delete clone.updated_at;
+  delete clone.duration_days;
+  delete clone.photos;
+  delete clone.testimonials;
+  delete clone.faqs;
+  clone.slug = newSlug;
+  clone.title = `${full.title} (copia)`;
+  clone.spots_taken = 0;
+  clone.sold_out = false;
+  clone.status = 'coming_soon';
+
+  const { data: inserted, error: insertErr } = await supabase
+    .from('surf_camps')
+    .insert(clone)
+    .select()
+    .single();
+  if (insertErr) throw insertErr;
+
+  const newId = inserted.id;
+
+  // Clone photos
+  if (full.photos?.length) {
+    const photosClone = full.photos.map(p => ({
+      camp_id: newId, url: p.url, alt_text: p.alt_text, sort_order: p.sort_order,
+    }));
+    await supabase.from('camp_photos').insert(photosClone);
+  }
+  // Clone testimonials
+  if (full.testimonials?.length) {
+    const testsClone = full.testimonials.map(t => ({
+      camp_id: newId, author_name: t.author_name, quote: t.quote, stars: t.stars, sort_order: t.sort_order,
+    }));
+    await supabase.from('camp_testimonials').insert(testsClone);
+  }
+  // Clone FAQs
+  if (full.faqs?.length) {
+    const faqsClone = full.faqs.map(f => ({
+      camp_id: newId, question: f.question, answer: f.answer, col_index: f.col_index, sort_order: f.sort_order,
+    }));
+    await supabase.from('camp_faqs').insert(faqsClone);
+  }
+
+  invalidateCache('camps');
+  return inserted;
+}
+
 // ---- Camp Full (with photos, testimonials, faqs) ----
 export async function fetchCampFull(id) {
   const [camp, photos, testimonials, faqs] = await Promise.all([

@@ -6112,6 +6112,31 @@ a.admin-nav-item-external .nav-icon svg {
   color: #b91c1c;
 }
 
+/* Duplicate button on card (left of delete) */
+.sc-card-duplicate {
+  position: absolute;
+  top: 8px;
+  right: 44px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255,255,255,.9);
+  color: var(--color-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .15s, color .15s, background .15s;
+  z-index: 2;
+}
+.sc-card:hover .sc-card-duplicate { opacity: 1; }
+.sc-card-duplicate:hover {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
 /* Empty state */
 .sc-empty {
   display: flex;
