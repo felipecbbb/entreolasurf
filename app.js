@@ -3,24 +3,49 @@ import { supabase } from '/lib/supabase.js';
 import '/lib/cookie-banner.js';
 updateCartPill();
 
-/* ---------- Hide nav links for deactivated activities ---------- */
+/* ---------- Hide nav links for deactivated activities + expired camps ---------- */
 (async () => {
   try {
-    const { data: activities } = await supabase
-      .from('activities')
-      .select('slug, activo');
-    if (!activities) return;
-    const inactive = new Set(
-      activities.filter(a => !a.activo).map(a => `/${a.slug}/`)
-    );
-    if (inactive.size === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
 
-    // Hide dropdown links for inactive activities
-    document.querySelectorAll('.main-nav .dropdown a[href]').forEach(link => {
-      if (inactive.has(link.getAttribute('href'))) {
-        link.style.display = 'none';
+    const [{ data: activities }, { data: camps }] = await Promise.all([
+      supabase.from('activities').select('slug, activo'),
+      supabase.from('surf_camps').select('slug, title, date_start, date_end').order('date_start'),
+    ]);
+
+    const inactive = new Set(
+      (activities || []).filter(a => !a.activo).map(a => `/${a.slug}/`)
+    );
+
+    // Expired camps: date_end before today → hide from nav
+    const campsList = camps || [];
+    const expiredSlugs = new Set(
+      campsList.filter(c => c.date_end && c.date_end < today).map(c => `/${c.slug}/`)
+    );
+    const activeCamps = campsList.filter(c => !c.date_end || c.date_end >= today);
+
+    // Rebuild the Surf Camp dropdown with only active camps, sorted by date_start
+    const campNavItem = [...document.querySelectorAll('.main-nav .nav-item.has-dd')]
+      .find(item => item.querySelector(':scope > a')?.getAttribute('href') === '/surf-camp/');
+    if (campNavItem) {
+      const dropdown = campNavItem.querySelector('.dropdown');
+      if (dropdown) {
+        const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        const links = ['<a href="/surf-camp/">Vista general</a>']
+          .concat(activeCamps.map(c => `<a href="/${esc(c.slug)}/">${esc(c.title)}</a>`));
+        dropdown.innerHTML = links.join('');
       }
-    });
+    }
+
+    // Hide dropdown links for inactive activities or expired camps (any leftover static links)
+    const hidden = new Set([...inactive, ...expiredSlugs]);
+    if (hidden.size > 0) {
+      document.querySelectorAll('.main-nav .dropdown a[href]').forEach(link => {
+        if (hidden.has(link.getAttribute('href'))) {
+          link.style.display = 'none';
+        }
+      });
+    }
 
     // Fix top-level trigger: if it points to an inactive activity,
     // re-point it to the first visible dropdown child
@@ -31,10 +56,15 @@ updateCartPill();
       if (visibleChild) {
         trigger.setAttribute('href', visibleChild.getAttribute('href'));
       } else {
-        // All children hidden — hide the whole nav group
         item.style.display = 'none';
       }
     });
+
+    // If the user is currently on an expired camp page, redirect to /surf-camp/
+    const currentPath = window.location.pathname.replace(/\/$/, '') + '/';
+    if (expiredSlugs.has(currentPath)) {
+      window.location.replace('/surf-camp/');
+    }
   } catch (e) { /* silent — nav stays as-is if query fails */ }
 })();
 

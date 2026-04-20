@@ -230,16 +230,20 @@ export async function upsertCamp(camp) {
   delete camp.photos;
   delete camp.testimonials;
   delete camp.faqs;
-  let error;
+  let error, data;
   if (camp.id) {
     const id = camp.id;
     delete camp.id;
-    ({ error } = await supabase.from('surf_camps').update(camp).eq('id', id));
+    ({ data, error } = await supabase.from('surf_camps').update(camp).eq('id', id).select());
+    if (!error && (!data || data.length === 0)) {
+      throw new Error('No se actualizó ninguna fila (permisos o id inválido)');
+    }
   } else {
-    ({ error } = await supabase.from('surf_camps').insert(camp));
+    ({ data, error } = await supabase.from('surf_camps').insert(camp).select());
   }
   if (error) throw error;
   invalidateCache('camps');
+  return data?.[0] || null;
 }
 
 export async function deleteCamp(id) {
