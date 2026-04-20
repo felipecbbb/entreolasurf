@@ -268,6 +268,7 @@ export async function renderCamps(container) {
         <div class="act-form-field"><label class="act-form-label">SLUG (URL)</label><input type="text" class="act-form-input" id="f-slug" value="${esc(c.slug)}" readonly style="background:#f3f4f6;cursor:not-allowed" /><small class="act-form-hint">Bloqueado: cambiar el slug rompe la URL /${esc(c.slug)}/. Si necesitas cambiarlo, contacta al desarrollador.</small></div>
         <div class="act-form-field"><label class="act-form-label">KICKER (texto bajo el título en las cards)</label><input type="text" class="act-form-input" id="f-kicker" value="${esc(c.kicker||'')}" placeholder="Ej: Conil x Sambatrips" /></div>
         <div class="act-form-field"><label class="act-form-label">VIBE / TAGS DE LA CARD</label><input type="text" class="act-form-input" id="f-card-vibe" value="${esc(c.card_vibe||'')}" placeholder="Ej: SURF, SOCIAL" /><small class="act-form-hint">Texto del ⚡ en la card (se muestra en mayúsculas).</small></div>
+        <div class="act-form-field"><label class="act-form-label">DURACIÓN (TEXTO DE LA CARD)</label><input type="text" class="act-form-input" id="f-duration-label" value="${esc(c.duration_label||'')}" placeholder="Ej: 4 días / 3 noches" /><small class="act-form-hint">Si lo dejas vacío, se calcula automáticamente desde las fechas.</small></div>
         <div class="act-form-field"><label class="act-form-label">DESCRIPCION</label><textarea class="act-form-textarea" id="f-description" rows="4">${esc(c.description||'')}</textarea></div>
         <div class="act-form-field"><label class="act-form-label">COLOR DE ACENTO</label><input type="color" class="act-form-input" id="f-color" value="${c.color||'#0f2f39'}" style="height:40px;padding:4px" /></div>
         <div class="act-form-field"><label class="act-form-label">FECHA INICIO</label><input type="date" class="act-form-input" id="f-date-start" value="${c.date_start||''}" /></div>
@@ -561,6 +562,7 @@ export async function renderCamps(container) {
       updates.title = container.querySelector('#f-title')?.value.trim() || c.title;
       updates.kicker = container.querySelector('#f-kicker')?.value.trim() || null;
       updates.card_vibe = container.querySelector('#f-card-vibe')?.value.trim() || null;
+      updates.duration_label = container.querySelector('#f-duration-label')?.value.trim() || null;
       updates.description = container.querySelector('#f-description')?.value.trim() || null;
       updates.color = container.querySelector('#f-color')?.value || '#0f2f39';
       updates.date_start = container.querySelector('#f-date-start')?.value || c.date_start;
