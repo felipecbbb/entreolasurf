@@ -276,6 +276,7 @@ export async function renderCamps(container) {
   }
 
   function tabHero(c) {
+    const heroTags = c.hero_tags || [];
     return `
       <h3 class="act-detail-section-title">Hero / Cabecera</h3>
       <div class="act-form-card">
@@ -288,6 +289,7 @@ export async function renderCamps(container) {
         <div class="act-form-field"><label class="act-form-label">KICKER (texto sobre el titulo)</label><input type="text" class="act-form-input" id="f-hero-kicker" value="${esc(c.hero_kicker||'')}" /></div>
         <div class="act-form-field"><label class="act-form-label">TITULO PRINCIPAL</label><input type="text" class="act-form-input" id="f-hero-title" value="${esc(c.hero_title||'')}" /></div>
         <div class="act-form-field"><label class="act-form-label">SUBTITULO</label><input type="text" class="act-form-input" id="f-hero-subtitle" value="${esc(c.hero_subtitle||'')}" /></div>
+        <div class="act-form-field"><label class="act-form-label">TAGS DEL HERO (uno por línea)</label><textarea class="act-form-textarea" id="f-hero-tags" rows="5" placeholder="Ej:&#10;9-13 Septiembre&#10;Roche, Cádiz&#10;Plazas limitadas&#10;Transporte incluido&#10;+18">${heroTags.map(esc).join('\n')}</textarea><small class="act-form-hint">Las píldoras que aparecen bajo el subtítulo en la página de detalle.</small></div>
       </div>`;
   }
 
@@ -570,6 +572,7 @@ export async function renderCamps(container) {
       updates.hero_kicker = container.querySelector('#f-hero-kicker')?.value.trim() || null;
       updates.hero_title = container.querySelector('#f-hero-title')?.value.trim() || null;
       updates.hero_subtitle = container.querySelector('#f-hero-subtitle')?.value.trim() || null;
+      updates.hero_tags = (container.querySelector('#f-hero-tags')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
     }
 
     if (activeTab === 'pagina') {
