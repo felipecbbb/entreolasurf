@@ -19,7 +19,6 @@ import { renderMaterial } from './sections/material.js';
 import { renderEstadisticas } from './sections/estadisticas.js';
 import { renderReservaClases } from './sections/reserva-clases.js';
 import { renderCupones } from './sections/cupones.js';
-import { renderWhatsApp } from './sections/whatsapp.js';
 import { renderEquipo } from './sections/equipo.js';
 
 // DOM refs
@@ -66,7 +65,6 @@ register('material', renderMaterial);
 register('estadisticas', renderEstadisticas);
 register('reserva-clases', renderReservaClases);
 register('cupones', renderCupones);
-register('whatsapp', renderWhatsApp);
 register('equipo', renderEquipo);
 
 // ---- Login form ----

@@ -20,7 +20,6 @@ const sectionTitles = {
   pedidos: 'Pedidos Tienda',
   clientes: 'Clientes',
   'reserva-clases': 'Reserva Clases',
-  whatsapp: 'WhatsApp Bot',
   cupones: 'Cupones',
   equipo: 'Equipo',
 };
