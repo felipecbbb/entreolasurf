@@ -16,6 +16,25 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Traduce errores de Supabase Auth a mensajes útiles en español
+function translateAuthError(msg: string | undefined): string {
+  if (!msg) return "No se pudo crear el encargado";
+  const m = msg.toLowerCase();
+  if (m.includes("already been registered") || m.includes("already registered") || m.includes("already exists")) {
+    return "Ya hay una cuenta con ese email";
+  }
+  if (m.includes("invalid email") || m.includes("invalid format")) {
+    return "El email no es válido";
+  }
+  if (m.includes("password") && (m.includes("short") || m.includes("at least") || m.includes("weak"))) {
+    return "La contraseña es demasiado corta o débil";
+  }
+  if (m.includes("rate limit") || m.includes("too many")) {
+    return "Demasiados intentos, espera un momento";
+  }
+  return msg; // fallback: pasa el original
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -57,7 +76,7 @@ Deno.serve(async (req) => {
       user_metadata: { full_name },
     });
     if (createErr || !created.user) {
-      return json({ error: createErr?.message || "No se pudo crear usuario" }, 400);
+      return json({ error: translateAuthError(createErr?.message) }, 400);
     }
 
     // 4) Upsert profile with role='encargado'. A trigger may have already
