@@ -208,7 +208,7 @@ async function _paymentsSumBy(reservationType, refIds) {
 
 export async function fetchPendingBookings() {
   const { data } = await supabase.from('bookings')
-    .select('id, user_id, total_amount, status, created_at, guest_name')
+    .select('id, user_id, total_amount, deposit_amount, status, created_at, guest_name, surf_camps(title)')
     .in('status', ['pending', 'deposit_paid'])
     .order('created_at', { ascending: false });
   const list = data || [];
@@ -216,7 +216,11 @@ export async function fetchPendingBookings() {
   const ids = list.map(b => b.id);
   const [profilesMap, paidMap] = await Promise.all([_profilesById(userIds), _paymentsSumBy('booking', ids)]);
   return list.map(b => {
-    const paid = paidMap[b.id] || 0;
+    // pagado real = máximo entre suma de payments y deposit_amount (cubre reservas antiguas
+    // donde la señal web se registró como reservation_type='order' y no aparece en paidMap)
+    const paidFromPayments = paidMap[b.id] || 0;
+    const paidFromDeposit  = b.status === 'pending' ? 0 : Number(b.deposit_amount || 0);
+    const paid  = Math.max(paidFromPayments, paidFromDeposit);
     const total = Number(b.total_amount || 0);
     const pending = Math.max(0, total - paid);
     return {
@@ -227,6 +231,7 @@ export async function fetchPendingBookings() {
       total, paid, pending,
       status: b.status,
       created_at: b.created_at,
+      meta: b.surf_camps?.title || 'Surf camp',
       entity: 'booking',
     };
   }).filter(b => b.pending > 0);

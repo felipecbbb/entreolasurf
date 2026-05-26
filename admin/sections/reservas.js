@@ -1,7 +1,7 @@
 /* ============================================================
    Reservas Section — Camp bookings grouped by camp
    ============================================================ */
-import { fetchBookings, fetchCamps, updateBookingStatus } from '../modules/api.js';
+import { fetchBookings, fetchCamps, updateBookingStatus, createPayment } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 
@@ -349,6 +349,11 @@ export async function renderReservas(container) {
 
           <!-- Actions -->
           <div class="rv-section rv-actions">
+            ${!isFullyPaid && pendingAmount > 0 ? `
+              <button class="btn rv-collect-rest-btn" data-id="${booking.id}" style="font-size:.85rem;padding:11px 24px;background:#22c55e;color:#fff;border:0">
+                Cobrar resto · ${formatCurrency(pendingAmount)}
+              </button>
+            ` : ''}
             <button class="btn red rv-ficha-status-btn" data-id="${booking.id}" style="font-size:.85rem;padding:11px 24px">Cambiar estado</button>
             ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" class="btn line" style="font-size:.85rem;padding:11px 24px;display:inline-flex;align-items:center;gap:8px">
               ${waSvg} Contactar por WhatsApp
@@ -385,6 +390,83 @@ export async function renderReservas(container) {
     overlay.querySelector('.rv-ficha-status-btn')?.addEventListener('click', () => {
       closeFicha();
       openStatusModal(booking);
+    });
+
+    // Collect rest from ficha
+    overlay.querySelector('.rv-collect-rest-btn')?.addEventListener('click', () => {
+      openCollectRestModal(booking, pendingAmount);
+    });
+  }
+
+  function openCollectRestModal(booking, pending) {
+    const METHODS = [
+      { v: 'efectivo', l: 'Efectivo' },
+      { v: 'tarjeta', l: 'Tarjeta (TPV en playa)' },
+      { v: 'transferencia', l: 'Transferencia' },
+    ];
+    openModal(`Cobrar resto · ${formatCurrency(pending)}`, `
+      <div class="trip-form">
+        <label>Cliente</label>
+        <input type="text" value="${esc(booking.profiles?.full_name || '—')}" disabled />
+
+        <label>Camp</label>
+        <input type="text" value="${esc(booking.surf_camps?.title || '—')}" disabled />
+
+        <label>Importe a cobrar</label>
+        <input type="number" id="cr-amount" value="${pending}" step="0.01" min="0.01" />
+
+        <label>Método de pago</label>
+        <select id="cr-method">
+          ${METHODS.map(m => `<option value="${m.v}">${m.l}</option>`).join('')}
+        </select>
+
+        <label>Notas (opcional)</label>
+        <input type="text" id="cr-notes" placeholder="Ej: pagado en mano el día 1" />
+
+        <button class="btn red" id="cr-save" style="margin-top:14px;background:#22c55e">Registrar cobro</button>
+      </div>
+    `);
+
+    document.getElementById('cr-save').addEventListener('click', async () => {
+      const btn = document.getElementById('cr-save');
+      const amount = parseFloat(document.getElementById('cr-amount').value) || 0;
+      const method = document.getElementById('cr-method').value;
+      const notes  = document.getElementById('cr-notes').value.trim();
+      if (amount <= 0) { showToast('Importe inválido', 'error'); return; }
+
+      btn.disabled = true; btn.textContent = 'Procesando…';
+      try {
+        // 1) Insertar payment
+        await createPayment({
+          user_id: booking.user_id,
+          amount,
+          payment_method: method,
+          channel: 'in_person',
+          reservation_type: 'booking',
+          reference_id: booking.id,
+          concept: `Resto surf camp ${booking.surf_camps?.title || ''}`.trim(),
+          notes: notes || null,
+        });
+
+        // 2) Actualizar booking
+        const newDeposit = Math.min(
+          Number(booking.deposit_amount || 0) + amount,
+          Number(booking.total_amount || 0)
+        );
+        const fullyPaid = newDeposit >= Number(booking.total_amount || 0);
+        await supabase.from('bookings').update({
+          deposit_amount: newDeposit,
+          status: fullyPaid ? 'fully_paid' : 'deposit_paid',
+          updated_at: new Date().toISOString(),
+        }).eq('id', booking.id);
+
+        closeModal();
+        showToast(`Cobro de ${formatCurrency(amount)} registrado`, 'success');
+        render();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+        btn.disabled = false; btn.textContent = 'Registrar cobro';
+      }
     });
   }
 

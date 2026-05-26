@@ -95,19 +95,39 @@ Deno.serve(async (req) => {
         await supabase.from("profiles").update(profileUpdate).eq("id", userId);
       }
 
+      // Acumula los payments a insertar: uno por cada item (camp/bono/rental) más
+      // uno tipo 'order' para los productos físicos.
+      const paymentRows: any[] = [];
+      const paymentsBase = {
+        user_id: userId,
+        payment_method: "online",
+        channel: "web",
+        payment_date: new Date().toISOString(),
+        notes: `Stripe session: ${session.id}`,
+      };
+
       // ---- Process CAMP reservations ----
       const camps = cart.filter((i: any) => i.type === "camp_reservation");
       for (const camp of camps) {
         const campId = camp.metadata?.campId || camp.id?.replace("camp-", "") || null;
         if (campId) {
-          await supabase.from("bookings").insert({
+          const { data: bk } = await supabase.from("bookings").insert({
             user_id: userId,
             camp_id: campId,
             deposit_amount: camp.price,
             total_amount: camp.metadata?.totalAmount || camp.price,
             status: "deposit_paid",
             notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}`,
-          });
+          }).select("id").single();
+          if (bk?.id) {
+            paymentRows.push({
+              ...paymentsBase,
+              amount: camp.price,
+              reservation_type: "booking",
+              reference_id: bk.id,
+              concept: `Señal surf camp ${camp.name || ''}`.trim(),
+            });
+          }
         }
       }
 
@@ -116,20 +136,31 @@ Deno.serve(async (req) => {
       for (const cls of classes) {
         const classType = cls.metadata?.classType || "grupal";
         const sessions = cls.metadata?.sessions || 1;
-        await supabase.from("bonos").insert({
+        const bonoPaid = cls.price * (cls.quantity || 1);
+        const { data: bono } = await supabase.from("bonos").insert({
           user_id: userId,
           order_id: orderId,
           class_type: classType,
           total_credits: sessions * (cls.quantity || 1),
           used_credits: 0,
-          total_paid: cls.price * (cls.quantity || 1),
+          total_paid: bonoPaid,
           status: "active",
           expires_at: getBonoExpiry(classType),
-        });
+        }).select("id").single();
+        if (bono?.id) {
+          paymentRows.push({
+            ...paymentsBase,
+            amount: bonoPaid,
+            reservation_type: "bono",
+            reference_id: bono.id,
+            concept: `Bono ${classType} · ${sessions} sesiones`,
+          });
+        }
       }
 
       // ---- Process PRODUCT order items ----
       const products = cart.filter((i: any) => i.type === "product");
+      let productsTotal = 0;
       for (const prod of products) {
         const productId = prod.metadata?.productId || prod.id || null;
         if (productId) {
@@ -139,6 +170,7 @@ Deno.serve(async (req) => {
             quantity: prod.quantity || 1,
             unit_price: prod.price,
           });
+          productsTotal += Number(prod.price || 0) * (prod.quantity || 1);
           // Decrease stock
           const { data: product } = await supabase
             .from("products").select("stock").eq("id", productId).single();
@@ -149,34 +181,54 @@ Deno.serve(async (req) => {
           }
         }
       }
+      if (productsTotal > 0) {
+        paymentRows.push({
+          ...paymentsBase,
+          amount: productsTotal,
+          reservation_type: "order",
+          reference_id: orderId,
+          concept: `Pedido tienda #${orderId.slice(0, 8)}`,
+        });
+      }
 
       // ---- Process RENTAL reservations ----
       const rentals = cart.filter((i: any) => i.type === "rental");
       for (const rental of rentals) {
         if (rental.metadata) {
-          await supabase.from("equipment_reservations").insert({
+          const rentalTotal = rental.price * (rental.quantity || 1);
+          const { data: rentalRow } = await supabase.from("equipment_reservations").insert({
             user_id: userId,
             equipment_type: rental.metadata.equipmentType || rental.name,
             date_start: rental.metadata.dateStart || new Date().toISOString().slice(0, 10),
             date_end: rental.metadata.dateEnd || new Date().toISOString().slice(0, 10),
-            total_amount: rental.price * (rental.quantity || 1),
+            total_amount: rentalTotal,
+            deposit_paid: rentalTotal,
             status: "confirmed",
             notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}`,
-          });
+          }).select("id").single();
+          if (rentalRow?.id) {
+            paymentRows.push({
+              ...paymentsBase,
+              amount: rentalTotal,
+              reservation_type: "rental",
+              reference_id: rentalRow.id,
+              concept: `Alquiler ${rental.name || rental.metadata.equipmentType}`,
+            });
+          }
         }
       }
 
-      // ---- Create payment record ----
-      await supabase.from("payments").insert({
-        user_id: userId,
-        amount: totalPaid,
-        payment_method: "online",
-        channel: "web",
-        payment_date: new Date().toISOString(),
-        reservation_type: "order",
-        reference_id: orderId,
-        notes: `Stripe session: ${session.id}`,
-      });
+      // ---- Create payment records ----
+      // Si no se pudo descomponer (carrito vacío o sin metadatos), fallback a un solo payment 'order'.
+      if (paymentRows.length === 0) {
+        paymentRows.push({
+          ...paymentsBase,
+          amount: totalPaid,
+          reservation_type: "order",
+          reference_id: orderId,
+        });
+      }
+      await supabase.from("payments").insert(paymentRows);
 
       // ---- Increment coupon usage ----
       if (meta.couponId) {

@@ -322,7 +322,7 @@ export async function renderEstadisticas(container) {
                   <tr>
                     <th>Cliente</th>
                     <th>Contacto</th>
-                    ${sec.key === 'rental' || sec.key === 'bono' ? '<th>Concepto</th>' : ''}
+                    ${sec.key === 'rental' || sec.key === 'bono' || sec.key === 'booking' ? '<th>Concepto</th>' : ''}
                     <th>Fecha</th>
                     <th class="estad-num">Total</th>
                     <th class="estad-num">Pagado</th>
@@ -338,7 +338,7 @@ export async function renderEstadisticas(container) {
                         ${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ''}
                         ${r.phone ? `<small style="display:block;color:var(--color-muted)">${esc(r.phone)}</small>` : ''}
                       </td>
-                      ${sec.key === 'rental' || sec.key === 'bono' ? `<td>${esc(r.meta || '')}</td>` : ''}
+                      ${sec.key === 'rental' || sec.key === 'bono' || sec.key === 'booking' ? `<td>${esc(r.meta || '')}</td>` : ''}
                       <td>${esc(fmtDate(r.created_at))}</td>
                       <td class="estad-num">${formatCurrency(r.total)}</td>
                       <td class="estad-num">${formatCurrency(r.paid)}</td>
