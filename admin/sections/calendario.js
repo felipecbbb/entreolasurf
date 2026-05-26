@@ -2141,11 +2141,10 @@ export async function renderCalendario(container) {
             // Track accumulated bono credit usage across persons
             const bonoCreditsUsed = {}; // bonoId → total credits consumed in this booking
 
-            // Link contact profile to first person if available from search
-            if (persons.length > 0 && contactData.profileId && !persons[0].profileId) {
-              persons[0].profileId = contactData.profileId;
-              persons[0].profileName = contactData.nombre;
-            }
+            // NOTE: NO heredamos contactData.profileId a persons[0]. El responsable es
+            // un concepto independiente de los inscritos — heredarlo provocaba violación
+            // del índice único (class_id, user_id, family_member_id) cuando el responsable
+            // ya estaba inscrito en la clase.
 
             // Create client accounts for new persons (not linked to existing client)
             for (let pi = 0; pi < persons.length; pi++) {
@@ -2254,7 +2253,16 @@ export async function renderCalendario(container) {
             showToast('Reserva confirmada', 'success');
             openReservationDetail(reservationData, overlay);
           } catch (err) {
-            showToast('Error: ' + err.message, 'error');
+            console.error('Error creando reserva:', err);
+            let msg = err.message || 'Error desconocido';
+            if (err.code === '23505' || msg.includes('duplicate key') || msg.includes('idx_unique_enrollment')) {
+              msg = 'Este cliente ya está inscrito en una de las sesiones seleccionadas.';
+            } else if (err.code === '23503') {
+              msg = 'Cliente o sesión no válidos (referencia rota).';
+            } else if (err.details) {
+              msg += ` (${err.details})`;
+            }
+            showToast('Error: ' + msg, 'error');
             btn.disabled = false;
             btn.textContent = 'Confirmar';
           }
@@ -2517,6 +2525,7 @@ export async function renderCalendario(container) {
                 : b.isFullyPaid
                   ? '<span style="color:#166534;font-size:.75rem;font-weight:600">PAGADO</span>'
                   : '';
+              const expandBtnHtml = `<button class="rv-bono-expand-btn" data-bono-id="${b.id}" data-person-id="${p.id}" title="Ampliar bono">+ Ampliar</button>`;
               return `
                 <div class="rv-bono-card ${isSelected ? 'rv-bono-active' : ''}" data-person-id="${p.id}" data-bono-id="${b.id}" style="${cardStyle}">
                   <div class="rv-bono-header">
@@ -2530,6 +2539,7 @@ export async function renderCalendario(container) {
                     <div class="rv-bono-bar"><div class="rv-bono-bar-fill" style="width:${paidPct}%;background:${b.isFullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
                     <span class="rv-bono-pay-label">${b.totalPaidReal.toFixed(2)}€ / ${b.expectedPrice.toFixed(2)}€</span>
                     ${payBtnHtml}
+                    ${expandBtnHtml}
                   </div>
                 </div>`;
             }).join('');
@@ -2992,6 +3002,16 @@ export async function renderCalendario(container) {
         });
       });
 
+      // Bono expand buttons (ampliar créditos)
+      overlay.querySelectorAll('.rv-bono-expand-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const bonoId = btn.dataset.bonoId;
+          const pid = btn.dataset.personId;
+          openBonoExpandModal(res, overlay, pid, bonoId);
+        });
+      });
+
       // Load credit balances for linked persons
       overlay.querySelectorAll('.rv-credit-row').forEach(async (row) => {
         const profileId = row.dataset.profileId;
@@ -3413,6 +3433,148 @@ export async function renderCalendario(container) {
         } catch (err) {
           showToast('Error: ' + err.message, 'error');
           btn.disabled = false; btn.textContent = 'Registrar Pago del Bono';
+        }
+      });
+    }
+
+    function openBonoExpandModal(res, overlayRef, personId, bonoId) {
+      const pc = res.personCredits?.[personId];
+      const bono = pc?.allBonos?.find(b => b.id === bonoId);
+      if (!bono) { showToast('Bono no encontrado', 'error'); return; }
+
+      const classType = bono.class_type;
+      const currentCredits = bono.total_credits;
+      const tiers = PACK_PRICING[classType];
+      const fallbackPerSession = Number(tiers ? tiers[1] : (res.totalFinal / (res.persons[0]?.sessions?.length || 1))) || 0;
+
+      function suggestPrice(extra) {
+        const newTotal = currentCredits + extra;
+        const fullPrice = getPackPrice(classType, newTotal, fallbackPerSession);
+        return Math.max(0, Math.round((fullPrice - bono.expectedPrice) * 100) / 100);
+      }
+
+      const defaultExtra = 4;
+      const defaultPrice = suggestPrice(defaultExtra);
+
+      const modal = document.createElement('div');
+      modal.className = 'bk-overlay';
+      modal.style.zIndex = '10001';
+      modal.innerHTML = `
+        <div class="bk-panel" style="max-width:480px;margin:auto;border-radius:16px;overflow:hidden">
+          <div class="bk-panel-header" style="background:#0ea5e9;padding:16px 22px">
+            <div class="bk-header-left" style="display:flex;align-items:center;gap:12px">
+              <button class="bk-close-btn rv-bono-modal-close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <span class="bk-header-title" style="font-size:1.1rem">Ampliar bono</span>
+            </div>
+          </div>
+          <div style="padding:24px">
+            <form class="rv-bono-expand-form trip-form">
+              <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px;margin-bottom:16px">
+                <div style="font-size:.85rem;color:#1e40af;font-weight:600">${TYPE_LABELS[classType] || classType} · ${bono.used_credits}/${currentCredits} clases usadas</div>
+                <div style="font-size:.82rem;color:#1e40af;margin-top:4px">Pagado actual: ${bono.totalPaidReal.toFixed(2)}€</div>
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:6px">Clases a añadir</label>
+                <input type="number" name="extra" min="1" step="1" value="${defaultExtra}" required />
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:6px">Importe a cobrar (€)</label>
+                <input type="number" name="amount" step="0.01" min="0" value="${defaultPrice.toFixed(2)}" required />
+                <small style="color:#6b7280;display:block;margin-top:4px">Sugerido según el pack ${classType}. Puedes ajustarlo libremente.</small>
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:6px">Método de pago</label>
+                <select name="method" required>
+                  <option value="">Seleccionar…</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="voucher">Voucher</option>
+                  <option value="saldo">Saldo a favor</option>
+                </select>
+              </div>
+              <button type="submit" class="bk-final-confirm-btn" style="margin-top:4px;background:#0ea5e9">Ampliar y registrar pago</button>
+            </form>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      modal.querySelector('.rv-bono-modal-close')?.addEventListener('click', () => modal.remove());
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+      // Auto-update suggested price when extra count changes
+      const extraInput = modal.querySelector('input[name="extra"]');
+      const amountInput = modal.querySelector('input[name="amount"]');
+      extraInput?.addEventListener('input', () => {
+        const extra = parseInt(extraInput.value) || 0;
+        if (extra > 0) amountInput.value = suggestPrice(extra).toFixed(2);
+      });
+
+      modal.querySelector('.rv-bono-expand-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const extra = parseInt(fd.get('extra')) || 0;
+        const amount = parseFloat(fd.get('amount')) || 0;
+        const method = fd.get('method');
+
+        if (extra <= 0) { showToast('Indica al menos 1 clase', 'error'); return; }
+        if (!method) { showToast('Selecciona un método de pago', 'error'); return; }
+
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true; submitBtn.textContent = 'Procesando…';
+
+        try {
+          const newTotalCredits = currentCredits + extra;
+          const newTotalPaid = Number(bono.totalPaidReal || 0) + amount;
+          const newExpiresAt = new Date();
+          newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
+
+          const { error: bErr } = await supabase.from('bonos').update({
+            total_credits: newTotalCredits,
+            total_paid: newTotalPaid,
+            status: 'active',
+            expires_at: newExpiresAt.toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('id', bonoId);
+          if (bErr) throw bErr;
+
+          // Deduct from saldo if applicable
+          if (method === 'saldo' && amount > 0) {
+            const person = res.persons.find(p => p.id === personId);
+            if (person?.profileId) {
+              const { data: profile } = await supabase.from('profiles').select('credit_balance').eq('id', person.profileId).single();
+              const currentBalance = Number(profile?.credit_balance || 0);
+              await supabase.from('profiles').update({ credit_balance: Math.max(0, currentBalance - amount) }).eq('id', person.profileId);
+            }
+          }
+
+          if (amount > 0) {
+            await createPayment({
+              reservation_type: 'enrollment',
+              reference_id: bonoId,
+              amount,
+              payment_method: method,
+              concept: `Ampliación bono ${TYPE_LABELS[classType] || classType} (+${extra})`,
+            });
+          }
+
+          // Update local state so renderDetail refleje cambios sin recargar
+          bono.total_credits = newTotalCredits;
+          bono.totalPaidReal = newTotalPaid;
+          bono.expectedPrice = getPackPrice(classType, newTotalCredits, fallbackPerSession);
+          bono.pendingAmount = Math.max(0, Math.round((bono.expectedPrice - newTotalPaid) * 100) / 100);
+          bono.isFullyPaid = bono.pendingAmount <= 0;
+
+          modal.remove();
+          showToast(`Bono ampliado: +${extra} clases · ${amount.toFixed(2)}€ cobrado`, 'success');
+          renderDetail();
+          if (overlayRef) bindDetailEvents(overlayRef, res);
+        } catch (err) {
+          console.error('Error ampliando bono:', err);
+          showToast('Error: ' + (err.message || 'No se pudo ampliar'), 'error');
+          submitBtn.disabled = false; submitBtn.textContent = 'Ampliar y registrar pago';
         }
       });
     }
