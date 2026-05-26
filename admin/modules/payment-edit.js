@@ -1,8 +1,23 @@
 /* ============================================================
    Modal de edición de pago — reutilizable
    ============================================================ */
-import { updatePayment } from './api.js';
+import { updatePayment as updatePaymentBase } from './api.js';
 import { showToast } from './ui.js';
+import { supabase } from '/lib/supabase.js';
+
+// Wrapper local: permite también editar el channel.
+// La versión de api.js solo deja método/fecha/concepto por seguridad,
+// pero desde este modal necesitamos también channel (ej: transferencia
+// desde casa = channel 'web' aunque no haya pasado por Stripe).
+async function updatePayment(id, patch) {
+  const allowed = {};
+  ['payment_method', 'payment_date', 'concept', 'channel'].forEach(k => {
+    if (patch[k] !== undefined) allowed[k] = patch[k];
+  });
+  if (!Object.keys(allowed).length) return;
+  const { error } = await supabase.from('payments').update(allowed).eq('id', id);
+  if (error) throw error;
+}
 
 const esc = (s) => s == null ? '' : String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -27,13 +42,18 @@ function toDatetimeLocalValue(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const CHANNEL_OPTIONS = [
+  { v: 'in_person', l: 'Manual / presencial (caja, transferencia, etc.)' },
+  { v: 'web',       l: 'Web (Stripe automático)' },
+];
+
+function methodsForChannel(channel) {
+  return [...(METHODS_BY_CHANNEL[channel] || METHODS_BY_CHANNEL.in_person)];
+}
+
 export function openPaymentEditModal(payment, { onSaved } = {}) {
-  const channel = payment.channel || 'in_person';
-  const methods = METHODS_BY_CHANNEL[channel] || METHODS_BY_CHANNEL.in_person;
-  // Si el método actual no está en la lista del canal, añadirlo al principio
-  if (!methods.find(m => m.v === payment.payment_method)) {
-    methods.unshift({ v: payment.payment_method, l: payment.payment_method });
-  }
+  let currentChannel = payment.channel || 'in_person';
+  let currentMethod  = payment.payment_method;
 
   const modal = document.createElement('div');
   modal.id = 'payment-edit-modal';
@@ -44,7 +64,7 @@ export function openPaymentEditModal(payment, { onSaved } = {}) {
         display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);
       }
       .pe-dialog {
-        background:#fffdf7;width:min(420px,calc(100% - 32px));max-height:90vh;overflow-y:auto;
+        background:#fffdf7;width:min(440px,calc(100% - 32px));max-height:90vh;overflow-y:auto;
         border-radius:14px;box-shadow:0 24px 64px rgba(15,47,57,.25);
         animation:peIn .2s cubic-bezier(.22,1,.36,1);
       }
@@ -74,6 +94,7 @@ export function openPaymentEditModal(payment, { onSaved } = {}) {
       .pe-save:disabled { opacity:.6;cursor:not-allowed; }
       .pe-info { font-size:.78rem;color:#6b7280;background:#f9fafb;padding:9px 11px;border-radius:8px;border:1px solid #e5e7eb; }
       .pe-info strong { color:#0f2f39; }
+      .pe-hint { font-size:.72rem;color:#6b7280;margin-top:-2px; }
     </style>
     <div class="pe-dialog">
       <div class="pe-head">
@@ -82,15 +103,20 @@ export function openPaymentEditModal(payment, { onSaved } = {}) {
       </div>
       <form class="pe-body">
         <div class="pe-info">
-          <div><strong>Canal:</strong> ${channel === 'web' ? 'Web (Stripe)' : 'Presencial (playa)'}</div>
-          <div><strong>Importe:</strong> ${formatAmount(payment.amount)} <em style="color:#6b7280">(no editable)</em></div>
+          <strong>Importe:</strong> ${formatAmount(payment.amount)} <em style="color:#6b7280">(no editable; bórralo y crea otro si necesitas cambiarlo)</em>
+        </div>
+
+        <div class="pe-row">
+          <label>Canal</label>
+          <select id="pe-channel">
+            ${CHANNEL_OPTIONS.map(c => `<option value="${esc(c.v)}" ${c.v === currentChannel ? 'selected' : ''}>${esc(c.l)}</option>`).join('')}
+          </select>
+          <span class="pe-hint">Usa "Manual" si lo cobraste tú (en playa, transferencia desde casa, voucher, etc.). "Web" solo para pagos automáticos por Stripe.</span>
         </div>
 
         <div class="pe-row">
           <label>Método de pago</label>
-          <select id="pe-method">
-            ${methods.map(m => `<option value="${esc(m.v)}" ${m.v === payment.payment_method ? 'selected' : ''}>${esc(m.l)}</option>`).join('')}
-          </select>
+          <select id="pe-method"></select>
         </div>
 
         <div class="pe-row">
@@ -100,7 +126,7 @@ export function openPaymentEditModal(payment, { onSaved } = {}) {
 
         <div class="pe-row">
           <label>Concepto (opcional)</label>
-          <input type="text" id="pe-concept" value="${esc(payment.concept || '')}" placeholder="Ej: Resto surf camp pagado en mano" />
+          <input type="text" id="pe-concept" value="${esc(payment.concept || '')}" placeholder="Ej: Resto surf camp pagado por transferencia" />
         </div>
 
         <button type="submit" class="pe-save">Guardar cambios</button>
@@ -113,18 +139,39 @@ export function openPaymentEditModal(payment, { onSaved } = {}) {
   modal.querySelector('.pe-close').addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
+  const channelSel = modal.querySelector('#pe-channel');
+  const methodSel = modal.querySelector('#pe-method');
+
+  function refreshMethods() {
+    const methods = methodsForChannel(currentChannel);
+    if (!methods.find(m => m.v === currentMethod)) {
+      methods.unshift({ v: currentMethod, l: currentMethod });
+    }
+    methodSel.innerHTML = methods.map(m => `<option value="${esc(m.v)}" ${m.v === currentMethod ? 'selected' : ''}>${esc(m.l)}</option>`).join('');
+  }
+  refreshMethods();
+
+  channelSel.addEventListener('change', (e) => {
+    currentChannel = e.target.value;
+    // Si el método actual no encaja con el canal nuevo, intenta uno por defecto
+    const fits = methodsForChannel(currentChannel).find(m => m.v === currentMethod);
+    if (!fits) currentMethod = methodsForChannel(currentChannel)[0]?.v || currentMethod;
+    refreshMethods();
+  });
+  methodSel.addEventListener('change', (e) => { currentMethod = e.target.value; });
+
   modal.querySelector('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = modal.querySelector('.pe-save');
     btn.disabled = true; btn.textContent = 'Guardando…';
     try {
-      const method = modal.querySelector('#pe-method').value;
       const dateLocal = modal.querySelector('#pe-date').value;
       const concept = modal.querySelector('#pe-concept').value.trim();
       const payment_date = dateLocal ? new Date(dateLocal).toISOString() : undefined;
 
       await updatePayment(payment.id, {
-        payment_method: method,
+        channel: currentChannel,
+        payment_method: currentMethod,
         payment_date,
         concept: concept || null,
       });
