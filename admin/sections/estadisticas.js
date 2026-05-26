@@ -4,8 +4,9 @@
 import {
   fetchPaymentsFiltered,
   fetchPendingBookings, fetchPendingRentals, fetchPendingOrders, fetchPendingBonos,
+  deletePayment, deleteReservationFully,
 } from '../modules/api.js';
-import { formatCurrency } from '../modules/ui.js';
+import { formatCurrency, showToast } from '../modules/ui.js';
 
 const esc = (s) => s == null ? '' : String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -328,11 +329,12 @@ export async function renderEstadisticas(container) {
                     <th class="estad-num">Pagado</th>
                     <th class="estad-num estad-pending-col">Pendiente</th>
                     <th>Estado</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   ${sec.arr.map(r => `
-                    <tr>
+                    <tr data-rid="${esc(r.id)}" data-entity="${esc(sec.key)}">
                       <td>${esc(r.client)}</td>
                       <td>
                         ${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ''}
@@ -344,6 +346,11 @@ export async function renderEstadisticas(container) {
                       <td class="estad-num">${formatCurrency(r.paid)}</td>
                       <td class="estad-num estad-pending-col"><strong>${formatCurrency(r.pending)}</strong></td>
                       <td>${esc(r.status)}</td>
+                      <td>
+                        <button class="estad-icon-btn estad-icon-danger" data-del-reservation="${esc(r.id)}" data-entity="${esc(sec.key)}" title="Eliminar reserva">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        </button>
+                      </td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -352,6 +359,22 @@ export async function renderEstadisticas(container) {
           </div>
         `).join('')}
       `;
+
+      body.querySelectorAll('[data-del-reservation]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.delReservation;
+          const entity = btn.dataset.entity;
+          const labelByEntity = { booking: 'reserva de surf camp', rental: 'alquiler', order: 'pedido', bono: 'bono' };
+          if (!confirm(`¿Eliminar ${labelByEntity[entity] || 'reserva'} y todos sus pagos asociados? No se puede deshacer.`)) return;
+          try {
+            await deleteReservationFully(entity, id);
+            showToast('Eliminado correctamente', 'success');
+            await renderPendienteBody();
+          } catch (err) {
+            showToast('Error: ' + err.message, 'error');
+          }
+        });
+      });
     }
   }
 
@@ -411,24 +434,44 @@ export async function renderEstadisticas(container) {
                 <th>Método</th>
                 <th>Tipo</th>
                 <th class="estad-num">Importe</th>
-                <th>Concepto / Notas</th>
+                <th>Concepto</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               ${payments.map(p => `
-                <tr>
+                <tr data-pid="${esc(p.id)}">
                   <td>${esc(fmtDateTime(p.payment_date))}</td>
                   <td><span class="estad-chip estad-chip-${p.channel || 'in_person'}">${esc(CHANNEL_LABELS[p.channel] || p.channel || '—')}</span></td>
                   <td>${esc(METHOD_LABELS[p.payment_method] || p.payment_method || '—')}</td>
                   <td>${esc(TYPE_LABELS[p.reservation_type] || p.reservation_type || '—')}</td>
                   <td class="estad-num"><strong>${formatCurrency(p.amount)}</strong></td>
-                  <td><small>${esc(p.concept || p.notes || '')}</small></td>
+                  <td><small>${esc(p.concept || '')}</small></td>
+                  <td>
+                    <button class="estad-icon-btn estad-icon-danger" data-del-payment="${esc(p.id)}" title="Eliminar pago">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    </button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
         </div>
       `;
+
+      body.querySelectorAll('[data-del-payment]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.delPayment;
+          if (!confirm('¿Eliminar este pago? La acción no se puede deshacer.')) return;
+          try {
+            await deletePayment(id);
+            showToast('Pago eliminado', 'success');
+            await renderDetalleBody();
+          } catch (err) {
+            showToast('Error: ' + err.message, 'error');
+          }
+        });
+      });
     }
   }
 

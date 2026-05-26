@@ -170,6 +170,37 @@ export async function fetchDashboardOperational() {
   return { todayClasses, todayEnrollments, activeRentals, upcomingClasses, upcomingRentals, upcomingCamps };
 }
 
+// ---- Eliminar reservas (con sus pagos asociados) ----
+const ENTITY_TABLE = {
+  booking: 'bookings',
+  rental: 'equipment_reservations',
+  order: 'orders',
+  bono: 'bonos',
+};
+const ENTITY_PAYMENT_TYPE = {
+  booking: 'booking',
+  rental: 'rental',
+  order: 'order',
+  bono: ['bono', 'enrollment'], // pagos del bono pueden estar como 'enrollment'
+};
+
+export async function deleteReservationFully(entity, id) {
+  const table = ENTITY_TABLE[entity];
+  if (!table) throw new Error(`Entidad desconocida: ${entity}`);
+
+  // 1) borrar payments asociados (no hay FK, hay que hacerlo a mano)
+  const types = ENTITY_PAYMENT_TYPE[entity];
+  if (Array.isArray(types)) {
+    await supabase.from('payments').delete().in('reservation_type', types).eq('reference_id', id);
+  } else {
+    await supabase.from('payments').delete().eq('reservation_type', types).eq('reference_id', id);
+  }
+
+  // 2) borrar la reserva en sí
+  const { error } = await supabase.from(table).delete().eq('id', id);
+  if (error) throw error;
+}
+
 // ---- Pagos con filtros (channel, método, tipo, rango) ----
 export async function fetchPaymentsFiltered({ dateFrom, dateTo, channel, paymentMethod, reservationType } = {}) {
   let q = supabase.from('payments')

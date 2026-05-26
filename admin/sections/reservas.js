@@ -404,51 +404,100 @@ export async function renderReservas(container) {
       { v: 'tarjeta', l: 'Tarjeta (TPV en playa)' },
       { v: 'transferencia', l: 'Transferencia' },
     ];
-    openModal(`Cobrar resto · ${formatCurrency(pending)}`, `
-      <div class="trip-form">
-        <label>Cliente</label>
-        <input type="text" value="${esc(booking.profiles?.full_name || '—')}" disabled />
 
-        <label>Camp</label>
-        <input type="text" value="${esc(booking.surf_camps?.title || '—')}" disabled />
-
-        <label>Importe a cobrar</label>
-        <input type="number" id="cr-amount" value="${pending}" step="0.01" min="0.01" />
-
-        <label>Método de pago</label>
-        <select id="cr-method">
-          ${METHODS.map(m => `<option value="${m.v}">${m.l}</option>`).join('')}
-        </select>
-
-        <label>Notas (opcional)</label>
-        <input type="text" id="cr-notes" placeholder="Ej: pagado en mano el día 1" />
-
-        <button class="btn red" id="cr-save" style="margin-top:14px;background:#22c55e">Registrar cobro</button>
+    // Modal inline con z-index encima de la ficha (10001 > 9999)
+    const modal = document.createElement('div');
+    modal.id = 'rv-collect-modal';
+    modal.innerHTML = `
+      <style>
+        #rv-collect-modal {
+          position:fixed;inset:0;z-index:10001;background:rgba(15,47,57,.55);
+          display:flex;align-items:center;justify-content:center;
+          backdrop-filter:blur(2px);overscroll-behavior:contain;
+        }
+        .rv-collect-dialog {
+          background:#fffdf7;width:min(420px,calc(100% - 32px));max-height:90vh;overflow-y:auto;
+          border-radius:14px;box-shadow:0 24px 64px rgba(15,47,57,.25);
+          animation:rvCollectIn .2s cubic-bezier(.22,1,.36,1);
+        }
+        @keyframes rvCollectIn { from { transform:scale(.96);opacity:0 } to { transform:scale(1);opacity:1 } }
+        .rv-collect-head {
+          display:flex;align-items:center;justify-content:space-between;
+          padding:18px 22px;border-bottom:1px solid #e5e7eb;
+        }
+        .rv-collect-head h3 { margin:0;font-family:'Space Grotesk',sans-serif;color:#0f2f39;font-size:1.05rem; }
+        .rv-collect-close {
+          width:30px;height:30px;border-radius:50%;border:0;background:#f3f4f6;cursor:pointer;
+          font-size:1.1rem;color:#6b7280;display:flex;align-items:center;justify-content:center;
+        }
+        .rv-collect-body { padding:18px 22px 22px;display:flex;flex-direction:column;gap:12px; }
+        .rv-collect-body label { font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280; }
+        .rv-collect-body input, .rv-collect-body select {
+          background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:9px 12px;
+          font-family:'Space Grotesk',sans-serif;font-size:.92rem;color:#0f2f39;width:100%;
+        }
+        .rv-collect-body input:disabled { background:#f9fafb;color:#6b7280; }
+        .rv-collect-row { display:flex;flex-direction:column;gap:4px; }
+        .rv-collect-save {
+          margin-top:6px;background:#22c55e;color:#fff;border:0;border-radius:999px;
+          padding:12px 22px;font-family:'Space Grotesk',sans-serif;font-weight:700;
+          font-size:.92rem;cursor:pointer;width:100%;
+        }
+        .rv-collect-save:hover { background:#16a34a; }
+        .rv-collect-save:disabled { opacity:.6;cursor:not-allowed; }
+      </style>
+      <div class="rv-collect-dialog">
+        <div class="rv-collect-head">
+          <h3>Cobrar resto · ${formatCurrency(pending)}</h3>
+          <button class="rv-collect-close" type="button">&times;</button>
+        </div>
+        <form class="rv-collect-body">
+          <div class="rv-collect-row">
+            <label>Cliente</label>
+            <input type="text" value="${esc(booking.profiles?.full_name || '—')}" disabled />
+          </div>
+          <div class="rv-collect-row">
+            <label>Camp</label>
+            <input type="text" value="${esc(booking.surf_camps?.title || '—')}" disabled />
+          </div>
+          <div class="rv-collect-row">
+            <label>Importe a cobrar</label>
+            <input type="number" id="cr-amount" value="${pending}" step="0.01" min="0.01" />
+          </div>
+          <div class="rv-collect-row">
+            <label>Método de pago</label>
+            <select id="cr-method">
+              ${METHODS.map(m => `<option value="${m.v}">${m.l}</option>`).join('')}
+            </select>
+          </div>
+          <button type="submit" class="rv-collect-save">Registrar cobro</button>
+        </form>
       </div>
-    `);
+    `;
+    document.body.appendChild(modal);
 
-    document.getElementById('cr-save').addEventListener('click', async () => {
-      const btn = document.getElementById('cr-save');
-      const amount = parseFloat(document.getElementById('cr-amount').value) || 0;
-      const method = document.getElementById('cr-method').value;
-      const notes  = document.getElementById('cr-notes').value.trim();
+    const close = () => modal.remove();
+    modal.querySelector('.rv-collect-close').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+    modal.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = modal.querySelector('.rv-collect-save');
+      const amount = parseFloat(modal.querySelector('#cr-amount').value) || 0;
+      const method = modal.querySelector('#cr-method').value;
       if (amount <= 0) { showToast('Importe inválido', 'error'); return; }
 
       btn.disabled = true; btn.textContent = 'Procesando…';
       try {
-        // 1) Insertar payment
         await createPayment({
-          user_id: booking.user_id,
           amount,
           payment_method: method,
           channel: 'in_person',
           reservation_type: 'booking',
           reference_id: booking.id,
           concept: `Resto surf camp ${booking.surf_camps?.title || ''}`.trim(),
-          notes: notes || null,
         });
 
-        // 2) Actualizar booking
         const newDeposit = Math.min(
           Number(booking.deposit_amount || 0) + amount,
           Number(booking.total_amount || 0)
@@ -460,7 +509,8 @@ export async function renderReservas(container) {
           updated_at: new Date().toISOString(),
         }).eq('id', booking.id);
 
-        closeModal();
+        close();
+        closeFicha();
         showToast(`Cobro de ${formatCurrency(amount)} registrado`, 'success');
         render();
       } catch (err) {
@@ -471,7 +521,14 @@ export async function renderReservas(container) {
   }
 
   function openStatusModal(booking) {
-    const options = STATUSES.map(s =>
+    const totalAmount = Number(booking.total_amount || 0);
+    const depositPaid = Number(booking.deposit_amount || 0);
+    const stillOwes   = totalAmount - depositPaid > 0;
+
+    // Si todavía debe dinero, no se puede marcar fully_paid manualmente:
+    // hay que pasar por "Cobrar resto" para registrar el método de pago.
+    const visibleStatuses = STATUSES.filter(s => !(s === 'fully_paid' && stillOwes));
+    const options = visibleStatuses.map(s =>
       `<option value="${s}" ${booking.status === s ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`
     ).join('');
 
@@ -485,6 +542,7 @@ export async function renderReservas(container) {
         <input type="text" value="${formatCurrency(booking.total_amount)}" disabled />
         <label>Nuevo Estado</label>
         <select id="modal-status">${options}</select>
+        ${stillOwes ? '<p style="font-size:.78rem;color:#92400e;margin:4px 0 0;background:#fef3c7;padding:8px 10px;border-radius:6px">Para marcar como pagado completamente, usa el botón verde <strong>Cobrar resto</strong> en la ficha y registra cómo se cobró.</p>' : ''}
         <button class="btn red" id="modal-save" style="margin-top:12px">Guardar</button>
       </div>
     `);

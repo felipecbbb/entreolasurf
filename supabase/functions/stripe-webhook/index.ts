@@ -98,12 +98,12 @@ Deno.serve(async (req) => {
       // Acumula los payments a insertar: uno por cada item (camp/bono/rental) más
       // uno tipo 'order' para los productos físicos.
       const paymentRows: any[] = [];
+      // NOTE: la tabla payments NO tiene columnas user_id ni notes;
+      // referencia se hace por (reservation_type, reference_id).
       const paymentsBase = {
-        user_id: userId,
         payment_method: "online",
         channel: "web",
         payment_date: new Date().toISOString(),
-        notes: `Stripe session: ${session.id}`,
       };
 
       // ---- Process CAMP reservations ----
