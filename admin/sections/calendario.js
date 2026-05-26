@@ -28,6 +28,10 @@ function getPackPrice(type, sessionCount, fallbackPrice = 0) {
   return maxPrice + (sessionCount - maxTier) * perSession;
 }
 
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
 const DAY_NAMES_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const DAY_NAMES_SHORT = ['Dom.', 'Lun.', 'Mar.', 'Mié.', 'Jue.', 'Vie.', 'Sáb.'];
 const MONTH_NAMES = ['Ene.', 'Feb.', 'Mar.', 'Abr.', 'May.', 'Jun.', 'Jul.', 'Ago.', 'Sep.', 'Oct.', 'Nov.', 'Dic.'];
@@ -314,9 +318,9 @@ export async function renderCalendario(container) {
             </span>
           </div>
         </div>
-        <div class="cal-session-notes-row" data-id="${c.id}">
+        <div class="cal-session-notes-row${c.notes ? ' has-note' : ''}" data-id="${c.id}" title="${c.notes ? 'Editar nota' : 'Añadir nota'}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="14" y2="12"/></svg>
-          <span>Añadir notas de sesión</span>
+          <span class="cal-session-notes-text">${c.notes ? escapeHtml(c.notes) : 'Añadir notas de sesión'}</span>
         </div>
         <div class="cal-clients-list" data-class-id="${c.id}">
           ${clientsHtml}
@@ -534,6 +538,16 @@ export async function renderCalendario(container) {
         if (!id) return;
         const cls = classes.find(c => c.id === id);
         if (cls) await showEnrollments(cls);
+      });
+    });
+
+    // Session notes row → open editor
+    container.querySelectorAll('.cal-session-notes-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = row.dataset.id;
+        const cls = classes.find(c => c.id === id);
+        if (cls) openSessionNotesEditor(cls);
       });
     });
 
@@ -3721,6 +3735,58 @@ export async function renderCalendario(container) {
   }
 
   // ======== NEW SESSION MODAL ========
+  function openSessionNotesEditor(cls) {
+    const title = TYPE_LABELS[cls.type] || cls.title || 'Sesión';
+    const timeLabel = `${cls.time_start?.slice(0, 5) || ''}${cls.time_end ? ` - ${cls.time_end.slice(0, 5)}` : ''}`;
+    openModal('Notas de sesión', `
+      <div style="margin-bottom:12px;color:#6b7280;font-size:.85rem">${title} · ${timeLabel}</div>
+      <textarea id="session-notes-textarea" rows="6"
+        style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;font:inherit;resize:vertical"
+        placeholder="Escribe aquí notas sobre la sesión (condiciones del mar, incidencias, observaciones del grupo…)">${escapeHtml(cls.notes || '')}</textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        ${cls.notes ? '<button id="session-notes-delete" class="btn" style="background:#fee2e2;color:#b91c1c">Eliminar</button>' : ''}
+        <button id="session-notes-cancel" class="btn">Cancelar</button>
+        <button id="session-notes-save" class="btn red">Guardar</button>
+      </div>
+    `);
+
+    const textarea = document.getElementById('session-notes-textarea');
+    textarea?.focus();
+
+    document.getElementById('session-notes-cancel')?.addEventListener('click', () => closeModal());
+
+    document.getElementById('session-notes-save')?.addEventListener('click', async () => {
+      const newNotes = textarea.value.trim();
+      try {
+        const { error } = await supabase
+          .from('surf_classes')
+          .update({ notes: newNotes || null })
+          .eq('id', cls.id);
+        if (error) throw error;
+        showToast('Nota guardada', 'success');
+        closeModal();
+        render();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
+    });
+
+    document.getElementById('session-notes-delete')?.addEventListener('click', async () => {
+      try {
+        const { error } = await supabase
+          .from('surf_classes')
+          .update({ notes: null })
+          .eq('id', cls.id);
+        if (error) throw error;
+        showToast('Nota eliminada', 'success');
+        closeModal();
+        render();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
+    });
+  }
+
   function openNewSessionModal() {
     const dateStr = getDateStr(currentDate);
     const typeOptions = Object.entries(TYPE_LABELS)
