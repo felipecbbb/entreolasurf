@@ -7150,3 +7150,50 @@ a.admin-nav-item-external .nav-icon svg {
 }
 .estad-icon-btn:hover { background: #fafafa; }
 .estad-icon-danger:hover { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+
+/* Estadísticas v2 — KPI clicables, celdas drill-down, panel drill */
+.estad-kpi-clickable { cursor: pointer; transition: transform .15s ease, border-color .15s ease; }
+.estad-kpi-clickable:hover { transform: translateY(-2px); border-color: var(--color-navy); }
+.estad-kpi-clickable .estad-kpi-sub::after { content: ''; }
+
+.estad-matrix .estad-cell-clickable {
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background .15s ease;
+}
+.estad-matrix .estad-cell-clickable:hover { background: #fef9e7; }
+.estad-cell-count {
+  display: block;
+  font-size: .68rem;
+  color: var(--color-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.estad-bar-item[data-drill] { cursor: pointer; padding: 4px; margin: -4px; border-radius: 6px; transition: background .15s ease; }
+.estad-bar-item[data-drill]:hover { background: #fef9e7; }
+
+.estad-drill {
+  margin-top: 18px;
+  background: #fff;
+  border: 1px solid var(--color-line, #d7d0c2);
+  border-radius: 12px;
+  padding: 16px;
+  animation: estadDrillIn .2s ease-out;
+}
+@keyframes estadDrillIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.estad-drill-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-line, #d7d0c2);
+}
+.estad-drill-head h4 { margin: 0; font-family: 'Space Grotesk', sans-serif; color: var(--color-navy); font-size: 1rem; }
+.estad-drill-head small { color: var(--color-muted); font-weight: 500; font-size: .8rem; margin-left: 6px; }
+.estad-drill-close {
+  width: 28px; height: 28px; border: 0; background: #f3f4f6; border-radius: 50%;
+  cursor: pointer; font-size: 1.1rem; color: var(--color-muted);
+  display: flex; align-items: center; justify-content: center;
+}
+.estad-drill-close:hover { background: #e5e7eb; color: var(--color-navy); }

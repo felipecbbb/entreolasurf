@@ -216,6 +216,70 @@ export async function fetchPaymentsFiltered({ dateFrom, dateTo, channel, payment
   return data || [];
 }
 
+// Mapa de cómo obtener el cliente para cada reservation_type.
+// payments no tiene user_id → hay que ir a la tabla origen por reference_id.
+const PAYMENT_CLIENT_SOURCES = {
+  booking:    { table: 'bookings',                userCol: 'user_id', guestCol: 'guest_name' },
+  rental:     { table: 'equipment_reservations',  userCol: 'user_id', guestCol: 'guest_name' },
+  order:      { table: 'orders',                  userCol: 'user_id', guestCol: null },
+  bono:       { table: 'bonos',                   userCol: 'user_id', guestCol: null },
+  enrollment: { table: 'class_enrollments',       userCol: 'user_id', guestCol: 'guest_name' },
+};
+
+// Enriquece una lista de payments con client_name y client_email.
+// Hace queries en bulk: una por tabla origen + una a profiles.
+export async function enrichPaymentsWithClient(payments) {
+  if (!payments?.length) return [];
+
+  // Agrupa references por reservation_type
+  const byType = {};
+  payments.forEach(p => {
+    const t = p.reservation_type;
+    if (!PAYMENT_CLIENT_SOURCES[t]) return;
+    (byType[t] = byType[t] || new Set()).add(p.reference_id);
+  });
+
+  // ref_id → { client_name, client_email }
+  const clientByRef = {};
+  const userIdsToFetch = new Set();
+  const guestByRef = {}; // ref_id → guest_name (cuando no hay user_id)
+
+  await Promise.all(Object.entries(byType).map(async ([type, refIds]) => {
+    const cfg = PAYMENT_CLIENT_SOURCES[type];
+    const cols = ['id', cfg.userCol, cfg.guestCol].filter(Boolean).join(', ');
+    const { data } = await supabase.from(cfg.table).select(cols).in('id', [...refIds]);
+    (data || []).forEach(row => {
+      if (row[cfg.userCol]) {
+        userIdsToFetch.add(row[cfg.userCol]);
+        clientByRef[row.id] = { user_id: row[cfg.userCol] };
+      } else if (cfg.guestCol && row[cfg.guestCol]) {
+        guestByRef[row.id] = row[cfg.guestCol];
+      }
+    });
+  }));
+
+  // Profiles bulk
+  let profilesById = {};
+  if (userIdsToFetch.size) {
+    const { data } = await supabase.from('profiles')
+      .select('id, full_name, email')
+      .in('id', [...userIdsToFetch]);
+    (data || []).forEach(p => { profilesById[p.id] = p; });
+  }
+
+  return payments.map(p => {
+    const ref = clientByRef[p.reference_id];
+    if (ref) {
+      const prof = profilesById[ref.user_id];
+      return { ...p, client_name: prof?.full_name || 'Cliente', client_email: prof?.email || null };
+    }
+    if (guestByRef[p.reference_id]) {
+      return { ...p, client_name: guestByRef[p.reference_id], client_email: null };
+    }
+    return { ...p, client_name: '—', client_email: null };
+  });
+}
+
 // ---- Pendientes de cobro por entidad ----
 // Devuelve por entidad: { id, client, total, paid, pending, status, created_at, meta }
 async function _profilesById(ids) {

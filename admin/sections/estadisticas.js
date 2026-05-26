@@ -1,8 +1,10 @@
 /* ============================================================
-   Estadísticas — Tabs: Resumen · Cobrado · Pendiente · Detalle
+   Estadísticas — Tabs: Resumen · Cobrado · Pendiente
+   Cobrado/Resumen: cifras clicables → drill-down con clientes.
    ============================================================ */
 import {
   fetchPaymentsFiltered,
+  enrichPaymentsWithClient,
   fetchPendingBookings, fetchPendingRentals, fetchPendingOrders, fetchPendingBonos,
   deletePayment, deleteReservationFully,
 } from '../modules/api.js';
@@ -28,7 +30,7 @@ const ENTITY_LABELS = {
 };
 
 function pad(n) { return String(n).padStart(2, '0'); }
-function fmt(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function fmtYMD(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
 function fmtDate(s) {
   if (!s) return '—';
   return new Date(s).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' });
@@ -46,21 +48,21 @@ function saveState(s) { localStorage.setItem('eos_estad_state', JSON.stringify(s
 function defaultDates() {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  return { from: fmt(monthStart), to: fmt(now) };
+  return { from: fmtYMD(monthStart), to: fmtYMD(now) };
 }
 
 const TABS = [
   { id: 'resumen',   label: 'Resumen' },
   { id: 'cobrado',   label: 'Cobrado' },
   { id: 'pendiente', label: 'Pendiente' },
-  { id: 'detalle',   label: 'Detalle' },
 ];
 
 export async function renderEstadisticas(container) {
   const saved = loadState();
   const defaults = defaultDates();
+  const validTabIds = TABS.map(t => t.id);
   const state = {
-    tab:        saved.tab        || 'resumen',
+    tab:        validTabIds.includes(saved.tab) ? saved.tab : 'resumen',
     dateFrom:   saved.dateFrom   || defaults.from,
     dateTo:     saved.dateTo     || defaults.to,
     channel:    saved.channel    || 'all',
@@ -70,6 +72,25 @@ export async function renderEstadisticas(container) {
   };
 
   function persist() { saveState(state); }
+
+  // Cache de pagos enriquecidos por rango+filtros para evitar re-fetch en drill-down
+  let cachedFiltered = null;
+  let cachedEnriched = null;
+  let cachedKey = '';
+
+  async function fetchAndEnrich() {
+    const key = JSON.stringify({ f: state.dateFrom, t: state.dateTo, c: state.channel, m: state.method, ty: state.type });
+    if (cachedKey === key && cachedEnriched) return cachedEnriched;
+    cachedFiltered = await fetchPaymentsFiltered({
+      dateFrom: state.dateFrom, dateTo: state.dateTo,
+      channel: state.channel, paymentMethod: state.method, reservationType: state.type,
+    });
+    cachedEnriched = await enrichPaymentsWithClient(cachedFiltered);
+    cachedKey = key;
+    return cachedEnriched;
+  }
+
+  function invalidateCache() { cachedKey = ''; cachedEnriched = null; }
 
   async function renderShell() {
     container.innerHTML = `
@@ -95,9 +116,7 @@ export async function renderEstadisticas(container) {
       </div>
 
       <div class="estad-tab-content" id="estad-content">
-        <div class="admin-skeleton" style="padding:24px 0">
-          <div class="admin-skeleton-row"><div class="admin-skeleton-block w-full h-card"></div><div class="admin-skeleton-block w-full h-card"></div></div>
-        </div>
+        <div class="estad-loading">Cargando…</div>
       </div>
     `;
 
@@ -110,8 +129,8 @@ export async function renderEstadisticas(container) {
       });
     });
 
-    container.querySelector('#estad-from').addEventListener('change', (e) => { state.dateFrom = e.target.value; persist(); renderTab(); });
-    container.querySelector('#estad-to').addEventListener('change',   (e) => { state.dateTo   = e.target.value; persist(); renderTab(); });
+    container.querySelector('#estad-from').addEventListener('change', (e) => { state.dateFrom = e.target.value; invalidateCache(); persist(); renderTab(); });
+    container.querySelector('#estad-to').addEventListener('change',   (e) => { state.dateTo   = e.target.value; invalidateCache(); persist(); renderTab(); });
 
     container.querySelectorAll('.estad-preset-btn').forEach(b => {
       b.addEventListener('click', () => {
@@ -119,7 +138,7 @@ export async function renderEstadisticas(container) {
         state.dateFrom = d.from; state.dateTo = d.to;
         container.querySelector('#estad-from').value = d.from;
         container.querySelector('#estad-to').value = d.to;
-        persist(); renderTab();
+        invalidateCache(); persist(); renderTab();
       });
     });
 
@@ -133,15 +152,17 @@ export async function renderEstadisticas(container) {
       if (state.tab === 'resumen')   await renderResumen(content);
       if (state.tab === 'cobrado')   await renderCobrado(content);
       if (state.tab === 'pendiente') await renderPendiente(content);
-      if (state.tab === 'detalle')   await renderDetalle(content);
     } catch (err) {
       content.innerHTML = `<p style="color:#ef4444;padding:18px">Error: ${esc(err.message)}</p>`;
       console.error(err);
     }
   }
 
-  // ---------- RESUMEN ----------
+  // ============================================================
+  // RESUMEN
+  // ============================================================
   async function renderResumen(el) {
+    // Resumen usa la versión sin filtros de channel/method/type
     const payments = await fetchPaymentsFiltered({ dateFrom: state.dateFrom, dateTo: state.dateTo });
 
     const total = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -158,15 +179,15 @@ export async function renderEstadisticas(container) {
           <div class="estad-kpi-value">${formatCurrency(total)}</div>
           <div class="estad-kpi-sub">${txCount} transacciones · ticket medio ${formatCurrency(ticket)}</div>
         </div>
-        <div class="estad-kpi">
+        <div class="estad-kpi estad-kpi-clickable" data-drill="channel:web">
           <div class="estad-kpi-label">Web</div>
           <div class="estad-kpi-value">${formatCurrency(byCh.web)}</div>
-          <div class="estad-kpi-sub">${webPct}% del total</div>
+          <div class="estad-kpi-sub">${webPct}% del total · ver pagos →</div>
         </div>
-        <div class="estad-kpi">
+        <div class="estad-kpi estad-kpi-clickable" data-drill="channel:in_person">
           <div class="estad-kpi-label">Presencial (playa)</div>
           <div class="estad-kpi-value">${formatCurrency(byCh.in_person)}</div>
-          <div class="estad-kpi-sub">${100 - webPct}% del total</div>
+          <div class="estad-kpi-sub">${100 - webPct}% del total · ver pagos →</div>
         </div>
       </div>
 
@@ -179,10 +200,56 @@ export async function renderEstadisticas(container) {
         <h4>Reparto por tipo</h4>
         ${renderBreakdown(payments, 'reservation_type', TYPE_LABELS)}
       </div>
+
+      <div id="estad-resumen-drill"></div>
     `;
+
+    // KPI cards clicables → drill-down de canal
+    el.querySelectorAll('[data-drill]').forEach(card => {
+      card.addEventListener('click', async () => {
+        const [field, value] = card.dataset.drill.split(':');
+        await renderDrill(el.querySelector('#estad-resumen-drill'), field, value);
+      });
+    });
+
+    // Barras del breakdown clicables (data-drill="payment_method:efectivo", etc.)
+    el.querySelectorAll('.estad-bar-item[data-drill]').forEach(item => {
+      item.addEventListener('click', async () => {
+        const [field, value] = item.dataset.drill.split(':');
+        await renderDrill(el.querySelector('#estad-resumen-drill'), field, value);
+      });
+    });
   }
 
-  // ---------- COBRADO ----------
+  async function renderDrill(targetEl, field, value) {
+    targetEl.innerHTML = `<div class="estad-loading">Cargando pagos…</div>`;
+    const all = await fetchPaymentsFiltered({ dateFrom: state.dateFrom, dateTo: state.dateTo });
+    const filtered = all.filter(p => (p[field] || 'in_person') === value);
+    const enriched = await enrichPaymentsWithClient(filtered);
+
+    const labelMap = field === 'channel' ? CHANNEL_LABELS
+      : field === 'payment_method' ? METHOD_LABELS
+      : field === 'reservation_type' ? TYPE_LABELS : {};
+
+    const total = enriched.reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    targetEl.innerHTML = `
+      <div class="estad-drill">
+        <div class="estad-drill-head">
+          <h4>Pagos · ${esc(labelMap[value] || value)} <small>(${enriched.length} · ${formatCurrency(total)})</small></h4>
+          <button class="estad-drill-close" title="Cerrar">&times;</button>
+        </div>
+        ${enriched.length ? renderPaymentsTable(enriched) : '<p class="estad-empty">Sin pagos en esta categoría</p>'}
+      </div>
+    `;
+    targetEl.querySelector('.estad-drill-close').addEventListener('click', () => { targetEl.innerHTML = ''; });
+    bindPaymentRowActions(targetEl, () => renderDrill(targetEl, field, value));
+    targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ============================================================
+  // COBRADO
+  // ============================================================
   async function renderCobrado(el) {
     el.innerHTML = `
       <div class="estad-filters">
@@ -203,43 +270,41 @@ export async function renderEstadisticas(container) {
       <div id="estad-cobrado-body"><div class="estad-loading">Cargando…</div></div>
     `;
 
-    el.querySelector('#estad-f-channel').addEventListener('change', (e) => { state.channel = e.target.value; persist(); renderCobradoBody(); });
-    el.querySelector('#estad-f-method').addEventListener('change',  (e) => { state.method  = e.target.value; persist(); renderCobradoBody(); });
-    el.querySelector('#estad-f-type').addEventListener('change',    (e) => { state.type    = e.target.value; persist(); renderCobradoBody(); });
+    el.querySelector('#estad-f-channel').addEventListener('change', (e) => { state.channel = e.target.value; invalidateCache(); persist(); renderCobradoBody(); });
+    el.querySelector('#estad-f-method').addEventListener('change',  (e) => { state.method  = e.target.value; invalidateCache(); persist(); renderCobradoBody(); });
+    el.querySelector('#estad-f-type').addEventListener('change',    (e) => { state.type    = e.target.value; invalidateCache(); persist(); renderCobradoBody(); });
 
     await renderCobradoBody();
 
     async function renderCobradoBody() {
       const body = el.querySelector('#estad-cobrado-body');
       body.innerHTML = `<div class="estad-loading">Cargando…</div>`;
-      const payments = await fetchPaymentsFiltered({
-        dateFrom: state.dateFrom, dateTo: state.dateTo,
-        channel: state.channel, paymentMethod: state.method, reservationType: state.type,
-      });
+      const enriched = await fetchAndEnrich();
 
-      const total = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      const total = enriched.reduce((s, p) => s + Number(p.amount || 0), 0);
 
-      // Cruce channel × method
+      // Matriz channel × method
       const matrix = {};
-      payments.forEach(p => {
+      enriched.forEach(p => {
         const ch = p.channel || 'in_person';
         const mt = p.payment_method || 'otros';
         matrix[ch] = matrix[ch] || {};
-        matrix[ch][mt] = (matrix[ch][mt] || 0) + Number(p.amount || 0);
+        matrix[ch][mt] = (matrix[ch][mt] || []).concat(p);
       });
 
-      const methods = [...new Set(payments.map(p => p.payment_method))].filter(Boolean).sort();
+      const methods = [...new Set(enriched.map(p => p.payment_method))].filter(Boolean).sort();
+      const channels = Object.keys(matrix);
 
       body.innerHTML = `
         <div class="estad-total-card">
           <span class="estad-total-label">Total filtrado</span>
           <span class="estad-total-value">${formatCurrency(total)}</span>
-          <span class="estad-total-sub">${payments.length} transacciones</span>
+          <span class="estad-total-sub">${enriched.length} transacciones</span>
         </div>
 
         ${methods.length ? `
           <div class="estad-table-wrap">
-            <table class="estad-table">
+            <table class="estad-table estad-matrix">
               <thead>
                 <tr>
                   <th>Canal · Método</th>
@@ -248,25 +313,73 @@ export async function renderEstadisticas(container) {
                 </tr>
               </thead>
               <tbody>
-                ${Object.keys(matrix).map(ch => {
-                  const rowTotal = Object.values(matrix[ch]).reduce((s, v) => s + v, 0);
+                ${channels.map(ch => {
+                  const rowPayments = Object.values(matrix[ch]).flat();
+                  const rowTotal = rowPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
                   return `
                     <tr>
                       <td><strong>${esc(CHANNEL_LABELS[ch] || ch)}</strong></td>
-                      ${methods.map(m => `<td class="estad-num">${matrix[ch][m] ? formatCurrency(matrix[ch][m]) : '—'}</td>`).join('')}
-                      <td class="estad-num"><strong>${formatCurrency(rowTotal)}</strong></td>
+                      ${methods.map(m => {
+                        const cell = matrix[ch][m] || [];
+                        const cellTotal = cell.reduce((s, p) => s + Number(p.amount || 0), 0);
+                        if (!cell.length) return '<td class="estad-num">—</td>';
+                        return `<td class="estad-num estad-cell-clickable" data-ch="${esc(ch)}" data-mt="${esc(m)}">
+                          <strong>${formatCurrency(cellTotal)}</strong>
+                          <span class="estad-cell-count">${cell.length} pago${cell.length === 1 ? '' : 's'}</span>
+                        </td>`;
+                      }).join('')}
+                      <td class="estad-num estad-cell-clickable" data-ch="${esc(ch)}" data-mt="all">
+                        <strong>${formatCurrency(rowTotal)}</strong>
+                        <span class="estad-cell-count">${rowPayments.length} pago${rowPayments.length === 1 ? '' : 's'}</span>
+                      </td>
                     </tr>
                   `;
                 }).join('')}
               </tbody>
             </table>
           </div>
+
+          <div id="estad-cobrado-drill"></div>
         ` : `<p class="estad-empty">Sin pagos para los filtros aplicados</p>`}
       `;
+
+      body.querySelectorAll('.estad-cell-clickable').forEach(cell => {
+        cell.addEventListener('click', () => {
+          const ch = cell.dataset.ch;
+          const mt = cell.dataset.mt;
+          const subset = (matrix[ch] && (mt === 'all' ? Object.values(matrix[ch]).flat() : matrix[ch][mt])) || [];
+          const drillEl = body.querySelector('#estad-cobrado-drill');
+          renderCellDrill(drillEl, subset, ch, mt);
+          drillEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      });
+    }
+
+    function renderCellDrill(targetEl, payments, ch, mt) {
+      const total = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      const titleParts = [CHANNEL_LABELS[ch] || ch];
+      if (mt !== 'all') titleParts.push(METHOD_LABELS[mt] || mt);
+
+      targetEl.innerHTML = `
+        <div class="estad-drill">
+          <div class="estad-drill-head">
+            <h4>${esc(titleParts.join(' · '))} <small>(${payments.length} · ${formatCurrency(total)})</small></h4>
+            <button class="estad-drill-close" title="Cerrar">&times;</button>
+          </div>
+          ${payments.length ? renderPaymentsTable(payments) : '<p class="estad-empty">Sin pagos</p>'}
+        </div>
+      `;
+      targetEl.querySelector('.estad-drill-close').addEventListener('click', () => { targetEl.innerHTML = ''; });
+      bindPaymentRowActions(targetEl, () => {
+        invalidateCache();
+        renderCobrado(el);
+      });
     }
   }
 
-  // ---------- PENDIENTE ----------
+  // ============================================================
+  // PENDIENTE
+  // ============================================================
   async function renderPendiente(el) {
     el.innerHTML = `
       <div class="estad-filters">
@@ -378,104 +491,67 @@ export async function renderEstadisticas(container) {
     }
   }
 
-  // ---------- DETALLE ----------
-  async function renderDetalle(el) {
-    el.innerHTML = `
-      <div class="estad-filters">
-        ${filterSelect('estad-f-channel2', 'Canal', state.channel, [
-          { v: 'all', l: 'Web + Presencial' },
-          { v: 'web', l: 'Solo web' },
-          { v: 'in_person', l: 'Solo presencial' },
-        ])}
-        ${filterSelect('estad-f-method2', 'Método', state.method, [
-          { v: 'all', l: 'Todos los métodos' },
-          ...Object.entries(METHOD_LABELS).map(([v, l]) => ({ v, l })),
-        ])}
-        ${filterSelect('estad-f-type2', 'Tipo', state.type, [
-          { v: 'all', l: 'Todos los tipos' },
-          ...Object.entries(TYPE_LABELS).map(([v, l]) => ({ v, l })),
-        ])}
-      </div>
-      <div id="estad-detalle-body"><div class="estad-loading">Cargando…</div></div>
-    `;
-
-    el.querySelector('#estad-f-channel2').addEventListener('change', (e) => { state.channel = e.target.value; persist(); renderDetalleBody(); });
-    el.querySelector('#estad-f-method2').addEventListener('change',  (e) => { state.method  = e.target.value; persist(); renderDetalleBody(); });
-    el.querySelector('#estad-f-type2').addEventListener('change',    (e) => { state.type    = e.target.value; persist(); renderDetalleBody(); });
-
-    await renderDetalleBody();
-
-    async function renderDetalleBody() {
-      const body = el.querySelector('#estad-detalle-body');
-      body.innerHTML = `<div class="estad-loading">Cargando…</div>`;
-      const payments = await fetchPaymentsFiltered({
-        dateFrom: state.dateFrom, dateTo: state.dateTo,
-        channel: state.channel, paymentMethod: state.method, reservationType: state.type,
-      });
-
-      if (!payments.length) {
-        body.innerHTML = `<p class="estad-empty">Sin pagos para los filtros aplicados</p>`;
-        return;
-      }
-
-      const total = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-
-      body.innerHTML = `
-        <div class="estad-total-card">
-          <span class="estad-total-label">${payments.length} pagos · total</span>
-          <span class="estad-total-value">${formatCurrency(total)}</span>
-        </div>
-        <div class="estad-table-wrap">
-          <table class="estad-table">
-            <thead>
+  // ============================================================
+  // Helpers
+  // ============================================================
+  function renderPaymentsTable(payments) {
+    return `
+      <div class="estad-table-wrap">
+        <table class="estad-table">
+          <thead>
+            <tr>
+              <th>Cuándo</th>
+              <th>Cliente</th>
+              <th>Canal</th>
+              <th>Método</th>
+              <th>Tipo</th>
+              <th class="estad-num">Importe</th>
+              <th>Concepto</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${payments.map(p => `
               <tr>
-                <th>Fecha</th>
-                <th>Canal</th>
-                <th>Método</th>
-                <th>Tipo</th>
-                <th class="estad-num">Importe</th>
-                <th>Concepto</th>
-                <th></th>
+                <td>${esc(fmtDateTime(p.payment_date))}</td>
+                <td>
+                  ${esc(p.client_name || '—')}
+                  ${p.client_email ? `<small style="display:block;color:var(--color-muted)"><a href="mailto:${esc(p.client_email)}">${esc(p.client_email)}</a></small>` : ''}
+                </td>
+                <td><span class="estad-chip estad-chip-${p.channel || 'in_person'}">${esc(CHANNEL_LABELS[p.channel] || p.channel || '—')}</span></td>
+                <td>${esc(METHOD_LABELS[p.payment_method] || p.payment_method || '—')}</td>
+                <td>${esc(TYPE_LABELS[p.reservation_type] || p.reservation_type || '—')}</td>
+                <td class="estad-num"><strong>${formatCurrency(p.amount)}</strong></td>
+                <td><small>${esc(p.concept || '')}</small></td>
+                <td>
+                  <button class="estad-icon-btn estad-icon-danger" data-del-payment="${esc(p.id)}" title="Eliminar pago">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              ${payments.map(p => `
-                <tr data-pid="${esc(p.id)}">
-                  <td>${esc(fmtDateTime(p.payment_date))}</td>
-                  <td><span class="estad-chip estad-chip-${p.channel || 'in_person'}">${esc(CHANNEL_LABELS[p.channel] || p.channel || '—')}</span></td>
-                  <td>${esc(METHOD_LABELS[p.payment_method] || p.payment_method || '—')}</td>
-                  <td>${esc(TYPE_LABELS[p.reservation_type] || p.reservation_type || '—')}</td>
-                  <td class="estad-num"><strong>${formatCurrency(p.amount)}</strong></td>
-                  <td><small>${esc(p.concept || '')}</small></td>
-                  <td>
-                    <button class="estad-icon-btn estad-icon-danger" data-del-payment="${esc(p.id)}" title="Eliminar pago">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                    </button>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `;
-
-      body.querySelectorAll('[data-del-payment]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const id = btn.dataset.delPayment;
-          if (!confirm('¿Eliminar este pago? La acción no se puede deshacer.')) return;
-          try {
-            await deletePayment(id);
-            showToast('Pago eliminado', 'success');
-            await renderDetalleBody();
-          } catch (err) {
-            showToast('Error: ' + err.message, 'error');
-          }
-        });
-      });
-    }
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
-  // ---------- Helpers ----------
+  function bindPaymentRowActions(scope, onChange) {
+    scope.querySelectorAll('[data-del-payment]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.delPayment;
+        if (!confirm('¿Eliminar este pago? La acción no se puede deshacer.')) return;
+        try {
+          await deletePayment(id);
+          showToast('Pago eliminado', 'success');
+          if (onChange) await onChange();
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+        }
+      });
+    });
+  }
+
   function filterSelect(id, label, value, options) {
     return `
       <label class="estad-filter">
@@ -500,7 +576,7 @@ export async function renderEstadisticas(container) {
         ${Object.entries(agg).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
           const pct = Math.round((v / total) * 100);
           return `
-            <div class="estad-bar-item">
+            <div class="estad-bar-item" data-drill="${esc(field)}:${esc(k)}" role="button" tabindex="0">
               <div class="estad-bar-label">
                 <span>${esc(labels[k] || k)}</span>
                 <span>${formatCurrency(v)} <small>(${pct}%)</small></span>
@@ -517,21 +593,21 @@ export async function renderEstadisticas(container) {
     const n = new Date();
     const y = n.getFullYear(), m = n.getMonth(), d = n.getDate();
     switch (preset) {
-      case 'hoy': return { from: fmt(n), to: fmt(n) };
+      case 'hoy': return { from: fmtYMD(n), to: fmtYMD(n) };
       case 'semana': {
         const day = n.getDay();
         const mon = new Date(n); mon.setDate(d - (day === 0 ? 6 : day - 1));
         const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-        return { from: fmt(mon), to: fmt(sun) };
+        return { from: fmtYMD(mon), to: fmtYMD(sun) };
       }
       case 'mes': {
         const last = new Date(y, m + 1, 0);
-        return { from: `${y}-${pad(m + 1)}-01`, to: fmt(last) };
+        return { from: `${y}-${pad(m + 1)}-01`, to: fmtYMD(last) };
       }
       case 'trimestre': {
         const qs = new Date(y, Math.floor(m / 3) * 3, 1);
         const qe = new Date(y, Math.floor(m / 3) * 3 + 3, 0);
-        return { from: fmt(qs), to: fmt(qe) };
+        return { from: fmtYMD(qs), to: fmtYMD(qe) };
       }
       case 'año': case 'ano': return { from: `${y}-01-01`, to: `${y}-12-31` };
     }
