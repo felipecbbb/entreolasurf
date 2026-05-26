@@ -281,28 +281,59 @@ export async function fetchPendingOrders() {
   }).filter(o => o.pending > 0);
 }
 
-// Bonos con créditos sin usar y total_paid < precio esperado → pendientes simples
-// (no se calcula precio esperado del catálogo; usa solo bonos con total_paid=0 como proxy de "no pagado")
+// Precio esperado de un pack según class_type y nº de créditos (espejo de admin/sections/calendario.js).
+// Si total_credits > tier máximo, extrapola con la tarifa por sesión del último tier.
+const PACK_PRICING_LOCAL = {
+  grupal:     [0, 35, 65, 90, 115, 135, 155, 165],
+  individual: [0, 69, 130, 177, 220, 250],
+  yoga:       [0, 20, 35, 48, 60, 70, 75],
+  paddle:     [0, 49, 95, 135, 170, 205, 240],
+  surfskate:  [0, 30, 55, 78, 95, 115, 130],
+};
+const DEPOSIT_DEFAULT = 15;
+
+function expectedBonoPrice(classType, credits) {
+  if (!credits || credits <= 0) return 0;
+  const tiers = PACK_PRICING_LOCAL[classType];
+  if (!tiers) return 0;
+  if (credits < tiers.length) return tiers[credits];
+  const maxTier = tiers.length - 1;
+  const perSession = tiers[maxTier] / maxTier;
+  return tiers[maxTier] + (credits - maxTier) * perSession;
+}
+
+// Bonos activos cuyo total_paid < precio esperado del catálogo.
+// Si total_paid es 0 pero hay order_id (compra web), asumimos que al menos se cobró el deposit.
 export async function fetchPendingBonos() {
   const { data } = await supabase.from('bonos')
-    .select('id, user_id, class_type, total_credits, used_credits, total_paid, status, created_at')
+    .select('id, user_id, order_id, class_type, total_credits, used_credits, total_paid, status, created_at')
     .eq('status', 'active')
-    .eq('total_paid', 0)
     .order('created_at', { ascending: false });
   const list = data || [];
   const userIds = [...new Set(list.map(b => b.user_id).filter(Boolean))];
   const profilesMap = await _profilesById(userIds);
-  return list.map(b => ({
-    id: b.id,
-    client: profilesMap[b.user_id]?.full_name || 'Sin nombre',
-    email: profilesMap[b.user_id]?.email || null,
-    phone: profilesMap[b.user_id]?.phone || null,
-    total: 0, paid: 0, pending: 0, // sin precio conocido
-    status: b.status,
-    created_at: b.created_at,
-    meta: `${b.class_type} · ${b.used_credits}/${b.total_credits} créditos`,
-    entity: 'bono',
-  }));
+
+  const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
+
+  return list.map(b => {
+    const expected = expectedBonoPrice(b.class_type, b.total_credits);
+    const paidRaw  = Number(b.total_paid || 0);
+    const paid     = paidRaw > 0 ? paidRaw : (b.order_id ? DEPOSIT_DEFAULT : 0);
+    const pending  = Math.max(0, Math.round((expected - paid) * 100) / 100);
+    return {
+      id: b.id,
+      client: profilesMap[b.user_id]?.full_name || 'Sin nombre',
+      email: profilesMap[b.user_id]?.email || null,
+      phone: profilesMap[b.user_id]?.phone || null,
+      total: expected,
+      paid,
+      pending,
+      status: b.status,
+      created_at: b.created_at,
+      meta: `${TYPE_LBL[b.class_type] || b.class_type} · ${b.total_credits} ${b.total_credits === 1 ? 'clase' : 'clases'}`,
+      entity: 'bono',
+    };
+  }).filter(b => b.pending > 0);
 }
 
 // ---- Estadísticas (extended dashboard stats with enrollment-class type cross + user names) ----
