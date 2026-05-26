@@ -2,7 +2,7 @@
    Admin Entry Point — Entre Olas Surf
    ============================================================ */
 import { checkSession, signIn, signOut, getProfile, onAuthChange } from './modules/auth.js';
-import { register, initRouter } from './modules/router.js';
+import { register, initRouter, applyRolePermissions } from './modules/router.js';
 import { initModal, showToast } from './modules/ui.js';
 
 // Import sections
@@ -19,6 +19,8 @@ import { renderMaterial } from './sections/material.js';
 import { renderEstadisticas } from './sections/estadisticas.js';
 import { renderReservaClases } from './sections/reserva-clases.js';
 import { renderCupones } from './sections/cupones.js';
+import { renderWhatsApp } from './sections/whatsapp.js';
+import { renderEquipo } from './sections/equipo.js';
 
 // DOM refs
 const loginView = document.getElementById('login-view');
@@ -44,8 +46,10 @@ function showAdmin() {
   adminApp.style.display = '';
   const profile = getProfile();
   if (profile) {
-    userDisplay.textContent = profile.full_name || profile.id.substring(0, 8);
+    const roleLabel = profile.role === 'encargado' ? ' · Encargado' : '';
+    userDisplay.textContent = (profile.full_name || profile.id.substring(0, 8)) + roleLabel;
   }
+  applyRolePermissions();
 }
 
 // ---- Register routes ----
@@ -62,6 +66,8 @@ register('material', renderMaterial);
 register('estadisticas', renderEstadisticas);
 register('reserva-clases', renderReservaClases);
 register('cupones', renderCupones);
+register('whatsapp', renderWhatsApp);
+register('equipo', renderEquipo);
 
 // ---- Login form ----
 loginForm.addEventListener('submit', async (e) => {

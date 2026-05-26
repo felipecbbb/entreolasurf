@@ -1,7 +1,8 @@
 /* ============================================================
    Hash Router — Admin Panel SPA navigation
    ============================================================ */
-import { getUser } from './auth.js';
+import { getUser, getProfile } from './auth.js';
+import { showToast } from './ui.js';
 
 const routes = {};
 let contentEl = null;
@@ -19,7 +20,26 @@ const sectionTitles = {
   pedidos: 'Pedidos Tienda',
   clientes: 'Clientes',
   'reserva-clases': 'Reserva Clases',
+  whatsapp: 'WhatsApp Bot',
+  cupones: 'Cupones',
+  equipo: 'Equipo',
 };
+
+// Secciones restringidas: solo role='admin' puede acceder
+const ADMIN_ONLY_SECTIONS = new Set(['estadisticas', 'cupones', 'equipo']);
+
+function currentRole() {
+  return getProfile()?.role || null;
+}
+
+// Oculta del sidebar los items cuyo data-roles no incluye el rol actual
+export function applyRolePermissions() {
+  const role = currentRole();
+  document.querySelectorAll('a.admin-nav-item[data-roles]').forEach(a => {
+    const allowed = a.dataset.roles.split(',').map(s => s.trim());
+    a.style.display = allowed.includes(role) ? '' : 'none';
+  });
+}
 
 // Register a route
 export function register(hash, renderFn) {
@@ -39,7 +59,15 @@ export function initRouter() {
 export async function navigate() {
   if (!getUser()) return;
 
-  const hash = (location.hash || '#dashboard').replace('#', '');
+  let hash = (location.hash || '#dashboard').replace('#', '');
+
+  // Bloqueo por rol: encargado intentando entrar a sección admin-only
+  if (ADMIN_ONLY_SECTIONS.has(hash) && currentRole() !== 'admin') {
+    showToast('Sin permisos para esa sección', 'error');
+    location.hash = '#dashboard';
+    return; // hashchange disparará navigate() de nuevo con #dashboard
+  }
+
   const renderFn = routes[hash];
 
   // Update topbar title

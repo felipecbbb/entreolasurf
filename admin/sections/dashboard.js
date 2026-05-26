@@ -4,6 +4,7 @@
 import { fetchDashboardStats, fetchClassesInRange } from '../modules/api.js';
 import { formatCurrency, showToast } from '../modules/ui.js';
 import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js';
+import { isAdmin } from '../modules/auth.js';
 
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -139,6 +140,7 @@ export async function renderDashboard(container) {
 
     // Date range presets
     const rangeLabel = getDateRangeLabel(dateFrom, dateTo);
+    const showFinancials = isAdmin();
 
     // ---- Render HTML ----
     container.innerHTML = `
@@ -157,11 +159,14 @@ export async function renderDashboard(container) {
             <input type="date" id="dash-to" value="${dateTo}" />
           </div>
         </div>
+        ${showFinancials ? `
         <button class="dash-settings-btn" id="dash-settings-toggle" title="Configuración">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         </button>
+        ` : ''}
       </div>
 
+      ${showFinancials ? `
       <div class="dash-settings-panel" id="dash-settings-panel" style="display:none">
         <div class="dash-settings-row">
           <label>IVA (%)</label>
@@ -173,9 +178,11 @@ export async function renderDashboard(container) {
         </div>
         <button class="dash-settings-save" id="dash-settings-save">Guardar</button>
       </div>
+      ` : ''}
 
       <!-- Main KPI cards -->
       <div class="dash-kpi-grid">
+        ${showFinancials ? `
         <div class="dash-kpi-card dash-kpi-primary">
           <div class="dash-kpi-label">Ingresos Totales</div>
           <div class="dash-kpi-value">${formatCurrency(totalRevenue)}</div>
@@ -187,6 +194,7 @@ export async function renderDashboard(container) {
           <div class="dash-kpi-value">${formatCurrency(ticketMedio)}</div>
           <div class="dash-kpi-sub">${ticketCount} transacciones</div>
         </div>
+        ` : ''}
         <div class="dash-kpi-card">
           <div class="dash-kpi-label">Inscripciones a Clases</div>
           <div class="dash-kpi-value">${totalEnrollments}</div>
@@ -224,6 +232,7 @@ export async function renderDashboard(container) {
         ` : '<p class="dash-empty">No hay clases programadas para hoy</p>'}
       </div>
 
+      ${showFinancials ? `
       <!-- Revenue breakdown -->
       <div class="dash-section">
         <h3 class="dash-section-title">Desglose de Ingresos</h3>
@@ -250,6 +259,7 @@ export async function renderDashboard(container) {
           </div>
         </div>
       </div>
+      ` : ''}
 
       <!-- Classes by type -->
       <div class="dash-section">
@@ -279,7 +289,7 @@ export async function renderDashboard(container) {
             <div class="dash-detail-info">
               <div class="dash-detail-title">Bonos Vendidos</div>
               <div class="dash-detail-value">${totalBonos}</div>
-              <div class="dash-detail-sub">${formatCurrency(bonoRevenue)} cobrado · ${totalCredits} créditos (${usedCredits} usados)</div>
+              <div class="dash-detail-sub">${showFinancials ? `${formatCurrency(bonoRevenue)} cobrado · ` : ''}${totalCredits} créditos (${usedCredits} usados)</div>
             </div>
           </div>
           <div class="dash-detail-card">
@@ -289,7 +299,7 @@ export async function renderDashboard(container) {
             <div class="dash-detail-info">
               <div class="dash-detail-title">Surf Camps</div>
               <div class="dash-detail-value">${totalBookings} reservas</div>
-              <div class="dash-detail-sub">${formatCurrency(campRevenue)} · ${paidBookings} pagadas · ${data.futureCamps.length} camps próximos</div>
+              <div class="dash-detail-sub">${showFinancials ? `${formatCurrency(campRevenue)} · ` : ''}${paidBookings} pagadas · ${data.futureCamps.length} camps próximos</div>
             </div>
           </div>
           <div class="dash-detail-card">
@@ -299,7 +309,7 @@ export async function renderDashboard(container) {
             <div class="dash-detail-info">
               <div class="dash-detail-title">Tienda Online</div>
               <div class="dash-detail-value">${totalOrders} pedidos</div>
-              <div class="dash-detail-sub">${formatCurrency(orderRevenue)} · ${paidOrders} pagados</div>
+              <div class="dash-detail-sub">${showFinancials ? `${formatCurrency(orderRevenue)} · ` : ''}${paidOrders} pagados</div>
             </div>
           </div>
           <div class="dash-detail-card">
@@ -309,7 +319,7 @@ export async function renderDashboard(container) {
             <div class="dash-detail-info">
               <div class="dash-detail-title">Alquiler Material</div>
               <div class="dash-detail-value">${totalRentals} reservas</div>
-              <div class="dash-detail-sub">${formatCurrency(rentalRevenue)} cobrado</div>
+              <div class="dash-detail-sub">${showFinancials ? `${formatCurrency(rentalRevenue)} cobrado` : `${totalRentals} reservas activas`}</div>
             </div>
           </div>
         </div>

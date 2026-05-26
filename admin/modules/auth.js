@@ -6,10 +6,15 @@ import { supabase } from '/lib/supabase.js';
 let currentUser = null;
 let currentProfile = null;
 
+const STAFF_ROLES = ['admin', 'encargado'];
+
 export function getUser() { return currentUser; }
 export function getProfile() { return currentProfile; }
+export function isAdmin() { return currentProfile?.role === 'admin'; }
+export function isEncargado() { return currentProfile?.role === 'encargado'; }
+export function isStaff() { return STAFF_ROLES.includes(currentProfile?.role); }
 
-// Check if session exists and user is admin
+// Check if session exists and user is staff (admin or encargado)
 export async function checkSession() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return false;
@@ -21,7 +26,7 @@ export async function checkSession() {
     .eq('id', session.user.id)
     .single();
 
-  if (!profile || profile.role !== 'admin') {
+  if (!profile || !STAFF_ROLES.includes(profile.role)) {
     await supabase.auth.signOut();
     currentUser = null;
     currentProfile = null;
@@ -32,7 +37,7 @@ export async function checkSession() {
   return true;
 }
 
-// Sign in with email/password, verify admin role
+// Sign in with email/password, verify staff role (admin or encargado)
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw new Error(error.message);
@@ -45,11 +50,11 @@ export async function signIn(email, password) {
     .eq('id', data.user.id)
     .single();
 
-  if (!profile || profile.role !== 'admin') {
+  if (!profile || !STAFF_ROLES.includes(profile.role)) {
     await supabase.auth.signOut();
     currentUser = null;
     currentProfile = null;
-    throw new Error('No tienes permisos de administrador');
+    throw new Error('No tienes permisos para acceder al panel');
   }
 
   currentProfile = profile;
