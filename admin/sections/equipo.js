@@ -28,12 +28,13 @@ async function callCreateStaff({ email, password, full_name }) {
     body: { email, password, full_name },
   });
   if (error) {
-    // FunctionsHttpError contains the response body in the context
+    // FunctionsHttpError exposes the original Response in error.context
+    let serverMsg = null;
     try {
-      const ctx = await error.context?.json?.();
-      if (ctx?.error) throw new Error(ctx.error);
-    } catch (_) { /* fall through */ }
-    throw new Error(error.message || 'No se pudo crear encargado');
+      const body = await error.context?.json?.();
+      if (body?.error) serverMsg = body.error;
+    } catch (_) { /* response was not JSON */ }
+    throw new Error(serverMsg || error.message || 'No se pudo crear encargado');
   }
   if (data?.error) throw new Error(data.error);
   return data;
