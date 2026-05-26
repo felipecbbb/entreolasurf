@@ -170,7 +170,8 @@ Deno.serve(async (req) => {
       await supabase.from("payments").insert({
         user_id: userId,
         amount: totalPaid,
-        payment_method: "stripe",
+        payment_method: "online",
+        channel: "web",
         payment_date: new Date().toISOString(),
         reservation_type: "order",
         reference_id: orderId,
