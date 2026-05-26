@@ -98,6 +98,78 @@ export async function fetchDashboardStats(dateFrom, dateTo) {
   }
 }
 
+// ---- Dashboard operativo (sin importes ni agregados sensibles) ----
+// Vista del día y próximos 7 días: clases con alumnos, alquileres activos, camps próximos.
+export async function fetchDashboardOperational() {
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const todayStr = fmt(today);
+  const in7 = new Date(today); in7.setDate(today.getDate() + 7);
+  const in7Str = fmt(in7);
+
+  async function safe(label, q) {
+    const r = await q;
+    if (r.error) { console.warn(`Dashboard op [${label}]:`, r.error.message); return []; }
+    return r.data || [];
+  }
+
+  // 1) Clases de hoy (con conteo de inscritos básico desde surf_classes)
+  const todayClasses = await safe('todayClasses', supabase
+    .from('surf_classes')
+    .select('id, type, title, date, time_start, time_end, max_students, enrolled_count, status, level')
+    .eq('date', todayStr)
+    .order('time_start', { ascending: true }));
+
+  // 2) Inscripciones de las clases de hoy (con nombres de alumnos)
+  let todayEnrollments = [];
+  if (todayClasses.length) {
+    const classIds = todayClasses.map(c => c.id);
+    todayEnrollments = await safe('todayEnrollments', supabase
+      .from('class_enrollments')
+      .select('id, class_id, status, guest_name, profiles(full_name), family_members(full_name)')
+      .in('class_id', classIds));
+  }
+
+  // 3) Alquileres activos hoy (empezaron hoy o antes y aún no terminaron)
+  const activeRentals = await safe('activeRentals', supabase
+    .from('equipment_reservations')
+    .select('id, status, date_start, date_end, guest_name, duration_key, rental_equipment(name, type)')
+    .lte('date_start', todayStr)
+    .gte('date_end', todayStr)
+    .in('status', ['confirmed', 'active'])
+    .order('date_end', { ascending: true }));
+
+  // 4) Próximos 7 días — clases
+  const upcomingClasses = await safe('upcomingClasses', supabase
+    .from('surf_classes')
+    .select('id, type, date, time_start, time_end, max_students, enrolled_count, status')
+    .gt('date', todayStr)
+    .lte('date', in7Str)
+    .eq('status', 'scheduled')
+    .order('date', { ascending: true })
+    .order('time_start', { ascending: true }));
+
+  // 5) Próximos 7 días — alquileres que empiezan
+  const upcomingRentals = await safe('upcomingRentals', supabase
+    .from('equipment_reservations')
+    .select('id, status, date_start, date_end, guest_name, rental_equipment(name, type)')
+    .gt('date_start', todayStr)
+    .lte('date_start', in7Str)
+    .in('status', ['pending', 'confirmed'])
+    .order('date_start', { ascending: true }));
+
+  // 6) Próximos camps (3 más cercanos)
+  const upcomingCamps = await safe('upcomingCamps', supabase
+    .from('surf_camps')
+    .select('id, title, slug, date_start, date_end, max_spots, spots_taken, status')
+    .gte('date_start', todayStr)
+    .order('date_start', { ascending: true })
+    .limit(3));
+
+  return { todayClasses, todayEnrollments, activeRentals, upcomingClasses, upcomingRentals, upcomingCamps };
+}
+
 // ---- Estadísticas (extended dashboard stats with enrollment-class type cross + user names) ----
 export async function fetchEstadisticas(dateFrom, dateTo) {
   const base = await fetchDashboardStats(dateFrom, dateTo);
