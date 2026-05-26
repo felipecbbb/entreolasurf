@@ -170,6 +170,141 @@ export async function fetchDashboardOperational() {
   return { todayClasses, todayEnrollments, activeRentals, upcomingClasses, upcomingRentals, upcomingCamps };
 }
 
+// ---- Pagos con filtros (channel, método, tipo, rango) ----
+export async function fetchPaymentsFiltered({ dateFrom, dateTo, channel, paymentMethod, reservationType } = {}) {
+  let q = supabase.from('payments')
+    .select('id, amount, payment_method, channel, payment_date, reservation_type, reference_id, user_id, notes, concept')
+    .order('payment_date', { ascending: false });
+  if (dateFrom) q = q.gte('payment_date', dateFrom);
+  if (dateTo)   q = q.lte('payment_date', dateTo + 'T23:59:59');
+  if (channel && channel !== 'all') q = q.eq('channel', channel);
+  if (paymentMethod && paymentMethod !== 'all') q = q.eq('payment_method', paymentMethod);
+  if (reservationType && reservationType !== 'all') q = q.eq('reservation_type', reservationType);
+  const { data, error } = await q;
+  if (error) { console.warn('fetchPaymentsFiltered:', error.message); return []; }
+  return data || [];
+}
+
+// ---- Pendientes de cobro por entidad ----
+// Devuelve por entidad: { id, client, total, paid, pending, status, created_at, meta }
+async function _profilesById(ids) {
+  if (!ids.length) return {};
+  const { data } = await supabase.from('profiles').select('id, full_name, email, phone').in('id', ids);
+  const map = {};
+  (data || []).forEach(p => { map[p.id] = p; });
+  return map;
+}
+
+async function _paymentsSumBy(reservationType, refIds) {
+  if (!refIds.length) return {};
+  const { data } = await supabase.from('payments')
+    .select('reference_id, amount')
+    .eq('reservation_type', reservationType)
+    .in('reference_id', refIds);
+  const sum = {};
+  (data || []).forEach(p => { sum[p.reference_id] = (sum[p.reference_id] || 0) + Number(p.amount || 0); });
+  return sum;
+}
+
+export async function fetchPendingBookings() {
+  const { data } = await supabase.from('bookings')
+    .select('id, user_id, total_amount, status, created_at, guest_name')
+    .in('status', ['pending', 'deposit_paid'])
+    .order('created_at', { ascending: false });
+  const list = data || [];
+  const userIds = [...new Set(list.map(b => b.user_id).filter(Boolean))];
+  const ids = list.map(b => b.id);
+  const [profilesMap, paidMap] = await Promise.all([_profilesById(userIds), _paymentsSumBy('booking', ids)]);
+  return list.map(b => {
+    const paid = paidMap[b.id] || 0;
+    const total = Number(b.total_amount || 0);
+    const pending = Math.max(0, total - paid);
+    return {
+      id: b.id,
+      client: profilesMap[b.user_id]?.full_name || b.guest_name || 'Sin nombre',
+      email: profilesMap[b.user_id]?.email || null,
+      phone: profilesMap[b.user_id]?.phone || null,
+      total, paid, pending,
+      status: b.status,
+      created_at: b.created_at,
+      entity: 'booking',
+    };
+  }).filter(b => b.pending > 0);
+}
+
+export async function fetchPendingRentals() {
+  const { data } = await supabase.from('equipment_reservations')
+    .select('id, user_id, guest_name, total_amount, deposit_paid, status, date_start, rental_equipment(name)')
+    .in('status', ['pending', 'confirmed', 'active'])
+    .order('date_start', { ascending: false });
+  const list = data || [];
+  const userIds = [...new Set(list.map(r => r.user_id).filter(Boolean))];
+  const profilesMap = await _profilesById(userIds);
+  return list.map(r => {
+    const total = Number(r.total_amount || 0);
+    const paid = Number(r.deposit_paid || 0);
+    const pending = Math.max(0, total - paid);
+    return {
+      id: r.id,
+      client: profilesMap[r.user_id]?.full_name || r.guest_name || 'Sin nombre',
+      email: profilesMap[r.user_id]?.email || null,
+      phone: profilesMap[r.user_id]?.phone || null,
+      total, paid, pending,
+      status: r.status,
+      created_at: r.date_start,
+      meta: r.rental_equipment?.name || 'Material',
+      entity: 'rental',
+    };
+  }).filter(r => r.pending > 0);
+}
+
+export async function fetchPendingOrders() {
+  const { data } = await supabase.from('orders')
+    .select('id, user_id, total, status, created_at, shipping_address, notes')
+    .in('status', ['pending'])
+    .order('created_at', { ascending: false });
+  const list = data || [];
+  const userIds = [...new Set(list.map(o => o.user_id).filter(Boolean))];
+  const profilesMap = await _profilesById(userIds);
+  return list.map(o => {
+    const total = Number(o.total || 0);
+    return {
+      id: o.id,
+      client: profilesMap[o.user_id]?.full_name || 'Invitado',
+      email: profilesMap[o.user_id]?.email || null,
+      phone: profilesMap[o.user_id]?.phone || null,
+      total, paid: 0, pending: total,
+      status: o.status,
+      created_at: o.created_at,
+      entity: 'order',
+    };
+  }).filter(o => o.pending > 0);
+}
+
+// Bonos con créditos sin usar y total_paid < precio esperado → pendientes simples
+// (no se calcula precio esperado del catálogo; usa solo bonos con total_paid=0 como proxy de "no pagado")
+export async function fetchPendingBonos() {
+  const { data } = await supabase.from('bonos')
+    .select('id, user_id, class_type, total_credits, used_credits, total_paid, status, created_at')
+    .eq('status', 'active')
+    .eq('total_paid', 0)
+    .order('created_at', { ascending: false });
+  const list = data || [];
+  const userIds = [...new Set(list.map(b => b.user_id).filter(Boolean))];
+  const profilesMap = await _profilesById(userIds);
+  return list.map(b => ({
+    id: b.id,
+    client: profilesMap[b.user_id]?.full_name || 'Sin nombre',
+    email: profilesMap[b.user_id]?.email || null,
+    phone: profilesMap[b.user_id]?.phone || null,
+    total: 0, paid: 0, pending: 0, // sin precio conocido
+    status: b.status,
+    created_at: b.created_at,
+    meta: `${b.class_type} · ${b.used_credits}/${b.total_credits} créditos`,
+    entity: 'bono',
+  }));
+}
+
 // ---- Estadísticas (extended dashboard stats with enrollment-class type cross + user names) ----
 export async function fetchEstadisticas(dateFrom, dateTo) {
   const base = await fetchDashboardStats(dateFrom, dateTo);
