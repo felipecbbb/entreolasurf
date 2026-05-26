@@ -184,6 +184,8 @@ function renderAuth() {
     btn.disabled = true; btn.textContent = 'Entrando…';
     try {
       await signIn(e.target.email.value, e.target.password.value);
+      const profile = await getProfile();
+      if (redirectIfStaff(profile)) return;
       renderDashboard();
     } catch (err) {
       errEl.textContent = err.message;
@@ -678,16 +680,22 @@ async function renderPedidos(session) {
   }
 }
 
+// Si el usuario es staff (admin o encargado), va al panel de admin en vez del de cliente
+function redirectIfStaff(profile) {
+  if (profile?.role === 'admin' || profile?.role === 'encargado') {
+    window.location.href = '/admin/';
+    return true;
+  }
+  return false;
+}
+
 // ---- Init ----
 async function init() {
   try {
     const session = await getSession();
     if (session) {
       const profile = await getProfile();
-      if (profile?.role === 'admin') {
-        window.location.href = '/admin/';
-        return;
-      }
+      if (redirectIfStaff(profile)) return;
       if (profile && profile.can_swim == null) {
         renderOnboarding(profile);
       } else {
