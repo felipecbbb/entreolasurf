@@ -50,18 +50,20 @@ export async function renderReservas(container) {
       .reduce((s, b) => s + Number(b.deposit_amount || 0), 0);
 
     container.innerHTML = `
-      <div class="admin-toolbar" style="margin-bottom:20px">
-        <select class="admin-filter" id="rv-camp-filter">
-          <option value="">Todos los camps</option>
-          ${campOptions}
-        </select>
-        <select class="admin-filter" id="rv-status-filter">
-          <option value="">Todos los estados</option>
-          ${statusOptions}
-        </select>
-        <div style="margin-left:auto;display:flex;gap:16px;align-items:center">
-          <span style="font-family:'Space Grotesk',sans-serif;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--color-muted)">${filtered.length} reserva${filtered.length !== 1 ? 's' : ''}</span>
-          <span style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--color-navy)">${formatCurrency(totalRevenue)}</span>
+      <div class="rv-toolbar">
+        <div class="rv-toolbar-filters">
+          <select class="admin-filter" id="rv-camp-filter">
+            <option value="">Todos los camps</option>
+            ${campOptions}
+          </select>
+          <select class="admin-filter" id="rv-status-filter">
+            <option value="">Todos los estados</option>
+            ${statusOptions}
+          </select>
+        </div>
+        <div class="rv-toolbar-summary">
+          <span class="rv-toolbar-count">${filtered.length} reserva${filtered.length !== 1 ? 's' : ''}</span>
+          <span class="rv-toolbar-total">${formatCurrency(totalRevenue)}</span>
         </div>
       </div>
 
@@ -113,10 +115,10 @@ export async function renderReservas(container) {
                   </div>
                   <div>${statusBadge(b.status)}</div>
                   <div class="rv-booking-date">${formatDate(b.created_at)}</div>
-                  <div style="display:flex;gap:6px">
+                  <div class="rv-booking-actions">
                     <button class="admin-action-btn rv-status-btn" data-id="${b.id}">Estado</button>
-                    <button class="admin-action-btn rv-delete-btn" data-id="${b.id}" data-name="${esc(b.profiles?.full_name || 'esta reserva')}" title="Eliminar reserva" style="color:#b91c1c;border-color:#fecaca">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    <button class="rv-icon-btn rv-icon-danger rv-delete-btn" data-id="${b.id}" data-name="${esc(b.profiles?.full_name || 'esta reserva')}" title="Eliminar reserva">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                     </button>
                   </div>
                 </div>

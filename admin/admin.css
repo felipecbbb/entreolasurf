@@ -7238,3 +7238,100 @@ a.admin-nav-item-external .nav-icon svg {
 .rv-pay-action:hover { background: #fafafa; color: var(--color-navy); }
 .rv-pay-action-danger:hover { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
 .rv-payments-loading { font-size: .85rem; color: var(--color-muted); padding: 8px 0; }
+
+/* ============================================================
+   Reservas — más respiro
+   ============================================================ */
+.rv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+.rv-toolbar-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.rv-toolbar-filters select { min-width: 180px; }
+.rv-toolbar-summary {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 4px 0;
+}
+.rv-toolbar-count {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .74rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-muted);
+}
+.rv-toolbar-total {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.5rem;
+  color: var(--color-navy);
+  letter-spacing: .01em;
+  line-height: 1;
+}
+
+/* Camp group: más respiro entre tarjetas */
+.rv-camp-group { margin-bottom: 22px; box-shadow: 0 1px 2px rgba(15,47,57,.04); }
+
+/* Camp header: padding más generoso y separación stats */
+.rv-camp-header {
+  padding: 20px 24px;
+  gap: 24px;
+}
+.rv-camp-stats { gap: 32px; }
+.rv-stat-value { font-size: 1.3rem; line-height: 1.15; }
+.rv-stat-label { font-size: .66rem; margin-top: 4px; }
+
+/* Booking row: respira por dentro y por fuera */
+.rv-booking-row {
+  grid-template-columns: 1.4fr 1fr auto auto auto;
+  gap: 20px;
+  padding: 16px 24px;
+  font-size: .88rem;
+  transition: background .15s ease;
+}
+.rv-booking-row:hover { background: #fdfcf8; }
+.rv-booking-row + .rv-booking-row { border-top: 1px solid var(--color-line); }
+.rv-booking-client strong { font-size: .95rem; margin-bottom: 2px; }
+.rv-booking-amounts { line-height: 1.5; }
+.rv-booking-deposit { margin-bottom: 2px; }
+.rv-booking-date { white-space: nowrap; }
+
+.rv-booking-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Icon button (papelera) — limpio, no llamativo */
+.rv-icon-btn {
+  width: 34px;
+  height: 34px;
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--color-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.rv-icon-btn:hover { background: #fafafa; color: var(--color-navy); border-color: #c2c8cf; }
+.rv-icon-danger:hover { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+
+/* Responsive sin volver a apretarlo */
+@media (max-width: 1100px) {
+  .rv-booking-row { grid-template-columns: 1fr auto auto auto; padding: 14px 18px; gap: 14px; }
+  .rv-booking-date { display: none; }
+}
+@media (max-width: 820px) {
+  .rv-toolbar { gap: 16px; }
+  .rv-camp-header { padding: 16px 18px; }
+  .rv-camp-stats { gap: 22px; }
+  .rv-booking-row { grid-template-columns: 1fr; gap: 8px; padding: 14px 18px; }
+  .rv-booking-amounts { text-align: left; }
+}
