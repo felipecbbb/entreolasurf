@@ -1,8 +1,9 @@
 /* ============================================================
    Reservas Section — Camp bookings grouped by camp
    ============================================================ */
-import { fetchBookings, fetchCamps, updateBookingStatus, createPayment } from '../modules/api.js';
+import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
+import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { supabase } from '/lib/supabase.js';
 
 const STATUSES = ['pending', 'deposit_paid', 'fully_paid', 'cancelled', 'refunded'];
@@ -347,6 +348,9 @@ export async function renderReservas(container) {
             <div class="rv-card" style="font-size:.85rem;color:var(--color-navy)">${esc(booking.notes)}</div>
           </div>` : ''}
 
+          <!-- Pagos registrados (se rellena async) -->
+          <div id="rv-payments-block"></div>
+
           <!-- Actions -->
           <div class="rv-section rv-actions">
             ${!isFullyPaid && pendingAmount > 0 ? `
@@ -395,6 +399,85 @@ export async function renderReservas(container) {
     // Collect rest from ficha
     overlay.querySelector('.rv-collect-rest-btn')?.addEventListener('click', () => {
       openCollectRestModal(booking, pendingAmount);
+    });
+
+    // Cargar pagos asociados al booking y renderizar
+    renderBookingPayments(overlay, booking);
+  }
+
+  async function renderBookingPayments(overlay, booking) {
+    const block = overlay.querySelector('#rv-payments-block');
+    if (!block) return;
+    block.innerHTML = '<div class="rv-payments-loading">Cargando pagos…</div>';
+
+    const payments = await fetchPayments('booking', booking.id);
+
+    if (!payments.length) {
+      block.innerHTML = `
+        <div>
+          <span class="rv-field-label" style="display:block;margin-bottom:6px">Pagos registrados</span>
+          <div class="rv-card" style="font-size:.85rem;color:var(--color-muted)">Aún no hay pagos registrados para esta reserva.</div>
+        </div>
+      `;
+      return;
+    }
+
+    const METHOD_LBL = { efectivo:'Efectivo', tarjeta:'Tarjeta', transferencia:'Transferencia', voucher:'Voucher', saldo:'Saldo', online:'Online (Stripe)' };
+    const CH_LBL = { web:'Web', in_person:'Presencial' };
+
+    block.innerHTML = `
+      <div>
+        <span class="rv-field-label" style="display:block;margin-bottom:8px">Pagos registrados (${payments.length})</span>
+        <div class="rv-pay-list">
+          ${payments.map(p => `
+            <div class="rv-pay-row" data-pid="${esc(p.id)}">
+              <div class="rv-pay-main">
+                <div class="rv-pay-top">
+                  <span class="rv-pay-amount">${formatCurrency(p.amount)}</span>
+                  <span class="rv-pay-chip rv-pay-chip-${p.channel || 'in_person'}">${esc(CH_LBL[p.channel] || p.channel || '—')}</span>
+                  <span class="rv-pay-method">${esc(METHOD_LBL[p.payment_method] || p.payment_method || '—')}</span>
+                </div>
+                <div class="rv-pay-meta">
+                  ${formatDate(p.payment_date)}${p.concept ? ` · ${esc(p.concept)}` : ''}
+                </div>
+              </div>
+              <div class="rv-pay-actions">
+                <button class="rv-pay-action" data-action="edit" data-pid="${esc(p.id)}" title="Editar">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="rv-pay-action rv-pay-action-danger" data-action="delete" data-pid="${esc(p.id)}" title="Eliminar">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    block.querySelectorAll('[data-action="edit"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.pid;
+        const p = payments.find(x => x.id === id);
+        if (!p) return;
+        openPaymentEditModal(p, { onSaved: async () => {
+          await renderBookingPayments(overlay, booking);
+        }});
+      });
+    });
+
+    block.querySelectorAll('[data-action="delete"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.pid;
+        if (!confirm('¿Eliminar este pago? El estado de la reserva no se ajusta automáticamente.')) return;
+        try {
+          await deletePayment(id);
+          showToast('Pago eliminado', 'success');
+          await renderBookingPayments(overlay, booking);
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+        }
+      });
     });
   }
 

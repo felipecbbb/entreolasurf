@@ -9,6 +9,7 @@ import {
   deletePayment, deleteReservationFully,
 } from '../modules/api.js';
 import { formatCurrency, showToast } from '../modules/ui.js';
+import { openPaymentEditModal } from '../modules/payment-edit.js';
 
 const esc = (s) => s == null ? '' : String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -523,7 +524,10 @@ export async function renderEstadisticas(container) {
                 <td>${esc(TYPE_LABELS[p.reservation_type] || p.reservation_type || '—')}</td>
                 <td class="estad-num"><strong>${formatCurrency(p.amount)}</strong></td>
                 <td><small>${esc(p.concept || '')}</small></td>
-                <td>
+                <td style="white-space:nowrap">
+                  <button class="estad-icon-btn" data-edit-payment="${esc(p.id)}" title="Editar pago">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
                   <button class="estad-icon-btn estad-icon-danger" data-del-payment="${esc(p.id)}" title="Eliminar pago">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                   </button>
@@ -548,6 +552,15 @@ export async function renderEstadisticas(container) {
         } catch (err) {
           showToast('Error: ' + err.message, 'error');
         }
+      });
+    });
+    scope.querySelectorAll('[data-edit-payment]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.editPayment;
+        // Buscar el payment enriquecido en cachedEnriched para pasárselo al modal
+        const p = (cachedEnriched || []).find(x => x.id === id);
+        if (!p) { showToast('Pago no encontrado', 'error'); return; }
+        openPaymentEditModal(p, { onSaved: async () => { invalidateCache(); if (onChange) await onChange(); } });
       });
     });
   }

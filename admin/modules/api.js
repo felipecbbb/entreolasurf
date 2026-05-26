@@ -1250,3 +1250,15 @@ export async function deletePayment(id) {
   if (error) throw error;
 }
 
+// Edita solo método de pago y fecha (importe/canal/tipo no se tocan
+// para no descuadrar el estado del booking/order/etc).
+export async function updatePayment(id, { payment_method, payment_date, concept }) {
+  const patch = {};
+  if (payment_method !== undefined) patch.payment_method = payment_method;
+  if (payment_date   !== undefined) patch.payment_date   = payment_date;
+  if (concept        !== undefined) patch.concept        = concept;
+  if (!Object.keys(patch).length) return;
+  const { error } = await supabase.from('payments').update(patch).eq('id', id);
+  if (error) throw error;
+}
+
