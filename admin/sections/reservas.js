@@ -1,7 +1,7 @@
 /* ============================================================
    Reservas Section — Camp bookings grouped by camp
    ============================================================ */
-import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment } from '../modules/api.js';
+import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { supabase } from '/lib/supabase.js';
@@ -113,8 +113,11 @@ export async function renderReservas(container) {
                   </div>
                   <div>${statusBadge(b.status)}</div>
                   <div class="rv-booking-date">${formatDate(b.created_at)}</div>
-                  <div>
+                  <div style="display:flex;gap:6px">
                     <button class="admin-action-btn rv-status-btn" data-id="${b.id}">Estado</button>
+                    <button class="admin-action-btn rv-delete-btn" data-id="${b.id}" data-name="${esc(b.profiles?.full_name || 'esta reserva')}" title="Eliminar reserva" style="color:#b91c1c;border-color:#fecaca">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    </button>
                   </div>
                 </div>
               `).join('')}
@@ -132,6 +135,21 @@ export async function renderReservas(container) {
         e.stopPropagation();
         const booking = filtered.find(b => b.id === btn.dataset.id);
         if (booking) openStatusModal(booking);
+      });
+    });
+
+    container.querySelectorAll('.rv-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const name = btn.dataset.name;
+        if (!confirm(`¿Eliminar la reserva de ${name}? Se borrarán también todos sus pagos. No se puede deshacer.`)) return;
+        try {
+          await deleteReservationFully('booking', btn.dataset.id);
+          showToast('Reserva eliminada', 'success');
+          render();
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+        }
       });
     });
 
@@ -362,6 +380,9 @@ export async function renderReservas(container) {
             ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" class="btn line" style="font-size:.85rem;padding:11px 24px;display:inline-flex;align-items:center;gap:8px">
               ${waSvg} Contactar por WhatsApp
             </a>` : ''}
+            <button class="btn rv-ficha-delete-btn" data-id="${booking.id}" style="font-size:.85rem;padding:11px 24px;background:transparent;color:#b91c1c;border:1px solid #fecaca;margin-left:auto">
+              Eliminar reserva
+            </button>
           </div>
 
           <!-- Meta -->
@@ -399,6 +420,20 @@ export async function renderReservas(container) {
     // Collect rest from ficha
     overlay.querySelector('.rv-collect-rest-btn')?.addEventListener('click', () => {
       openCollectRestModal(booking, pendingAmount);
+    });
+
+    // Delete reserva desde la ficha
+    overlay.querySelector('.rv-ficha-delete-btn')?.addEventListener('click', async () => {
+      const name = booking.profiles?.full_name || 'esta reserva';
+      if (!confirm(`¿Eliminar la reserva de ${name}? Se borrarán también todos sus pagos. No se puede deshacer.`)) return;
+      try {
+        await deleteReservationFully('booking', booking.id);
+        closeFicha();
+        showToast('Reserva eliminada', 'success');
+        render();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
     });
 
     // Cargar pagos asociados al booking y renderizar
