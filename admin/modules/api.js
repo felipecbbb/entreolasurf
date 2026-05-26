@@ -204,7 +204,7 @@ export async function deleteReservationFully(entity, id) {
 // ---- Pagos con filtros (channel, método, tipo, rango) ----
 export async function fetchPaymentsFiltered({ dateFrom, dateTo, channel, paymentMethod, reservationType } = {}) {
   let q = supabase.from('payments')
-    .select('id, amount, payment_method, channel, payment_date, reservation_type, reference_id, user_id, notes, concept')
+    .select('id, amount, payment_method, channel, payment_date, reservation_type, reference_id, concept')
     .order('payment_date', { ascending: false });
   if (dateFrom) q = q.gte('payment_date', dateFrom);
   if (dateTo)   q = q.lte('payment_date', dateTo + 'T23:59:59');
