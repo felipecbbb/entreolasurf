@@ -173,6 +173,14 @@ export async function renderCalendario(container) {
                   <small>Crear sesión en el horario o material</small>
                 </div>
               </button>
+              <div class="cal-add-menu-divider"></div>
+              <button class="cal-add-menu-item danger" id="cal-menu-bulk-delete" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                <div>
+                  <strong>Borrar clases</strong>
+                  <small>Por rango, manual o todas</small>
+                </div>
+              </button>
             </div>
           </div>
         </div>
@@ -571,6 +579,10 @@ export async function renderCalendario(container) {
       container.querySelector('#cal-menu-new-session')?.addEventListener('click', () => {
         closeMenu();
         openNewSessionModal();
+      });
+      container.querySelector('#cal-menu-bulk-delete')?.addEventListener('click', () => {
+        closeMenu();
+        openBulkDeleteClasses();
       });
     }
 
@@ -3991,6 +4003,317 @@ export async function renderCalendario(container) {
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
       }
+    });
+  }
+
+  // ======== BULK DELETE CLASSES ========
+  async function openBulkDeleteClasses() {
+    document.getElementById('bd-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'bd-overlay';
+    overlay.className = 'ns-overlay';
+
+    const today = getDateStr(new Date());
+    const inThreeMonths = new Date();
+    inThreeMonths.setMonth(inThreeMonths.getMonth() + 3);
+    const defaultTo = getDateStr(inThreeMonths);
+
+    const typeOptions = Object.entries(TYPE_LABELS)
+      .map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+
+    overlay.innerHTML = `
+      <div class="ns-panel">
+        <header class="ns-header" style="background:#7f1d1d">
+          <div>
+            <h2>Borrar clases</h2>
+            <p>Esta acción no se puede deshacer</p>
+          </div>
+          <button class="ns-close" id="bd-close" title="Cerrar">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+
+        <div class="ns-tabs">
+          <button type="button" class="ns-tab active" data-bd-mode="range">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Por rango
+          </button>
+          <button type="button" class="ns-tab" data-bd-mode="manual">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            Selección manual
+          </button>
+          <button type="button" class="ns-tab" data-bd-mode="all">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
+            Todas las futuras
+          </button>
+        </div>
+
+        <div class="ns-body">
+          <!-- RANGO -->
+          <div class="bd-pane" data-bd-pane="range">
+            <section class="ns-section">
+              <h3>Rango de fechas</h3>
+              <div class="ns-field-2col">
+                <div class="ns-field">
+                  <label>Desde</label>
+                  <input type="date" id="bd-from" value="${today}" />
+                </div>
+                <div class="ns-field">
+                  <label>Hasta</label>
+                  <input type="date" id="bd-to" value="${defaultTo}" />
+                </div>
+              </div>
+              <div class="ns-field-2col">
+                <div class="ns-field">
+                  <label>Tipo de clase</label>
+                  <select id="bd-type">
+                    <option value="">Todas las actividades</option>
+                    ${typeOptions}
+                  </select>
+                </div>
+                <div class="ns-field">
+                  <label>Solo sin alumnos</label>
+                  <select id="bd-empty">
+                    <option value="all">Borrar todas (con o sin inscritos)</option>
+                    <option value="empty" selected>Solo clases sin inscritos</option>
+                  </select>
+                </div>
+              </div>
+              <div id="bd-range-preview" class="ns-price-summary" style="background:#fef2f2;border-color:#fecaca;color:#991b1b;display:none"></div>
+            </section>
+          </div>
+
+          <!-- MANUAL -->
+          <div class="bd-pane" data-bd-pane="manual" style="display:none">
+            <section class="ns-section">
+              <h3>Selecciona qué clases borrar</h3>
+              <div class="ns-field-2col">
+                <div class="ns-field">
+                  <label>Desde</label>
+                  <input type="date" id="bd-m-from" value="${today}" />
+                </div>
+                <div class="ns-field">
+                  <label>Hasta</label>
+                  <input type="date" id="bd-m-to" value="${defaultTo}" />
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button type="button" class="ns-btn ns-btn-secondary" id="bd-m-load" style="padding:8px 16px;font-size:.82rem">Cargar clases del rango</button>
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:#6b7280;cursor:pointer">
+                  <input type="checkbox" id="bd-m-all" />
+                  Seleccionar todas
+                </label>
+                <span id="bd-m-counter" style="font-size:.82rem;color:#6b7280;margin-left:auto"></span>
+              </div>
+              <div id="bd-m-list" style="max-height:50vh;overflow-y:auto;border:1px solid #e5e7eb;border-radius:9px;padding:6px;background:#fff;min-height:120px">
+                <p style="text-align:center;color:#9ca3af;padding:30px 16px;font-size:.85rem">Pulsa "Cargar clases del rango" para ver el listado</p>
+              </div>
+            </section>
+          </div>
+
+          <!-- TODAS -->
+          <div class="bd-pane" data-bd-pane="all" style="display:none">
+            <section class="ns-section" style="background:#fef2f2;border-color:#fecaca">
+              <h3 style="color:#991b1b">⚠️ Borrar TODAS las clases futuras</h3>
+              <p style="font-size:.92rem;color:#7f1d1d;margin:0">
+                Esto eliminará todas las clases programadas a partir de hoy
+                (<strong>${formatDate(today)}</strong>) en adelante, sin excepción.
+                Las inscripciones asociadas también se borrarán por cascada.
+              </p>
+              <div id="bd-all-stat" style="padding:14px;background:#fff;border:1px solid #fecaca;border-radius:9px;font-size:.9rem">
+                <span style="color:#6b7280">Calculando…</span>
+              </div>
+              <label class="ns-checkbox" style="color:#991b1b">
+                <input type="checkbox" id="bd-all-confirm" />
+                <span>Confirmo que quiero borrar TODAS las clases futuras</span>
+              </label>
+            </section>
+          </div>
+        </div>
+
+        <footer class="ns-footer">
+          <button type="button" class="ns-btn ns-btn-secondary" id="bd-cancel">Cancelar</button>
+          <button type="button" class="ns-btn" id="bd-submit" style="background:#dc2626;color:#fff">Borrar</button>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    function closeBd() { overlay.remove(); }
+    overlay.querySelector('#bd-close')?.addEventListener('click', closeBd);
+    overlay.querySelector('#bd-cancel')?.addEventListener('click', closeBd);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeBd(); });
+
+    let currentMode = 'range';
+    let manualClasses = []; // [{id, date, type, enrolled, ...}]
+    let allFutureClasses = [];
+
+    // Tab switching
+    overlay.querySelectorAll('[data-bd-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        overlay.querySelectorAll('[data-bd-mode]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = btn.dataset.bdMode;
+        overlay.querySelectorAll('[data-bd-pane]').forEach(p => {
+          p.style.display = p.dataset.bdPane === currentMode ? '' : 'none';
+        });
+        const submit = overlay.querySelector('#bd-submit');
+        if (currentMode === 'range') submit.textContent = 'Buscar y borrar';
+        else if (currentMode === 'manual') submit.textContent = 'Borrar seleccionadas';
+        else submit.textContent = 'Borrar TODAS las futuras';
+      });
+    });
+
+    // ----- RANGO: live preview -----
+    async function refreshRangePreview() {
+      const from = overlay.querySelector('#bd-from').value;
+      const to = overlay.querySelector('#bd-to').value;
+      const type = overlay.querySelector('#bd-type').value;
+      const onlyEmpty = overlay.querySelector('#bd-empty').value === 'empty';
+      const preview = overlay.querySelector('#bd-range-preview');
+      if (!from || !to) { preview.style.display = 'none'; return; }
+      try {
+        const all = await fetchClassesInRange(from, to);
+        const filtered = all.filter(c => (!type || c.type === type) && (!onlyEmpty || (c.enrolled_count || 0) === 0));
+        const withStudents = filtered.filter(c => (c.enrolled_count || 0) > 0).length;
+        preview.style.display = '';
+        preview.innerHTML = `Se borrarán <strong>${filtered.length} clases</strong>${withStudents > 0 ? ` · <strong>${withStudents}</strong> tienen alumnos inscritos` : ''}`;
+      } catch (e) { preview.style.display = 'none'; }
+    }
+    ['#bd-from', '#bd-to', '#bd-type', '#bd-empty'].forEach(sel => {
+      overlay.querySelector(sel)?.addEventListener('change', refreshRangePreview);
+    });
+    refreshRangePreview();
+
+    // ----- MANUAL: load list -----
+    function renderManualList() {
+      const listEl = overlay.querySelector('#bd-m-list');
+      if (!manualClasses.length) {
+        listEl.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:30px 16px;font-size:.85rem">No hay clases en el rango seleccionado</p>';
+        return;
+      }
+      // group by date
+      const byDate = {};
+      manualClasses.forEach(c => { (byDate[c.date] = byDate[c.date] || []).push(c); });
+      const sortedDates = Object.keys(byDate).sort();
+      listEl.innerHTML = sortedDates.map(d => {
+        const items = byDate[d].map(c => {
+          const en = c.enrolled_count || 0;
+          const enrColor = en > 0 ? '#b91c1c' : '#16a34a';
+          return `
+            <label class="bd-row" data-class-id="${c.id}">
+              <input type="checkbox" class="bd-row-check" data-class-id="${c.id}" />
+              <span class="bd-row-time">${c.time_start?.slice(0,5) || '--:--'}</span>
+              <span class="bd-row-title">${TYPE_LABELS[c.type] || c.type}${c.instructor ? ' · ' + escapeHtml(c.instructor) : ''}</span>
+              <span class="bd-row-cap" style="color:${enrColor}">${en} / ${c.max_students || 0}</span>
+            </label>`;
+        }).join('');
+        return `
+          <div class="bd-day-group">
+            <div class="bd-day-header">${formatDate(d)}</div>
+            ${items}
+          </div>`;
+      }).join('');
+
+      listEl.querySelectorAll('.bd-row-check').forEach(cb => {
+        cb.addEventListener('change', updateManualCounter);
+      });
+      updateManualCounter();
+    }
+
+    function updateManualCounter() {
+      const checked = overlay.querySelectorAll('.bd-row-check:checked').length;
+      overlay.querySelector('#bd-m-counter').textContent = checked > 0 ? `${checked} seleccionadas` : '';
+    }
+
+    overlay.querySelector('#bd-m-load')?.addEventListener('click', async () => {
+      const from = overlay.querySelector('#bd-m-from').value;
+      const to = overlay.querySelector('#bd-m-to').value;
+      if (!from || !to) { showToast('Indica un rango', 'error'); return; }
+      const listEl = overlay.querySelector('#bd-m-list');
+      listEl.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:20px;font-size:.85rem">Cargando…</p>';
+      try {
+        manualClasses = await fetchClassesInRange(from, to);
+        renderManualList();
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+
+    overlay.querySelector('#bd-m-all')?.addEventListener('change', (e) => {
+      overlay.querySelectorAll('.bd-row-check').forEach(cb => { cb.checked = e.target.checked; });
+      updateManualCounter();
+    });
+
+    // ----- TODAS: load stat -----
+    (async () => {
+      try {
+        const veryFar = new Date();
+        veryFar.setFullYear(veryFar.getFullYear() + 5);
+        allFutureClasses = await fetchClassesInRange(today, getDateStr(veryFar));
+        const total = allFutureClasses.length;
+        const withStudents = allFutureClasses.filter(c => (c.enrolled_count || 0) > 0).length;
+        overlay.querySelector('#bd-all-stat').innerHTML = `
+          <strong style="font-size:1.2rem;color:#991b1b">${total} clases</strong> programadas a partir de hoy.
+          ${withStudents > 0 ? `<br><span style="color:#b91c1c">⚠️ ${withStudents} tienen alumnos inscritos.</span>` : ''}
+        `;
+      } catch (err) {
+        overlay.querySelector('#bd-all-stat').innerHTML = '<span style="color:#b91c1c">Error cargando stat</span>';
+      }
+    })();
+
+    // ----- SUBMIT -----
+    overlay.querySelector('#bd-submit')?.addEventListener('click', async () => {
+      const submit = overlay.querySelector('#bd-submit');
+
+      let toDelete = [];
+      if (currentMode === 'range') {
+        const from = overlay.querySelector('#bd-from').value;
+        const to = overlay.querySelector('#bd-to').value;
+        const type = overlay.querySelector('#bd-type').value;
+        const onlyEmpty = overlay.querySelector('#bd-empty').value === 'empty';
+        if (!from || !to) { showToast('Indica un rango', 'error'); return; }
+        try {
+          const all = await fetchClassesInRange(from, to);
+          toDelete = all.filter(c => (!type || c.type === type) && (!onlyEmpty || (c.enrolled_count || 0) === 0));
+        } catch (err) { showToast('Error: ' + err.message, 'error'); return; }
+      } else if (currentMode === 'manual') {
+        const ids = [...overlay.querySelectorAll('.bd-row-check:checked')].map(cb => cb.dataset.classId);
+        toDelete = manualClasses.filter(c => ids.includes(c.id));
+      } else if (currentMode === 'all') {
+        if (!overlay.querySelector('#bd-all-confirm').checked) {
+          showToast('Marca la casilla de confirmación', 'error');
+          return;
+        }
+        toDelete = allFutureClasses;
+      }
+
+      if (!toDelete.length) { showToast('No hay clases que borrar', 'error'); return; }
+
+      const withStudents = toDelete.filter(c => (c.enrolled_count || 0) > 0).length;
+      const msg = withStudents > 0
+        ? `Vas a borrar ${toDelete.length} clases. ${withStudents} tienen alumnos inscritos (sus inscripciones se borrarán también).\n\n¿Continuar?`
+        : `Vas a borrar ${toDelete.length} clases. ¿Continuar?`;
+      if (!confirm(msg)) return;
+
+      submit.disabled = true;
+      submit.textContent = `Borrando 0 / ${toDelete.length}…`;
+
+      let done = 0, failed = 0;
+      for (const c of toDelete) {
+        try {
+          await deleteClass(c.id);
+          done++;
+        } catch (err) {
+          console.error('No se pudo borrar', c.id, err);
+          failed++;
+        }
+        submit.textContent = `Borrando ${done} / ${toDelete.length}…`;
+      }
+
+      closeBd();
+      if (failed > 0) showToast(`${done} borradas · ${failed} con error`, 'error');
+      else showToast(`${done} clases borradas`, 'success');
+      render();
     });
   }
 

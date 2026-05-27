@@ -1307,6 +1307,75 @@ a.admin-nav-item-external .nav-icon svg {
   color: #6b7280;
   margin-top: 1px;
 }
+.cal-add-menu-item.danger {
+  color: #b91c1c;
+}
+.cal-add-menu-item.danger svg,
+.cal-add-menu-item.danger strong {
+  color: #b91c1c;
+}
+.cal-add-menu-item.danger:hover {
+  background: #fef2f2;
+}
+.cal-add-menu-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 8px;
+}
+
+/* Bulk delete classes — list view */
+.bd-day-group {
+  margin-bottom: 6px;
+}
+.bd-day-header {
+  padding: 8px 10px 4px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #6b7280;
+  background: #f9fafb;
+  border-radius: 6px;
+  margin-bottom: 2px;
+}
+.bd-row {
+  display: grid;
+  grid-template-columns: auto 60px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s;
+}
+.bd-row:hover {
+  background: #f9fafb;
+}
+.bd-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #dc2626;
+}
+.bd-row-time {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  color: #0f2f39;
+  font-size: .85rem;
+}
+.bd-row-title {
+  font-size: .88rem;
+  color: #0f2f39;
+}
+.bd-row-cap {
+  font-size: .78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.bd-row:has(input:checked) {
+  background: #fef2f2;
+}
 
 /* ---- Day View ---- */
 .cal-day-content {
