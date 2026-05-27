@@ -257,6 +257,29 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
       ].join(""), false),
     };
 
+    case "class_rescheduled": return {
+      subject: `Cambio de horario: ${d.className || "tu clase"}`,
+      html: emailWrap(logoDefault(), [
+        heading(`Cambio de horario`),
+        sub(`${name ? name + ", tu" : "Tu"} clase ha cambiado de horario.`),
+        `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+          <td style="background-color:#fee2e2;border:1px solid #fecaca;border-radius:10px;padding:14px 18px">
+            <p style="font-family:${FU};font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#991b1b;margin:0 0 6px">Antes</p>
+            <p style="font-family:${F};font-size:15px;color:#7f1d1d;margin:0;text-decoration:line-through">${d.oldClassDate || ""} &middot; ${d.oldClassTime || ""}</p>
+          </td>
+        </tr></table>`,
+        `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+          <td style="background-color:#f3ecdd;border-radius:10px;padding:18px 20px">
+            <p style="font-family:${FU};font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#64757d;margin:0 0 6px">Nuevo horario</p>
+            <p style="font-family:${F};font-size:18px;font-weight:700;color:#0f2f39;margin:0 0 4px">${d.className || "Clase"}</p>
+            <p style="font-family:${F};font-size:14px;color:#64757d;margin:0">${d.classDate || ""} &middot; ${d.classTime || ""}</p>
+            ${d.instructor ? `<p style="font-family:${F};font-size:13px;color:#64757d;margin:6px 0 0">Instructor: <strong style="color:#0f2f39">${d.instructor}</strong></p>` : ""}
+          </td>
+        </tr></table>`,
+        sandBox("Tu plaza sigue reservada con el nuevo horario. Si no puedes asistir, cancela desde tu cuenta o respondenos a este email."),
+      ].join(""), false),
+    };
+
     case "welcome": return {
       subject: "Bienvenido a Entre Olas!",
       html: emailWrap(logoDefault(), [

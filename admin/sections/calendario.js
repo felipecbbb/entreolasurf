@@ -32,6 +32,56 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
+// ---- Notificar a inscritos cuando una clase cambia o se cancela ----
+// kind: 'cancelled' | 'rescheduled'
+// payload: { className, classDate, classTime, instructor?, oldClassDate?, oldClassTime? }
+async function notifyEnrolledClients(classId, kind, payload) {
+  const result = { sent: 0, withoutEmail: 0, failed: 0 };
+  try {
+    const { data: enrollments } = await supabase
+      .from('class_enrollments')
+      .select('user_id, guest_name, status, profiles:user_id(full_name)')
+      .eq('class_id', classId)
+      .neq('status', 'cancelled');
+    if (!enrollments?.length) return result;
+
+    const emailType = kind === 'cancelled' ? 'class_cancelled' : 'class_rescheduled';
+
+    for (const en of enrollments) {
+      let email = null;
+      let name = en.guest_name || en.profiles?.full_name || null;
+      if (en.user_id) {
+        try {
+          const { data } = await supabase.rpc('get_user_email', { p_user_id: en.user_id });
+          if (data) email = data;
+        } catch {}
+      }
+      if (!email) { result.withoutEmail++; continue; }
+      try {
+        const { error } = await supabase.functions.invoke('send-email', {
+          body: { to: email, type: emailType, data: { customerName: name, ...payload } },
+        });
+        if (error) { result.failed++; continue; }
+        result.sent++;
+      } catch (err) {
+        console.warn('notifyEnrolledClients send failed:', err);
+        result.failed++;
+      }
+    }
+  } catch (err) {
+    console.warn('notifyEnrolledClients error:', err);
+  }
+  return result;
+}
+
+function notifyToastMessage(action, r) {
+  const parts = [];
+  if (r.sent > 0) parts.push(`${r.sent} ${r.sent === 1 ? 'aviso enviado' : 'avisos enviados'}`);
+  if (r.withoutEmail > 0) parts.push(`${r.withoutEmail} sin email`);
+  if (r.failed > 0) parts.push(`${r.failed} con error`);
+  return parts.length ? `${action} · ${parts.join(' · ')}` : action;
+}
+
 const DAY_NAMES_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const DAY_NAMES_SHORT = ['Dom.', 'Lun.', 'Mar.', 'Mié.', 'Jue.', 'Vie.', 'Sáb.'];
 const MONTH_NAMES = ['Ene.', 'Feb.', 'Mar.', 'Abr.', 'May.', 'Jun.', 'Jul.', 'Ago.', 'Sep.', 'Oct.', 'Nov.', 'Dic.'];
@@ -1073,10 +1123,21 @@ export async function renderCalendario(container) {
     container.querySelectorAll('.delete-session-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('¿Eliminar esta sesión?')) return;
+        if (!confirm('¿Eliminar esta sesión? Se notificará por email a los inscritos.')) return;
+        const classId = btn.dataset.id;
+        const cls = classes.find(c => c.id === classId);
         try {
-          await deleteClass(btn.dataset.id);
-          showToast('Sesión eliminada', 'success');
+          // Notificar ANTES de borrar (la cascada eliminará los enrollments)
+          let notifyResult = { sent: 0, withoutEmail: 0, failed: 0 };
+          if (cls) {
+            notifyResult = await notifyEnrolledClients(classId, 'cancelled', {
+              className: TYPE_LABELS[cls.type] || cls.title || 'Clase',
+              classDate: formatDate(cls.date),
+              classTime: `${cls.time_start?.slice(0,5) || ''} - ${cls.time_end?.slice(0,5) || ''}`,
+            });
+          }
+          await deleteClass(classId);
+          showToast(notifyToastMessage('Sesión eliminada', notifyResult), 'success');
           render();
         } catch (err) { showToast('Error: ' + err.message, 'error'); }
       });
@@ -4299,8 +4360,19 @@ export async function renderCalendario(container) {
       submit.textContent = `Borrando 0 / ${toDelete.length}…`;
 
       let done = 0, failed = 0;
+      const notifySum = { sent: 0, withoutEmail: 0, failed: 0 };
       for (const c of toDelete) {
         try {
+          if ((c.enrolled_count || 0) > 0) {
+            const r = await notifyEnrolledClients(c.id, 'cancelled', {
+              className: TYPE_LABELS[c.type] || c.title || 'Clase',
+              classDate: formatDate(c.date),
+              classTime: `${c.time_start?.slice(0,5) || ''} - ${c.time_end?.slice(0,5) || ''}`,
+            });
+            notifySum.sent += r.sent;
+            notifySum.withoutEmail += r.withoutEmail;
+            notifySum.failed += r.failed;
+          }
           await deleteClass(c.id);
           done++;
         } catch (err) {
@@ -4311,8 +4383,8 @@ export async function renderCalendario(container) {
       }
 
       closeBd();
-      if (failed > 0) showToast(`${done} borradas · ${failed} con error`, 'error');
-      else showToast(`${done} clases borradas`, 'success');
+      const base = failed > 0 ? `${done} borradas · ${failed} con error` : `${done} clases borradas`;
+      showToast(notifyToastMessage(base, notifySum), failed > 0 ? 'error' : 'success');
       render();
     });
   }
@@ -5262,10 +5334,30 @@ export async function renderCalendario(container) {
       if (!obj.instructor) obj.instructor = null;
       if (!obj.audience) obj.audience = null;
 
+      // Detectar si cambia el horario o la fecha → notificar a inscritos
+      const oldDate = cls.date;
+      const oldTimeStart = cls.time_start?.slice(0, 5) || '';
+      const oldTimeEnd = cls.time_end?.slice(0, 5) || '';
+      const newTimeStart = obj.time_start?.slice(0, 5) || '';
+      const newTimeEnd = obj.time_end?.slice(0, 5) || '';
+      const scheduleChanged = oldDate !== obj.date || oldTimeStart !== newTimeStart || oldTimeEnd !== newTimeEnd;
+
       try {
         await upsertClass(obj);
         closeModal();
-        showToast('Sesión actualizada', 'success');
+        let toastMsg = 'Sesión actualizada';
+        if (scheduleChanged && (cls.enrolled_count || 0) > 0) {
+          const r = await notifyEnrolledClients(cls.id, 'rescheduled', {
+            className: TYPE_LABELS[obj.type] || obj.title || 'Clase',
+            classDate: formatDate(obj.date),
+            classTime: `${newTimeStart} - ${newTimeEnd}`,
+            instructor: obj.instructor || '',
+            oldClassDate: formatDate(oldDate),
+            oldClassTime: `${oldTimeStart} - ${oldTimeEnd}`,
+          });
+          toastMsg = notifyToastMessage(toastMsg, r);
+        }
+        showToast(toastMsg, 'success');
         render();
       } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });
