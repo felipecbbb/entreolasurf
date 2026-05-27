@@ -4015,7 +4015,8 @@ export async function renderCalendario(container) {
     const eid = enrollment.id;
     const personName = enrollment.guest_name || enrollment.family_members?.full_name || enrollment.profiles?.full_name || 'Sin nombre';
     const clsLabel = TYPE_LABELS[cls.type] || cls.title || 'Clase';
-    const clsPrice = Number(cls.price || 0);
+    // Si la clase no tiene precio (no se pide al crear), usar el precio de 1 sesión del pack
+    const clsPrice = Number(cls.price) > 0 ? Number(cls.price) : getPackPrice(cls.type, 1, 0);
     const hasBono = !!enrollment.bono_id;
 
     document.getElementById('epm-overlay')?.remove();
