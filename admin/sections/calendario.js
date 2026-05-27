@@ -4002,109 +4002,238 @@ export async function renderCalendario(container) {
 
     const dayCheckboxes = DAY_NAMES_FULL.map((name, i) => {
       const checked = i === currentDate.getDay() ? 'checked' : '';
-      return `<label class="cal-day-checkbox">
+      return `<label class="ns-day-pill">
         <input type="checkbox" name="repeat_days" value="${i}" ${checked} />
         <span>${name.slice(0, 3)}</span>
       </label>`;
     }).join('');
 
     const defaultCapacities = { grupal: 6, individual: 1, yoga: 10, paddle: 8, surfskate: 8 };
+    const startDateStr = getDateStr(currentDate);
 
-    openModal('Nueva Sesión', `
-      <div class="cal-modal-type-selector" style="display:flex;gap:8px;margin-bottom:16px">
-        <button class="tar-tab-btn active" data-modal-type="clase" type="button">Clase</button>
-        <button class="tar-tab-btn" data-modal-type="material" type="button">Alquiler de Material</button>
-      </div>
-      <div id="ns-clase-form">
-        <form id="new-session-form" class="trip-form">
-          <label>Actividad</label>
-          <select name="type" id="ns-type" required>${typeOptions}</select>
-          <label>Hora de Inicio</label>
-          <input type="time" name="time_start" value="10:00" required />
-          <label>Hora de Fin</label>
-          <input type="time" name="time_end" value="11:30" required />
-          <label>Capacidad Máxima</label>
-          <input type="number" name="max_students" id="ns-capacity" value="6" min="1" required />
-          <label>Días de repetición</label>
-          <div class="cal-days-grid">${dayCheckboxes}</div>
-          <label>Repetir hasta</label>
-          <input type="date" name="repeat_until" value="${getEndOfMonthStr(currentDate)}" required />
-          <label>Instructor</label>
-          <input type="text" name="instructor" placeholder="Opcional" />
-          <label>Público</label>
-          <select name="audience">${audienceOptionsHtml()}</select>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
-            <input type="checkbox" name="published" style="width:auto" />
-            Publicar inmediatamente
-          </label>
-          <button type="submit" class="btn red" style="margin-top:16px">Crear Sesiones</button>
-        </form>
-      </div>
-      <div id="ns-material-form" style="display:none">
-        <form id="new-rental-form" class="trip-form">
-          <label>Material</label>
-          <select name="equipment_id" id="nr-equipment" required>
-            <option value="">Cargando material...</option>
-          </select>
-          <div id="nr-size-wrap" style="display:none">
-            <label>Talla</label>
-            <select name="size" id="nr-size"></select>
+    // Remove any existing overlay
+    document.getElementById('ns-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ns-overlay';
+    overlay.className = 'ns-overlay';
+    overlay.innerHTML = `
+      <div class="ns-panel">
+        <header class="ns-header">
+          <div>
+            <h2>Nueva sesión</h2>
+            <p>${formatDate(startDateStr)} · ${TYPE_LABELS['grupal'] || 'Clase'}</p>
           </div>
-          <label>Tarifa</label>
-          <select name="duration_key" id="nr-duration" required>
-            <option value="">Selecciona un material primero</option>
-          </select>
-          <div id="nr-custom-price-wrap" style="display:none;margin-top:8px">
-            <label>Precio personalizado (€)</label>
-            <input type="number" name="custom_price" id="nr-custom-price" step="0.01" min="0" value="0" />
+          <button class="ns-close" id="ns-close" title="Cerrar">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+
+        <div class="ns-tabs">
+          <button type="button" class="ns-tab active" data-modal-type="clase">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Clase
+          </button>
+          <button type="button" class="ns-tab" data-modal-type="material">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12c0-2.2 1.8-4 4-4m0 8c2.2 0 4-1.8 4-4"/></svg>
+            Alquiler de material
+          </button>
+        </div>
+
+        <div class="ns-body">
+          <!-- ============ CLASE ============ -->
+          <div id="ns-clase-form" class="ns-form-wrap">
+            <form id="new-session-form" class="ns-grid">
+              <section class="ns-section ns-section-when">
+                <h3>Cuándo</h3>
+                <div class="ns-field">
+                  <label>Días de repetición</label>
+                  <div class="ns-days-row">${dayCheckboxes}</div>
+                </div>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
+                    <label>Hora de inicio</label>
+                    <input type="time" name="time_start" value="10:00" required />
+                  </div>
+                  <div class="ns-field">
+                    <label>Hora de fin</label>
+                    <input type="time" name="time_end" value="11:30" required />
+                  </div>
+                </div>
+                <div class="ns-field">
+                  <label>Repetir hasta</label>
+                  <input type="date" name="repeat_until" value="${getEndOfMonthStr(currentDate)}" required />
+                </div>
+              </section>
+
+              <section class="ns-section ns-section-detail">
+                <h3>Detalles</h3>
+                <div class="ns-field">
+                  <label>Actividad</label>
+                  <select name="type" id="ns-type" required>${typeOptions}</select>
+                </div>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
+                    <label>Capacidad máxima</label>
+                    <input type="number" name="max_students" id="ns-capacity" value="6" min="1" required />
+                  </div>
+                  <div class="ns-field">
+                    <label>Público</label>
+                    <select name="audience">${audienceOptionsHtml()}</select>
+                  </div>
+                </div>
+                <div class="ns-field">
+                  <label>Instructor</label>
+                  <input type="text" name="instructor" placeholder="Opcional" />
+                </div>
+                <label class="ns-checkbox">
+                  <input type="checkbox" name="published" />
+                  <span>Publicar inmediatamente</span>
+                </label>
+              </section>
+            </form>
           </div>
-          <label>Nombre</label>
-          <input type="text" name="guest_name" placeholder="Nombre" required />
-          <label>Apellidos</label>
-          <input type="text" name="guest_last_name" placeholder="Apellidos" />
-          <label>Email</label>
-          <input type="email" name="guest_email" placeholder="email@ejemplo.com" />
-          <label>Teléfono</label>
-          <input type="tel" name="guest_phone" placeholder="+34 600 000 000" />
-          <label>Talla neopreno</label>
-          <select name="wetsuit_size">${wetsuitOptionsHtml()}</select>
-          <label>¿Sabe nadar?</label>
-          <select name="can_swim">
-            <option value="">Sin definir</option>
-            <option value="si">Sí</option>
-            <option value="no">No</option>
-          </select>
-          <label>¿Tiene alguna lesión?</label>
-          <select name="has_injury" id="nr-has-injury">
-            <option value="no">No</option>
-            <option value="si">Sí</option>
-          </select>
-          <div id="nr-injury-detail-wrap" style="display:none">
-            <label>Detalle de la lesión</label>
-            <input type="text" name="injury_detail" placeholder="Describe la lesión" />
+
+          <!-- ============ ALQUILER ============ -->
+          <div id="ns-material-form" class="ns-form-wrap" style="display:none">
+            <form id="new-rental-form" class="ns-grid">
+              <section class="ns-section">
+                <h3>Material y fechas</h3>
+                <div class="ns-field">
+                  <label>Material</label>
+                  <select name="equipment_id" id="nr-equipment" required>
+                    <option value="">Cargando material…</option>
+                  </select>
+                </div>
+                <div class="ns-field" id="nr-size-wrap" style="display:none">
+                  <label>Talla</label>
+                  <select name="size" id="nr-size"></select>
+                </div>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
+                    <label>Tarifa</label>
+                    <select name="duration_key" id="nr-duration" required>
+                      <option value="">Selecciona un material…</option>
+                    </select>
+                  </div>
+                  <div class="ns-field">
+                    <label>Cantidad</label>
+                    <input type="number" name="quantity" value="1" min="1" required />
+                  </div>
+                </div>
+                <div class="ns-field" id="nr-custom-price-wrap" style="display:none">
+                  <label>Precio personalizado (€)</label>
+                  <input type="number" name="custom_price" id="nr-custom-price" step="0.01" min="0" value="0" />
+                </div>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
+                    <label>Fecha inicio</label>
+                    <input type="date" name="date_start" value="${dateStr}" required />
+                  </div>
+                  <div class="ns-field">
+                    <label>Fecha fin</label>
+                    <input type="date" name="date_end" value="${dateStr}" required />
+                  </div>
+                </div>
+                <div id="nr-price-summary" class="ns-price-summary" style="display:none"></div>
+              </section>
+
+              <section class="ns-section">
+                <h3>Cliente</h3>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
+                    <label>Nombre</label>
+                    <input type="text" name="guest_name" placeholder="Nombre" required />
+                  </div>
+                  <div class="ns-field">
+                    <label>Apellidos</label>
+                    <input type="text" name="guest_last_name" placeholder="Apellidos" />
+                  </div>
+                </div>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
+                    <label>Email</label>
+                    <input type="email" name="guest_email" placeholder="email@ejemplo.com" />
+                  </div>
+                  <div class="ns-field">
+                    <label>Teléfono</label>
+                    <input type="tel" name="guest_phone" placeholder="+34 600 000 000" />
+                  </div>
+                </div>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
+                    <label>Talla neopreno</label>
+                    <select name="wetsuit_size">${wetsuitOptionsHtml()}</select>
+                  </div>
+                  <div class="ns-field">
+                    <label>¿Sabe nadar?</label>
+                    <select name="can_swim">
+                      <option value="">Sin definir</option>
+                      <option value="si">Sí</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="ns-field">
+                  <label>¿Tiene alguna lesión?</label>
+                  <select name="has_injury" id="nr-has-injury">
+                    <option value="no">No</option>
+                    <option value="si">Sí</option>
+                  </select>
+                </div>
+                <div class="ns-field" id="nr-injury-detail-wrap" style="display:none">
+                  <label>Detalle de la lesión</label>
+                  <input type="text" name="injury_detail" placeholder="Describe la lesión" />
+                </div>
+              </section>
+            </form>
           </div>
-          <label>Fecha inicio</label>
-          <input type="date" name="date_start" value="${dateStr}" required />
-          <label>Fecha fin</label>
-          <input type="date" name="date_end" value="${dateStr}" required />
-          <label>Cantidad</label>
-          <input type="number" name="quantity" value="1" min="1" required />
-          <div id="nr-price-summary" style="margin-top:12px;padding:12px;background:#f0fdf4;border-radius:8px;font-weight:600;display:none"></div>
-          <button type="submit" class="btn red" style="margin-top:16px">Crear Reserva de Material</button>
-        </form>
+        </div>
+
+        <footer class="ns-footer">
+          <button type="button" class="ns-btn ns-btn-secondary" id="ns-cancel">Cancelar</button>
+          <button type="button" class="ns-btn ns-btn-primary" id="ns-submit">Crear sesiones</button>
+        </footer>
       </div>
-    `);
+    `;
+    document.body.appendChild(overlay);
+
+    // Helpers locales (sustituyen a closeModal global)
+    function closeNsOverlay() { overlay.remove(); }
+    overlay.querySelector('#ns-close')?.addEventListener('click', closeNsOverlay);
+    overlay.querySelector('#ns-cancel')?.addEventListener('click', closeNsOverlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeNsOverlay(); });
+
+    let currentTab = 'clase';
+    function updateSubmitLabel() {
+      const submit = overlay.querySelector('#ns-submit');
+      if (!submit) return;
+      submit.textContent = currentTab === 'clase' ? 'Crear sesiones' : 'Crear reserva de material';
+    }
+
+    // El botón global de footer dispara el submit del form correspondiente
+    overlay.querySelector('#ns-submit')?.addEventListener('click', () => {
+      const form = currentTab === 'clase'
+        ? overlay.querySelector('#new-session-form')
+        : overlay.querySelector('#new-rental-form');
+      form?.requestSubmit();
+    });
 
     // Tab switching between Clase and Material
-    document.querySelectorAll('[data-modal-type]').forEach(btn => {
+    overlay.querySelectorAll('[data-modal-type]').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('[data-modal-type]').forEach(b => b.classList.remove('active'));
+        overlay.querySelectorAll('[data-modal-type]').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const isClase = btn.dataset.modalType === 'clase';
-        document.getElementById('ns-clase-form').style.display = isClase ? '' : 'none';
-        document.getElementById('ns-material-form').style.display = isClase ? 'none' : '';
+        overlay.querySelector('#ns-clase-form').style.display = isClase ? '' : 'none';
+        overlay.querySelector('#ns-material-form').style.display = isClase ? 'none' : '';
+        currentTab = isClase ? 'clase' : 'material';
+        updateSubmitLabel();
       });
     });
+
+    // Expongo cierre para los handlers de submit que se definen más abajo
+    overlay._close = closeNsOverlay;
 
     // Injury toggle in rental form
     document.getElementById('nr-has-injury')?.addEventListener('change', (e) => {
@@ -4222,9 +4351,8 @@ export async function renderCalendario(container) {
 
       if (!dates.length) { showToast('No hay fechas que coincidan', 'error'); return; }
 
-      const submitBtn = e.target.querySelector('button[type="submit"]');
-      submitBtn.disabled = true;
-      submitBtn.textContent = `Creando ${dates.length} sesiones…`;
+      const submitBtn = document.getElementById('ns-submit') || e.target.querySelector('button[type="submit"]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = `Creando ${dates.length} sesiones…`; }
 
       try {
         for (const date of dates) {
@@ -4235,13 +4363,14 @@ export async function renderCalendario(container) {
             location: 'Playa de Roche', status: 'scheduled',
           });
         }
+        document.getElementById('ns-overlay')?.remove();
         closeModal();
         showToast(`${dates.length} sesiones creadas`, 'success');
         render();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Crear Sesiones';
+        submitBtn.textContent = 'Crear sesiones';
       }
     });
 
@@ -4267,9 +4396,8 @@ export async function renderCalendario(container) {
       const eqId = document.getElementById('nr-equipment')?.value;
       const deposit = Number(equipmentMap[eqId]?.deposit) || 0;
 
-      const submitBtn = e.target.querySelector('button[type="submit"]');
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Creando reserva…';
+      const submitBtn = document.getElementById('ns-submit') || e.target.querySelector('button[type="submit"]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creando reserva…'; }
 
       // Build notes JSON with extra client data
       const extraData = {};
@@ -4301,13 +4429,14 @@ export async function renderCalendario(container) {
           status: 'confirmed',
           notes: Object.keys(extraData).length ? JSON.stringify(extraData) : null,
         });
+        document.getElementById('ns-overlay')?.remove();
         closeModal();
         showToast('Reserva de material creada', 'success');
         render();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Crear Reserva de Material';
+        submitBtn.textContent = 'Crear reserva de material';
       }
     });
   }
