@@ -154,13 +154,27 @@ export async function renderCalendario(container) {
             <button class="cal-view-btn ${viewMode === 'day' ? 'active' : ''}" data-view="day">Día</button>
             <button class="cal-view-btn ${viewMode === 'week' ? 'active' : ''}" data-view="week">Semana</button>
           </div>
-          <button class="cal-action-btn cal-booking-btn" id="cal-new-booking" title="Crear reserva">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M12 14l2 2 4-4"/></svg>
-            <span style="font-size:.82rem;font-weight:600">Reserva</span>
-          </button>
-          <button class="cal-action-btn cal-add-btn" id="cal-add-session" title="Nueva sesión">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </button>
+          <div class="cal-add-wrap" id="cal-add-wrap">
+            <button class="cal-action-btn cal-add-btn" id="cal-add-trigger" title="Crear">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <div class="cal-add-menu" id="cal-add-menu" hidden>
+              <button class="cal-add-menu-item" id="cal-menu-new-booking" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M12 14l2 2 4-4"/></svg>
+                <div>
+                  <strong>Nueva reserva</strong>
+                  <small>Inscribir cliente en clase existente</small>
+                </div>
+              </button>
+              <button class="cal-add-menu-item" id="cal-menu-new-session" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <div>
+                  <strong>Nueva clase / alquiler</strong>
+                  <small>Crear sesión en el horario o material</small>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
       </div>`;
 
@@ -529,8 +543,36 @@ export async function renderCalendario(container) {
       btn.addEventListener('click', () => { viewMode = btn.dataset.view; render(); });
     });
 
-    container.querySelector('#cal-add-session')?.addEventListener('click', () => openNewSessionModal());
-    container.querySelector('#cal-new-booking')?.addEventListener('click', () => openBookingWizard());
+    // Dropdown "+" del topbar — Nueva reserva / Nueva clase
+    const addTrigger = container.querySelector('#cal-add-trigger');
+    const addMenu = container.querySelector('#cal-add-menu');
+    const addWrap = container.querySelector('#cal-add-wrap');
+    if (addTrigger && addMenu) {
+      const closeMenu = () => {
+        addMenu.hidden = true;
+        addWrap?.classList.remove('open');
+        document.removeEventListener('click', onDocClick);
+      };
+      const onDocClick = (e) => {
+        if (!addWrap?.contains(e.target)) closeMenu();
+      };
+      addTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const willOpen = addMenu.hidden;
+        addMenu.hidden = !willOpen;
+        addWrap?.classList.toggle('open', willOpen);
+        if (willOpen) setTimeout(() => document.addEventListener('click', onDocClick), 0);
+        else document.removeEventListener('click', onDocClick);
+      });
+      container.querySelector('#cal-menu-new-booking')?.addEventListener('click', () => {
+        closeMenu();
+        openBookingWizard();
+      });
+      container.querySelector('#cal-menu-new-session')?.addEventListener('click', () => {
+        closeMenu();
+        openNewSessionModal();
+      });
+    }
 
     // Click on session header → show enrollments
     container.querySelectorAll('.cal-session-header').forEach(header => {

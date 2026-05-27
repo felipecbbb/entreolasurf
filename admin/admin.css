@@ -1242,10 +1242,70 @@ a.admin-nav-item-external .nav-icon svg {
 .cal-add-btn {
   color: var(--color-navy, #0f2f39);
 }
-.cal-add-btn:hover {
+.cal-add-btn:hover,
+.cal-add-wrap.open .cal-add-btn {
   background: var(--color-yellow, #FFCC01);
   border-color: var(--color-yellow, #FFCC01);
   color: var(--color-navy, #0f2f39);
+}
+
+/* Dropdown del + */
+.cal-add-wrap {
+  position: relative;
+}
+.cal-add-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15,47,57,.16);
+  min-width: 260px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: calAddMenuIn .15s cubic-bezier(.22,1,.36,1);
+}
+@keyframes calAddMenuIn {
+  from { opacity: 0; transform: translateY(-4px) scale(.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.cal-add-menu[hidden] {
+  display: none;
+}
+.cal-add-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-navy, #0f2f39);
+  transition: background .15s;
+}
+.cal-add-menu-item:hover {
+  background: #f3f4f6;
+}
+.cal-add-menu-item svg {
+  flex-shrink: 0;
+  color: #0f2f39;
+}
+.cal-add-menu-item strong {
+  display: block;
+  font-size: .88rem;
+  font-weight: 700;
+}
+.cal-add-menu-item small {
+  display: block;
+  font-size: .72rem;
+  color: #6b7280;
+  margin-top: 1px;
 }
 
 /* ---- Day View ---- */
