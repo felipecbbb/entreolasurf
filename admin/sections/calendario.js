@@ -685,15 +685,11 @@ export async function renderCalendario(container) {
 
         if (itemType === 'enrollment') {
           const eid = row.dataset.enrollmentId;
-          const isPartial = row.classList.contains('partial');
-          // Cycle: unpaid → partial → paid → unpaid
-          const newStatus = isPaid ? 'confirmed' : isPartial ? 'paid' : 'partial';
-          const statusMsg = { confirmed: 'Marcado como pendiente', partial: 'Marcado como anticipo pagado', paid: 'Marcado como pagado' };
-          try {
-            await updateEnrollmentStatus(eid, newStatus);
-            showToast(statusMsg[newStatus] || newStatus, 'success');
-            render();
-          } catch (err) { showToast('Error: ' + err.message, 'error'); }
+          const classId = row.dataset.classId;
+          const cls = classes.find(c => c.id === classId);
+          const enrollment = (enrollmentsCache[classId] || []).find(en => en.id === eid);
+          if (!cls || !enrollment) return;
+          openEnrollmentPayModal(cls, enrollment);
         } else if (itemType === 'rental') {
           const rid = row.dataset.rentalId;
           const reservation = rentalReservations.find(r => r.id === rid);
@@ -4012,6 +4008,197 @@ export async function renderCalendario(container) {
         });
       });
     }
+  }
+
+  // ======== ENROLLMENT PAY MODAL (icono billete en la card) ========
+  async function openEnrollmentPayModal(cls, enrollment) {
+    const eid = enrollment.id;
+    const personName = enrollment.guest_name || enrollment.family_members?.full_name || enrollment.profiles?.full_name || 'Sin nombre';
+    const clsLabel = TYPE_LABELS[cls.type] || cls.title || 'Clase';
+    const clsPrice = Number(cls.price || 0);
+    const hasBono = !!enrollment.bono_id;
+
+    document.getElementById('epm-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'epm-overlay';
+    overlay.className = 'ns-overlay';
+    overlay.style.alignItems = 'center';
+    overlay.innerHTML = `
+      <div class="ns-panel" style="max-width:480px;height:auto;max-height:90vh;border-radius:16px">
+        <header class="ns-header" style="padding:16px 22px">
+          <div>
+            <h2 style="font-size:1.2rem">${escapeHtml(personName)}</h2>
+            <p>${escapeHtml(clsLabel)} · ${formatDate(cls.date)} · ${cls.time_start?.slice(0,5) || ''}</p>
+          </div>
+          <button class="ns-close" id="epm-close" title="Cerrar">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+        <div class="ns-body" style="padding:22px">
+          <div id="epm-content"><div style="text-align:center;color:#9ca3af;padding:30px"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    function closeEpm() {
+      const dirty = overlay._dirty;
+      overlay.remove();
+      if (dirty) render();
+    }
+    overlay.querySelector('#epm-close')?.addEventListener('click', closeEpm);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEpm(); });
+
+    const contentEl = overlay.querySelector('#epm-content');
+
+    async function refreshStatusFromPayments() {
+      const payments = await fetchPayments('enrollment', eid);
+      const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      let newStatus;
+      if (totalPaid <= 0) newStatus = 'confirmed';
+      else if (clsPrice > 0 && totalPaid >= clsPrice) newStatus = 'paid';
+      else newStatus = 'partial';
+      // No tocar si está completed/no_show/cancelled (asistencia)
+      if (!['completed', 'no_show', 'cancelled'].includes(enrollment.status)) {
+        if (enrollment.status !== newStatus) {
+          try { await updateEnrollmentStatus(eid, newStatus); enrollment.status = newStatus; } catch {}
+        }
+      }
+      return { payments, totalPaid };
+    }
+
+    async function paint() {
+      const { payments, totalPaid } = await refreshStatusFromPayments();
+      const pending = Math.max(0, Math.round((clsPrice - totalPaid) * 100) / 100);
+      const isPaid = clsPrice > 0 ? totalPaid >= clsPrice : totalPaid > 0;
+      const isPartial = !isPaid && totalPaid > 0;
+      const statusColor = isPaid ? '#16a34a' : isPartial ? '#d97706' : '#dc2626';
+      const statusLabel = isPaid ? 'PAGADO' : isPartial ? 'ANTICIPO' : 'PENDIENTE';
+
+      const paymentsHtml = payments.length ? payments.map(p => {
+        const d = new Date(p.payment_date || p.created_at);
+        const dl = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        return `
+          <div class="epm-pay" data-pid="${p.id}">
+            <div>
+              <strong>${Number(p.amount).toFixed(2)}€</strong> · ${p.payment_method}
+              <div style="font-size:.72rem;color:#6b7280">${dl}${p.concept ? ' · ' + escapeHtml(p.concept) : ''}</div>
+            </div>
+            <button class="epm-del" data-pid="${p.id}" title="Eliminar">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
+            </button>
+          </div>`;
+      }).join('') : '<p style="font-size:.82rem;color:#6b7280;text-align:center;margin:8px 0">Sin pagos registrados</p>';
+
+      const bonoBanner = hasBono
+        ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:10px 12px;font-size:.82rem;color:#1e40af;margin-bottom:14px">
+            <strong>Esta clase la cubre un bono.</strong> Si quieres registrar pagos del bono, hazlo desde la ficha del cliente.
+          </div>` : '';
+
+      contentEl.innerHTML = `
+        ${bonoBanner}
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+          <div style="padding:10px;background:#f9fafb;border-radius:9px;text-align:center">
+            <div style="font-size:.65rem;text-transform:uppercase;color:#6b7280;font-weight:700;letter-spacing:.06em">Precio</div>
+            <div style="font-size:1.05rem;font-weight:700;color:#0f2f39;margin-top:2px">${clsPrice.toFixed(2)}€</div>
+          </div>
+          <div style="padding:10px;background:#f0fdf4;border-radius:9px;text-align:center">
+            <div style="font-size:.65rem;text-transform:uppercase;color:#065f46;font-weight:700;letter-spacing:.06em">Pagado</div>
+            <div style="font-size:1.05rem;font-weight:700;color:#166534;margin-top:2px">${totalPaid.toFixed(2)}€</div>
+          </div>
+          <div style="padding:10px;background:${pending > 0 ? '#fef2f2' : '#f0fdf4'};border-radius:9px;text-align:center">
+            <div style="font-size:.65rem;text-transform:uppercase;color:${pending > 0 ? '#991b1b' : '#065f46'};font-weight:700;letter-spacing:.06em">Pendiente</div>
+            <div style="font-size:1.05rem;font-weight:700;color:${pending > 0 ? '#b91c1c' : '#166534'};margin-top:2px">${pending.toFixed(2)}€</div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:center;margin-bottom:14px">
+          <span style="font-size:.7rem;font-weight:700;padding:4px 12px;border-radius:99px;background:${statusColor}15;color:${statusColor};letter-spacing:.06em">${statusLabel}</span>
+        </div>
+
+        ${!hasBono ? `
+        <div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:14px">
+          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:10px">Registrar pago</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            ${pending > 0 ? `<button class="epm-quick" data-amount="${pending.toFixed(2)}" style="flex:1;min-width:90px;padding:8px;border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:8px;cursor:pointer;font-weight:700;font-size:.82rem">Total ${pending.toFixed(2)}€</button>` : ''}
+            ${pending > 0 ? `<button class="epm-quick" data-amount="${(pending / 2).toFixed(2)}" style="flex:1;min-width:90px;padding:8px;border:1px solid #d97706;background:#fff;color:#d97706;border-radius:8px;cursor:pointer;font-weight:700;font-size:.82rem">Mitad ${(pending / 2).toFixed(2)}€</button>` : ''}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <input type="number" id="epm-amount" placeholder="Importe (€)" step="0.01" min="0.01" style="padding:9px 11px;border:1px solid #e5e7eb;border-radius:8px;font-size:.92rem" />
+            <select id="epm-method" style="padding:9px 11px;border:1px solid #e5e7eb;border-radius:8px;font-size:.92rem">
+              <option value="efectivo">Efectivo</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="voucher">Voucher</option>
+              <option value="saldo">Saldo a favor</option>
+            </select>
+          </div>
+          <button id="epm-save" class="ns-btn ns-btn-primary" style="width:100%;margin-top:10px">Registrar pago</button>
+        </div>
+        ` : ''}
+
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin:0 0 6px">Historial de pagos</div>
+        <div id="epm-list">${paymentsHtml}</div>
+      `;
+
+      // Quick amount buttons
+      contentEl.querySelectorAll('.epm-quick').forEach(btn => {
+        btn.addEventListener('click', () => {
+          contentEl.querySelector('#epm-amount').value = btn.dataset.amount;
+        });
+      });
+
+      // Submit payment
+      contentEl.querySelector('#epm-save')?.addEventListener('click', async () => {
+        const amount = parseFloat(contentEl.querySelector('#epm-amount').value);
+        const method = contentEl.querySelector('#epm-method').value;
+        if (!amount || amount <= 0) { showToast('Importe inválido', 'error'); return; }
+        const btn = contentEl.querySelector('#epm-save');
+        btn.disabled = true; btn.textContent = 'Guardando…';
+        try {
+          // Saldo: descontar del balance del usuario
+          if (method === 'saldo' && enrollment.user_id) {
+            const { data: profile } = await supabase.from('profiles').select('credit_balance').eq('id', enrollment.user_id).single();
+            const balance = Number(profile?.credit_balance || 0);
+            if (balance < amount) {
+              showToast(`Saldo insuficiente (${balance.toFixed(2)}€ disponible)`, 'error');
+              btn.disabled = false; btn.textContent = 'Registrar pago';
+              return;
+            }
+            await supabase.from('profiles').update({ credit_balance: balance - amount }).eq('id', enrollment.user_id);
+          }
+          await createPayment({
+            reservation_type: 'enrollment',
+            reference_id: eid,
+            amount,
+            payment_method: method,
+            concept: `Pago clase ${clsLabel}`,
+          });
+          showToast(`+${amount.toFixed(2)}€ registrado`, 'success');
+          await paint();
+          // Refrescar render principal del calendario al cerrar
+          overlay._dirty = true;
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+          btn.disabled = false; btn.textContent = 'Registrar pago';
+        }
+      });
+
+      // Delete payment
+      contentEl.querySelectorAll('.epm-del').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('¿Eliminar este pago?')) return;
+          try {
+            await deletePayment(btn.dataset.pid);
+            showToast('Pago eliminado', 'success');
+            await paint();
+            overlay._dirty = true;
+          } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        });
+      });
+    }
+
+    await paint();
   }
 
   // ======== NEW SESSION MODAL ========
