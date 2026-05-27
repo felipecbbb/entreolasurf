@@ -1,7 +1,7 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment } from '../modules/api.js';
+import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { PACK_PRICING, DEPOSIT } from '../modules/constants.js';
@@ -1034,9 +1034,9 @@ export async function renderClientes(container) {
         return;
       }
 
-      const rows = enrollments.map(e => {
+      const rows = enrollments.map((e, i) => {
         const cls = e.surf_class || {};
-        return `<tr>
+        return `<tr class="cli-row-click" data-idx="${i}" style="cursor:pointer">
           <td>${formatDate(cls.date)}</td>
           <td>${TYPE_LABELS[cls.type] || cls.type || '—'}</td>
           <td>${esc(cls.title) || '—'}</td>
@@ -1058,6 +1058,14 @@ export async function renderClientes(container) {
             </table>
           </div>
         </div>`;
+
+      el.querySelectorAll('.cli-row-click').forEach(row => {
+        row.addEventListener('click', () => {
+          const idx = parseInt(row.dataset.idx);
+          const enr = enrollments[idx];
+          if (enr) openEnrollmentDetailModal(c, enr);
+        });
+      });
     } catch (err) {
       el.innerHTML = `<div class="act-form-card"><p style="color:#b91c1c">Error cargando clases: ${esc(err.message)}</p></div>`;
     }
@@ -1354,6 +1362,298 @@ export async function renderClientes(container) {
     });
   }
 
+  // ---- Helpers para fichas de detalle ----
+  const METHOD_LBL = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', online: 'Online', saldo: 'Saldo a favor' };
+  const ENROLL_STATUS_OPTIONS = [
+    { v: 'confirmed', l: 'Confirmado' },
+    { v: 'partial', l: 'Anticipo pagado' },
+    { v: 'paid', l: 'Pagado' },
+    { v: 'completed', l: 'Completado' },
+    { v: 'no_show', l: 'No se presentó' },
+    { v: 'cancelled', l: 'Cancelado' },
+  ];
+  const RENTAL_STATUS_OPTIONS = [
+    { v: 'pending', l: 'Pendiente' },
+    { v: 'confirmed', l: 'Confirmado' },
+    { v: 'active', l: 'Activo' },
+    { v: 'returned', l: 'Devuelto' },
+    { v: 'cancelled', l: 'Cancelado' },
+  ];
+
+  function paymentsListHtml(payments, onDeleteId = true) {
+    if (!payments.length) return '<p style="font-size:.82rem;color:#6b7280;margin:6px 0 0">Sin pagos registrados</p>';
+    return payments.map(p => {
+      const d = new Date(p.payment_date || p.created_at);
+      const dateLbl = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      return `
+        <div class="cli-pay-item" data-payment-id="${p.id}" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-top:6px;background:#fff">
+          <div style="font-size:.82rem;color:#0f2f39">
+            <strong>${formatCurrency(p.amount)}</strong> · ${METHOD_LBL[p.payment_method] || p.payment_method}
+            <div style="font-size:.72rem;color:#6b7280">${dateLbl}${p.concept ? ' · ' + esc(p.concept) : ''}</div>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="cli-pay-edit-inline" data-payment-id="${p.id}" title="Editar" style="background:none;border:none;cursor:pointer;color:#0ea5e9;padding:4px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="cli-pay-del-inline" data-payment-id="${p.id}" title="Eliminar" style="background:none;border:none;cursor:pointer;color:#dc2626;padding:4px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function bindPaymentsListEvents(rootEl, c, payments, reloadFn) {
+    rootEl.querySelectorAll('.cli-pay-edit-inline').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = payments.find(pp => pp.id === btn.dataset.paymentId);
+        if (p) openPaymentEditModal(p, { onSaved: reloadFn });
+      });
+    });
+    rootEl.querySelectorAll('.cli-pay-del-inline').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const p = payments.find(pp => pp.id === btn.dataset.paymentId);
+        if (!p) return;
+        if (!confirm(`¿Eliminar este pago de ${formatCurrency(p.amount)}?`)) return;
+        try {
+          await deletePayment(p.id);
+          showToast('Pago eliminado', 'success');
+          reloadFn();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+      });
+    });
+  }
+
+  // ---- Ficha de inscripción (clase individual) ----
+  async function openEnrollmentDetailModal(c, enr) {
+    const cls = enr.surf_class || {};
+    const typeLbl = TYPE_LABELS[cls.type] || cls.type || '—';
+    const totalClase = Number(cls.price || 0);
+    const payments = await fetchPayments('enrollment', enr.id);
+    const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const pending = Math.max(0, Math.round((totalClase - totalPaid) * 100) / 100);
+
+    const statusOptions = ENROLL_STATUS_OPTIONS
+      .map(o => `<option value="${o.v}" ${o.v === enr.status ? 'selected' : ''}>${o.l}</option>`).join('');
+
+    openModal('Inscripción a clase', `
+      <div style="min-width:340px">
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:14px">
+          <div style="font-weight:700;color:#0f2f39">${typeLbl}${cls.title ? ' · ' + esc(cls.title) : ''}</div>
+          <div style="font-size:.82rem;color:#6b7280;margin-top:2px">${formatDate(cls.date)} · ${cls.time_start?.slice(0,5) || ''} — ${cls.time_end?.slice(0,5) || ''}</div>
+          ${cls.instructor ? `<div style="font-size:.78rem;color:#6b7280">Instructor: ${esc(cls.instructor)}</div>` : ''}
+        </div>
+
+        <label>Estado de la inscripción</label>
+        <select id="cli-enr-status" class="act-form-input" style="margin-bottom:14px">${statusOptions}</select>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:.82rem">
+          <div style="padding:8px;background:#f0fdf4;border-radius:8px"><div style="color:#065f46;font-size:.7rem;text-transform:uppercase">Precio</div><strong>${formatCurrency(totalClase)}</strong></div>
+          <div style="padding:8px;background:#eff6ff;border-radius:8px"><div style="color:#1e40af;font-size:.7rem;text-transform:uppercase">Pagado</div><strong>${formatCurrency(totalPaid)}</strong></div>
+          <div style="padding:8px;background:${pending > 0 ? '#fef2f2' : '#f0fdf4'};border-radius:8px"><div style="color:${pending > 0 ? '#b91c1c' : '#065f46'};font-size:.7rem;text-transform:uppercase">Pendiente</div><strong>${formatCurrency(pending)}</strong></div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px">
+          <label style="margin:0">Pagos</label>
+          <button class="btn" id="cli-enr-add-pay" style="font-size:.74rem;padding:4px 10px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer">+ Pago</button>
+        </div>
+        <div id="cli-enr-payments">${paymentsListHtml(payments)}</div>
+
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn" id="cli-enr-delete" style="flex:1;background:#fee2e2;color:#b91c1c;border:none;padding:9px;border-radius:8px;cursor:pointer;font-weight:600">Eliminar inscripción</button>
+          <button class="btn red" id="cli-enr-close" style="flex:1;padding:9px">Cerrar</button>
+        </div>
+      </div>
+    `);
+
+    const paymentsEl = document.getElementById('cli-enr-payments');
+    const reloadPayments = async () => {
+      const fresh = await fetchPayments('enrollment', enr.id);
+      paymentsEl.innerHTML = paymentsListHtml(fresh);
+      bindPaymentsListEvents(paymentsEl, c, fresh, reloadPayments);
+    };
+    bindPaymentsListEvents(paymentsEl, c, payments, reloadPayments);
+
+    document.getElementById('cli-enr-close')?.addEventListener('click', () => closeModal());
+
+    document.getElementById('cli-enr-status')?.addEventListener('change', async (e) => {
+      try {
+        await updateEnrollmentStatus(enr.id, e.target.value);
+        enr.status = e.target.value;
+        showToast('Estado actualizado', 'success');
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+
+    document.getElementById('cli-enr-add-pay')?.addEventListener('click', async () => {
+      const amount = parseFloat(prompt('Importe a registrar (€):', pending > 0 ? pending.toFixed(2) : ''));
+      if (!amount || amount <= 0) return;
+      const method = prompt('Método (efectivo / tarjeta / transferencia / voucher):', 'efectivo');
+      if (!method) return;
+      try {
+        await createPayment({
+          reservation_type: 'enrollment',
+          reference_id: enr.id,
+          amount,
+          payment_method: method,
+          concept: `Pago clase ${typeLbl}`,
+        });
+        showToast('Pago añadido', 'success');
+        reloadPayments();
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+
+    document.getElementById('cli-enr-delete')?.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta inscripción? También se borrarán sus pagos asociados.')) return;
+      try {
+        for (const p of await fetchPayments('enrollment', enr.id)) {
+          await deletePayment(p.id);
+        }
+        await deleteEnrollment(enr.id);
+        showToast('Inscripción eliminada', 'success');
+        closeModal();
+        loadClasesTab(c);
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+  }
+
+  // ---- Ficha de booking (surf camp) ----
+  async function openBookingDetailModal(c, bk) {
+    const payments = await fetchPayments('booking', bk.id);
+    const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const pending = Math.max(0, Math.round((Number(bk.total_amount || 0) - totalPaid) * 100) / 100);
+
+    openModal('Reserva surf camp', `
+      <div style="min-width:340px">
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;margin-bottom:14px">
+          <div style="font-weight:700;color:#0369a1">${esc(bk.camp_title) || 'Surf Camp'}</div>
+          <div style="font-size:.78rem;color:#0369a1;margin-top:4px">Reservada: ${formatDate(bk.created_at)}</div>
+          ${bk.guest_name ? `<div style="font-size:.78rem;color:#0369a1">A nombre de: ${esc(bk.guest_name)}</div>` : ''}
+          <div style="margin-top:6px">${statusBadge(bk.status)}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:.82rem">
+          <div style="padding:8px;background:#f0fdf4;border-radius:8px"><div style="color:#065f46;font-size:.7rem;text-transform:uppercase">Total</div><strong>${formatCurrency(bk.total_amount)}</strong></div>
+          <div style="padding:8px;background:#eff6ff;border-radius:8px"><div style="color:#1e40af;font-size:.7rem;text-transform:uppercase">Pagado</div><strong>${formatCurrency(totalPaid)}</strong></div>
+          <div style="padding:8px;background:${pending > 0 ? '#fef2f2' : '#f0fdf4'};border-radius:8px"><div style="color:${pending > 0 ? '#b91c1c' : '#065f46'};font-size:.7rem;text-transform:uppercase">Pendiente</div><strong>${formatCurrency(pending)}</strong></div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px">
+          <label style="margin:0">Pagos</label>
+          <button class="btn" id="cli-bk-add-pay" style="font-size:.74rem;padding:4px 10px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer">+ Pago</button>
+        </div>
+        <div id="cli-bk-payments">${paymentsListHtml(payments)}</div>
+
+        <button class="btn red" id="cli-bk-close" style="margin-top:16px;width:100%;padding:9px">Cerrar</button>
+      </div>
+    `);
+
+    const paymentsEl = document.getElementById('cli-bk-payments');
+    const reloadPayments = async () => {
+      const fresh = await fetchPayments('booking', bk.id);
+      paymentsEl.innerHTML = paymentsListHtml(fresh);
+      bindPaymentsListEvents(paymentsEl, c, fresh, reloadPayments);
+    };
+    bindPaymentsListEvents(paymentsEl, c, payments, reloadPayments);
+
+    document.getElementById('cli-bk-close')?.addEventListener('click', () => closeModal());
+
+    document.getElementById('cli-bk-add-pay')?.addEventListener('click', async () => {
+      const amount = parseFloat(prompt('Importe a registrar (€):', pending > 0 ? pending.toFixed(2) : ''));
+      if (!amount || amount <= 0) return;
+      const method = prompt('Método (efectivo / tarjeta / transferencia / voucher):', 'efectivo');
+      if (!method) return;
+      try {
+        await createPayment({
+          reservation_type: 'booking',
+          reference_id: bk.id,
+          amount,
+          payment_method: method,
+          concept: `Pago surf camp ${bk.camp_title || ''}`,
+        });
+        showToast('Pago añadido', 'success');
+        reloadPayments();
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+  }
+
+  // ---- Ficha de alquiler ----
+  async function openRentalDetailModal(c, r) {
+    const payments = await fetchPayments('rental', r.id);
+    const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalRental = Number(r.total_amount || 0);
+    const pending = Math.max(0, Math.round((totalRental - totalPaid) * 100) / 100);
+    const equipName = r.equipment?.name || 'Material';
+
+    const statusOptions = RENTAL_STATUS_OPTIONS
+      .map(o => `<option value="${o.v}" ${o.v === r.status ? 'selected' : ''}>${o.l}</option>`).join('');
+
+    openModal('Alquiler de material', `
+      <div style="min-width:340px">
+        <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px">
+          <div style="font-weight:700;color:#6d28d9">${esc(equipName)}</div>
+          <div style="font-size:.82rem;color:#6d28d9;margin-top:4px">${formatDate(r.date_start)} → ${formatDate(r.date_end)}</div>
+          ${r.size ? `<div style="font-size:.78rem;color:#6d28d9">Talla: ${esc(r.size)}</div>` : ''}
+          ${r.duration_key ? `<div style="font-size:.78rem;color:#6d28d9">Duración: ${esc(r.duration_key)}</div>` : ''}
+        </div>
+
+        <label>Estado</label>
+        <select id="cli-rt-status" class="act-form-input" style="margin-bottom:14px">${statusOptions}</select>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;font-size:.82rem">
+          <div style="padding:8px;background:#f0fdf4;border-radius:8px"><div style="color:#065f46;font-size:.7rem;text-transform:uppercase">Total</div><strong>${formatCurrency(totalRental)}</strong></div>
+          <div style="padding:8px;background:#eff6ff;border-radius:8px"><div style="color:#1e40af;font-size:.7rem;text-transform:uppercase">Pagado</div><strong>${formatCurrency(totalPaid)}</strong></div>
+          <div style="padding:8px;background:${pending > 0 ? '#fef2f2' : '#f0fdf4'};border-radius:8px"><div style="color:${pending > 0 ? '#b91c1c' : '#065f46'};font-size:.7rem;text-transform:uppercase">Pendiente</div><strong>${formatCurrency(pending)}</strong></div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px">
+          <label style="margin:0">Pagos</label>
+          <button class="btn" id="cli-rt-add-pay" style="font-size:.74rem;padding:4px 10px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer">+ Pago</button>
+        </div>
+        <div id="cli-rt-payments">${paymentsListHtml(payments)}</div>
+
+        <button class="btn red" id="cli-rt-close" style="margin-top:16px;width:100%;padding:9px">Cerrar</button>
+      </div>
+    `);
+
+    const paymentsEl = document.getElementById('cli-rt-payments');
+    const reloadPayments = async () => {
+      const fresh = await fetchPayments('rental', r.id);
+      paymentsEl.innerHTML = paymentsListHtml(fresh);
+      bindPaymentsListEvents(paymentsEl, c, fresh, reloadPayments);
+    };
+    bindPaymentsListEvents(paymentsEl, c, payments, reloadPayments);
+
+    document.getElementById('cli-rt-close')?.addEventListener('click', () => closeModal());
+
+    document.getElementById('cli-rt-status')?.addEventListener('change', async (e) => {
+      try {
+        await updateEquipmentReservationStatus(r.id, e.target.value);
+        r.status = e.target.value;
+        showToast('Estado actualizado', 'success');
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+
+    document.getElementById('cli-rt-add-pay')?.addEventListener('click', async () => {
+      const amount = parseFloat(prompt('Importe a registrar (€):', pending > 0 ? pending.toFixed(2) : ''));
+      if (!amount || amount <= 0) return;
+      const method = prompt('Método (efectivo / tarjeta / transferencia / voucher):', 'efectivo');
+      if (!method) return;
+      try {
+        await createPayment({
+          reservation_type: 'rental',
+          reference_id: r.id,
+          amount,
+          payment_method: method,
+          concept: `Pago alquiler ${equipName}`,
+        });
+        showToast('Pago añadido', 'success');
+        reloadPayments();
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+  }
+
   async function loadPagosTab(c) {
     const el = container.querySelector('#cli-tab-content');
     try {
@@ -1528,7 +1828,7 @@ export async function renderClientes(container) {
         return;
       }
 
-      const rows = bookings.map(b => `<tr>
+      const rows = bookings.map((b, i) => `<tr class="cli-row-click" data-idx="${i}" style="cursor:pointer">
         <td>${formatDate(b.created_at)}</td>
         <td>${esc(b.camp_title) || '—'}</td>
         <td>${formatCurrency(b.total_amount)}</td>
@@ -1546,6 +1846,14 @@ export async function renderClientes(container) {
             </table>
           </div>
         </div>`;
+
+      el.querySelectorAll('.cli-row-click').forEach(row => {
+        row.addEventListener('click', () => {
+          const idx = parseInt(row.dataset.idx);
+          const bk = bookings[idx];
+          if (bk) openBookingDetailModal(c, bk);
+        });
+      });
     } catch (err) {
       el.innerHTML = `<div class="act-form-card"><p style="color:#b91c1c">Error cargando reservas: ${esc(err.message)}</p></div>`;
     }
@@ -1570,7 +1878,7 @@ export async function renderClientes(container) {
         returned: 'Devuelto', cancelled: 'Cancelado',
       };
 
-      const rows = rentals.map(r => `<tr>
+      const rows = rentals.map((r, i) => `<tr class="cli-row-click" data-idx="${i}" style="cursor:pointer">
         <td>${esc(r.equipment?.name || '—')}</td>
         <td>${formatDate(r.date_start)} — ${formatDate(r.date_end)}</td>
         <td>${r.size || '—'}</td>
@@ -1592,6 +1900,14 @@ export async function renderClientes(container) {
             </table>
           </div>
         </div>`;
+
+      el.querySelectorAll('.cli-row-click').forEach(row => {
+        row.addEventListener('click', () => {
+          const idx = parseInt(row.dataset.idx);
+          const r = rentals[idx];
+          if (r) openRentalDetailModal(c, r);
+        });
+      });
     } catch (err) {
       el.innerHTML = `<div class="act-form-card"><p style="color:#b91c1c">Error cargando alquileres: ${esc(err.message)}</p></div>`;
     }
