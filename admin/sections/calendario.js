@@ -4022,21 +4022,23 @@ export async function renderCalendario(container) {
     document.getElementById('epm-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.id = 'epm-overlay';
-    overlay.className = 'ns-overlay';
-    overlay.style.alignItems = 'center';
+    overlay.className = 'epm-overlay';
     overlay.innerHTML = `
-      <div class="ns-panel" style="max-width:480px;height:auto;max-height:90vh;border-radius:16px">
-        <header class="ns-header" style="padding:16px 22px">
-          <div>
-            <h2 style="font-size:1.2rem">${escapeHtml(personName)}</h2>
+      <div class="epm-panel">
+        <header class="epm-header">
+          <div class="epm-avatar">${(personName[0] || '?').toUpperCase()}</div>
+          <div class="epm-header-text">
+            <h2>${escapeHtml(personName)}</h2>
             <p>${escapeHtml(clsLabel)} · ${formatDate(cls.date)} · ${cls.time_start?.slice(0,5) || ''}</p>
           </div>
-          <button class="ns-close" id="epm-close" title="Cerrar">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <button class="epm-close" id="epm-close" title="Cerrar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </header>
-        <div class="ns-body" style="padding:22px">
-          <div id="epm-content"><div style="text-align:center;color:#9ca3af;padding:30px"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div></div>
+        <div class="epm-body">
+          <div id="epm-content">
+            <div style="text-align:center;color:#9ca3af;padding:40px 0"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div>
+          </div>
         </div>
       </div>
     `;
@@ -4073,73 +4075,93 @@ export async function renderCalendario(container) {
       const pending = Math.max(0, Math.round((clsPrice - totalPaid) * 100) / 100);
       const isPaid = clsPrice > 0 ? totalPaid >= clsPrice : totalPaid > 0;
       const isPartial = !isPaid && totalPaid > 0;
-      const statusColor = isPaid ? '#16a34a' : isPartial ? '#d97706' : '#dc2626';
-      const statusLabel = isPaid ? 'PAGADO' : isPartial ? 'ANTICIPO' : 'PENDIENTE';
+      const statusClass = isPaid ? 'paid' : isPartial ? 'partial' : 'pending';
+      const statusLabel = isPaid ? 'Pagado' : isPartial ? 'Anticipo' : 'Pendiente';
+      const progressPct = clsPrice > 0 ? Math.min(100, (totalPaid / clsPrice) * 100) : (totalPaid > 0 ? 100 : 0);
+
+      const methodIcons = {
+        efectivo: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/></svg>',
+        tarjeta: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>',
+        transferencia: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="17" y1="3" x2="17" y2="21"/><polyline points="13 7 17 3 21 7"/><line x1="7" y1="21" x2="7" y2="3"/><polyline points="3 17 7 21 11 17"/></svg>',
+        voucher: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V8H6a2 2 0 01-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/><path d="M18 12a2 2 0 000 4h4v-4z"/></svg>',
+        saldo: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 100 4h4a2 2 0 010 4H8M12 6v2m0 8v2"/></svg>',
+      };
+      const methodLabels = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', voucher: 'Voucher', saldo: 'Saldo' };
 
       const paymentsHtml = payments.length ? payments.map(p => {
         const d = new Date(p.payment_date || p.created_at);
-        const dl = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        const dl = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        const mIcon = methodIcons[p.payment_method] || methodIcons.efectivo;
+        const mLbl = methodLabels[p.payment_method] || p.payment_method;
         return `
-          <div class="epm-pay" data-pid="${p.id}">
-            <div>
-              <strong>${Number(p.amount).toFixed(2)}€</strong> · ${p.payment_method}
-              <div style="font-size:.72rem;color:#6b7280">${dl}${p.concept ? ' · ' + escapeHtml(p.concept) : ''}</div>
+          <div class="epm-pay-card" data-pid="${p.id}">
+            <div class="epm-pay-icon">${mIcon}</div>
+            <div class="epm-pay-info">
+              <div class="epm-pay-amount">+${Number(p.amount).toFixed(2)}€</div>
+              <div class="epm-pay-meta">${mLbl} · ${dl}</div>
             </div>
-            <button class="epm-del" data-pid="${p.id}" title="Eliminar">
+            <button class="epm-del" data-pid="${p.id}" title="Eliminar pago">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
             </button>
           </div>`;
-      }).join('') : '<p style="font-size:.82rem;color:#6b7280;text-align:center;margin:8px 0">Sin pagos registrados</p>';
+      }).join('') : '<div class="epm-empty">Sin pagos registrados</div>';
 
       const bonoBanner = hasBono
-        ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:10px 12px;font-size:.82rem;color:#1e40af;margin-bottom:14px">
-            <strong>Esta clase la cubre un bono.</strong> Si quieres registrar pagos del bono, hazlo desde la ficha del cliente.
+        ? `<div class="epm-bono-banner">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="2"/></svg>
+            <div><strong>Esta clase la cubre un bono.</strong> Gestiona los pagos del bono desde la ficha del cliente.</div>
           </div>` : '';
 
       contentEl.innerHTML = `
         ${bonoBanner}
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
-          <div style="padding:10px;background:#f9fafb;border-radius:9px;text-align:center">
-            <div style="font-size:.65rem;text-transform:uppercase;color:#6b7280;font-weight:700;letter-spacing:.06em">Precio</div>
-            <div style="font-size:1.05rem;font-weight:700;color:#0f2f39;margin-top:2px">${clsPrice.toFixed(2)}€</div>
-          </div>
-          <div style="padding:10px;background:#f0fdf4;border-radius:9px;text-align:center">
-            <div style="font-size:.65rem;text-transform:uppercase;color:#065f46;font-weight:700;letter-spacing:.06em">Pagado</div>
-            <div style="font-size:1.05rem;font-weight:700;color:#166534;margin-top:2px">${totalPaid.toFixed(2)}€</div>
-          </div>
-          <div style="padding:10px;background:${pending > 0 ? '#fef2f2' : '#f0fdf4'};border-radius:9px;text-align:center">
-            <div style="font-size:.65rem;text-transform:uppercase;color:${pending > 0 ? '#991b1b' : '#065f46'};font-weight:700;letter-spacing:.06em">Pendiente</div>
-            <div style="font-size:1.05rem;font-weight:700;color:${pending > 0 ? '#b91c1c' : '#166534'};margin-top:2px">${pending.toFixed(2)}€</div>
-          </div>
-        </div>
 
-        <div style="display:flex;justify-content:center;margin-bottom:14px">
-          <span style="font-size:.7rem;font-weight:700;padding:4px 12px;border-radius:99px;background:${statusColor}15;color:${statusColor};letter-spacing:.06em">${statusLabel}</span>
+        <!-- Hero: total grande con barra de progreso -->
+        <div class="epm-hero epm-hero-${statusClass}">
+          <div class="epm-hero-top">
+            <div>
+              <div class="epm-hero-label">Total clase</div>
+              <div class="epm-hero-amount">${clsPrice.toFixed(2)}€</div>
+            </div>
+            <span class="epm-pill epm-pill-${statusClass}">${statusLabel}</span>
+          </div>
+          <div class="epm-bar">
+            <div class="epm-bar-fill epm-bar-${statusClass}" style="width:${progressPct}%"></div>
+          </div>
+          <div class="epm-hero-bottom">
+            <span>Pagado <strong>${totalPaid.toFixed(2)}€</strong></span>
+            <span class="epm-pending-${pending > 0 ? 'open' : 'closed'}">Pendiente <strong>${pending.toFixed(2)}€</strong></span>
+          </div>
         </div>
 
         ${!hasBono ? `
-        <div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:14px">
-          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:10px">Registrar pago</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            ${pending > 0 ? `<button class="epm-quick" data-amount="${pending.toFixed(2)}" style="flex:1;min-width:90px;padding:8px;border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:8px;cursor:pointer;font-weight:700;font-size:.82rem">Total ${pending.toFixed(2)}€</button>` : ''}
-            ${pending > 0 ? `<button class="epm-quick" data-amount="${(pending / 2).toFixed(2)}" style="flex:1;min-width:90px;padding:8px;border:1px solid #d97706;background:#fff;color:#d97706;border-radius:8px;cursor:pointer;font-weight:700;font-size:.82rem">Mitad ${(pending / 2).toFixed(2)}€</button>` : ''}
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <input type="number" id="epm-amount" placeholder="Importe (€)" step="0.01" min="0.01" style="padding:9px 11px;border:1px solid #e5e7eb;border-radius:8px;font-size:.92rem" />
-            <select id="epm-method" style="padding:9px 11px;border:1px solid #e5e7eb;border-radius:8px;font-size:.92rem">
-              <option value="efectivo">Efectivo</option>
-              <option value="tarjeta">Tarjeta</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="voucher">Voucher</option>
-              <option value="saldo">Saldo a favor</option>
+        <div class="epm-section">
+          <div class="epm-section-title">Registrar pago</div>
+          ${pending > 0 ? `<div class="epm-quick-row">
+            <button class="epm-quick epm-quick-full" data-amount="${pending.toFixed(2)}">
+              <span class="epm-quick-label">Total</span>
+              <span class="epm-quick-amount">${pending.toFixed(2)}€</span>
+            </button>
+            <button class="epm-quick epm-quick-half" data-amount="${(pending / 2).toFixed(2)}">
+              <span class="epm-quick-label">Mitad</span>
+              <span class="epm-quick-amount">${(pending / 2).toFixed(2)}€</span>
+            </button>
+          </div>` : ''}
+          <div class="epm-row-2">
+            <input type="number" id="epm-amount" placeholder="Importe €" step="0.01" min="0.01" class="epm-input" />
+            <select id="epm-method" class="epm-input">
+              <option value="efectivo">💵 Efectivo</option>
+              <option value="tarjeta">💳 Tarjeta</option>
+              <option value="transferencia">🏦 Transferencia</option>
+              <option value="voucher">🎟️ Voucher</option>
+              <option value="saldo">💰 Saldo a favor</option>
             </select>
           </div>
-          <button id="epm-save" class="ns-btn ns-btn-primary" style="width:100%;margin-top:10px">Registrar pago</button>
+          <button id="epm-save" class="epm-submit">Registrar pago</button>
         </div>
         ` : ''}
 
-        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin:0 0 6px">Historial de pagos</div>
-        <div id="epm-list">${paymentsHtml}</div>
+        <div class="epm-section-title epm-history-title">Historial de pagos${payments.length ? ` · ${payments.length}` : ''}</div>
+        <div id="epm-list" class="epm-list">${paymentsHtml}</div>
       `;
 
       // Quick amount buttons
