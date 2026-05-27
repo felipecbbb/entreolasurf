@@ -1,11 +1,12 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin, createPayment } from '../modules/api.js';
+import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { PACK_PRICING, DEPOSIT } from '../modules/constants.js';
 import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
+import { openPaymentEditModal } from '../modules/payment-edit.js';
 
 function getPackPrice(type, sessionCount, fallbackPrice = 0) {
   if (sessionCount <= 0) return 0;
@@ -1067,12 +1068,19 @@ export async function renderClientes(container) {
     try {
       const bonos = await fetchClientBonos(c.id);
 
+      const header = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <h3 class="act-detail-section-title" style="margin:0">Bonos (${bonos.length})</h3>
+          <button class="btn red" id="cli-create-bono-btn" style="font-size:.82rem;padding:8px 14px">+ Nuevo bono</button>
+        </div>`;
+
       if (!bonos.length) {
         el.innerHTML = `
-          <h3 class="act-detail-section-title">Bonos</h3>
+          ${header}
           <div class="act-form-card">
             <div class="admin-empty"><p>Este cliente no tiene bonos</p></div>
           </div>`;
+        el.querySelector('#cli-create-bono-btn')?.addEventListener('click', () => openCreateBonoModal(c));
         return;
       }
 
@@ -1082,7 +1090,7 @@ export async function renderClientes(container) {
         const expectedPrice = getPackPrice(b.class_type, b.total_credits);
         const deposit = DEPOSIT[b.class_type] || 15;
         const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
-        const pending = Math.max(0, expectedPrice - paid);
+        const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
         const isFullyPaid = paid >= expectedPrice;
         return `
           <div class="cli-bono-card" data-bono-id="${b.id}">
@@ -1107,13 +1115,18 @@ export async function renderClientes(container) {
               <span>Pagado: ${formatCurrency(paid)} de ${formatCurrency(expectedPrice)}</span>
               <span>Caduca: ${formatDate(b.expires_at)}</span>
             </div>
-            ${!isFullyPaid && b.status === 'active' ? `<button class="btn cli-bono-pay-btn" data-bono-id="${b.id}" data-pending="${pending.toFixed(2)}" style="margin-top:8px;font-size:.78rem;padding:6px 14px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;width:100%">Añadir pago al bono</button>` : ''}
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              ${!isFullyPaid && b.status === 'active' ? `<button class="btn cli-bono-pay-btn" data-bono-id="${b.id}" data-pending="${pending.toFixed(2)}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">Añadir pago</button>` : ''}
+              <button class="btn cli-bono-expand-btn" data-bono-id="${b.id}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:6px;cursor:pointer;font-weight:600">+ Ampliar</button>
+            </div>
           </div>`;
       }).join('');
 
       el.innerHTML = `
-        <h3 class="act-detail-section-title">Bonos (${bonos.length})</h3>
+        ${header}
         <div class="cli-bonos-grid">${cards}</div>`;
+
+      el.querySelector('#cli-create-bono-btn')?.addEventListener('click', () => openCreateBonoModal(c));
 
       // Bind add payment to bono
       el.querySelectorAll('.cli-bono-pay-btn').forEach(btn => {
@@ -1122,9 +1135,223 @@ export async function renderClientes(container) {
           openAddPaymentModal(c, 'bono', btn.dataset.bonoId, Number(btn.dataset.pending));
         });
       });
+
+      // Bind expand bono
+      el.querySelectorAll('.cli-bono-expand-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const bono = bonos.find(b => b.id === btn.dataset.bonoId);
+          if (bono) openExpandBonoModal(c, bono);
+        });
+      });
     } catch (err) {
       el.innerHTML = `<div class="act-form-card"><p style="color:#b91c1c">Error cargando bonos: ${esc(err.message)}</p></div>`;
     }
+  }
+
+  // ---- Ampliar bono existente ----
+  function openExpandBonoModal(c, bono) {
+    const classType = bono.class_type;
+    const currentCredits = bono.total_credits;
+    const currentPaid = Number(bono.total_paid || 0) || (bono.order_id ? (DEPOSIT[classType] || 15) : 0);
+    const currentExpected = getPackPrice(classType, currentCredits);
+
+    function suggestPrice(extra) {
+      const newTotal = currentCredits + extra;
+      const fullPrice = getPackPrice(classType, newTotal);
+      return Math.max(0, Math.round((fullPrice - currentExpected) * 100) / 100);
+    }
+
+    const defaultExtra = 4;
+    const defaultPrice = suggestPrice(defaultExtra);
+
+    openModal('Ampliar bono', `
+      <form id="cli-expand-bono-form" class="trip-form" style="min-width:340px">
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px;margin-bottom:16px">
+          <div style="font-size:.85rem;color:#1e40af;font-weight:600">${TYPE_LABELS[classType] || classType} · ${bono.used_credits}/${currentCredits} clases usadas</div>
+          <div style="font-size:.82rem;color:#1e40af;margin-top:4px">Pagado actual: ${formatCurrency(currentPaid)} de ${formatCurrency(currentExpected)}</div>
+        </div>
+        <label>Clases a añadir</label>
+        <input type="number" id="cli-exp-extra" class="act-form-input" min="1" step="1" value="${defaultExtra}" required style="margin-bottom:10px" />
+        <label>Importe a cobrar (€)</label>
+        <input type="number" id="cli-exp-amount" class="act-form-input" step="0.01" min="0" value="${defaultPrice.toFixed(2)}" required style="margin-bottom:4px" />
+        <small style="color:#6b7280;display:block;margin-bottom:10px">Sugerido según pack ${classType}. Editable.</small>
+        <label>Método de pago</label>
+        <select id="cli-exp-method" class="act-form-input" required style="margin-bottom:16px">
+          <option value="efectivo">Efectivo</option>
+          <option value="tarjeta">Tarjeta</option>
+          <option value="transferencia">Transferencia</option>
+          <option value="voucher">Voucher</option>
+          <option value="saldo">Saldo a favor</option>
+        </select>
+        <button type="submit" class="btn red" id="cli-exp-submit" style="width:100%;padding:10px;background:#0ea5e9">Ampliar y registrar pago</button>
+      </form>
+    `);
+
+    const extraInput = document.getElementById('cli-exp-extra');
+    const amountInput = document.getElementById('cli-exp-amount');
+    extraInput?.addEventListener('input', () => {
+      const e = parseInt(extraInput.value) || 0;
+      if (e > 0) amountInput.value = suggestPrice(e).toFixed(2);
+    });
+
+    document.getElementById('cli-expand-bono-form')?.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const extra = parseInt(extraInput.value) || 0;
+      const amount = parseFloat(amountInput.value) || 0;
+      const method = document.getElementById('cli-exp-method').value;
+      if (extra <= 0) { showToast('Indica al menos 1 clase', 'error'); return; }
+
+      const btn = document.getElementById('cli-exp-submit');
+      btn.disabled = true; btn.textContent = 'Procesando…';
+      try {
+        const newTotalCredits = currentCredits + extra;
+        const newTotalPaid = currentPaid + amount;
+        const newExpiresAt = new Date();
+        newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
+
+        const { error } = await supabase.from('bonos').update({
+          total_credits: newTotalCredits,
+          total_paid: newTotalPaid,
+          status: 'active',
+          expires_at: newExpiresAt.toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', bono.id);
+        if (error) throw error;
+
+        if (method === 'saldo' && amount > 0) {
+          const currentBalance = Number(c.credit_balance || 0);
+          await supabase.from('profiles').update({ credit_balance: Math.max(0, currentBalance - amount) }).eq('id', c.id);
+          c.credit_balance = Math.max(0, currentBalance - amount);
+        }
+
+        if (amount > 0) {
+          await createPayment({
+            reservation_type: 'enrollment',
+            reference_id: bono.id,
+            amount,
+            payment_method: method,
+            concept: `Ampliación bono ${TYPE_LABELS[classType] || classType} (+${extra})`,
+          });
+        }
+
+        showToast(`Bono ampliado: +${extra} clases · ${formatCurrency(amount)}`, 'success');
+        closeModal();
+        loadBonosTab(c);
+      } catch (err) {
+        console.error('Error ampliando bono:', err);
+        showToast('Error: ' + (err.message || 'No se pudo ampliar'), 'error');
+        btn.disabled = false; btn.textContent = 'Ampliar y registrar pago';
+      }
+    });
+  }
+
+  // ---- Crear bono nuevo ----
+  function openCreateBonoModal(c) {
+    const typeOptions = Object.entries(TYPE_LABELS)
+      .map(([val, label]) => `<option value="${val}">${label}</option>`)
+      .join('');
+
+    const defaultType = 'grupal';
+    const defaultCredits = 4;
+    const defaultPrice = getPackPrice(defaultType, defaultCredits);
+    const newExpiresAt = new Date();
+    newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
+
+    openModal('Nuevo bono', `
+      <form id="cli-new-bono-form" class="trip-form" style="min-width:340px">
+        <label>Tipo de clase</label>
+        <select id="cli-nb-type" class="act-form-input" required style="margin-bottom:10px">${typeOptions}</select>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label>Nº de clases</label>
+            <input type="number" id="cli-nb-credits" class="act-form-input" min="1" step="1" value="${defaultCredits}" required />
+          </div>
+          <div>
+            <label>Caduca</label>
+            <input type="date" id="cli-nb-expires" class="act-form-input" value="${newExpiresAt.toISOString().slice(0,10)}" required />
+          </div>
+        </div>
+
+        <label style="margin-top:10px">Importe a cobrar (€)</label>
+        <input type="number" id="cli-nb-amount" class="act-form-input" step="0.01" min="0" value="${defaultPrice.toFixed(2)}" required style="margin-bottom:4px" />
+        <small style="color:#6b7280;display:block;margin-bottom:10px">Sugerido según PACK_PRICING. Editable. Pon 0 si solo registras el bono sin cobro.</small>
+
+        <label>Método de pago</label>
+        <select id="cli-nb-method" class="act-form-input" required style="margin-bottom:16px">
+          <option value="efectivo">Efectivo</option>
+          <option value="tarjeta">Tarjeta</option>
+          <option value="transferencia">Transferencia</option>
+          <option value="voucher">Voucher</option>
+          <option value="saldo">Saldo a favor</option>
+        </select>
+
+        <button type="submit" class="btn red" id="cli-nb-submit" style="width:100%;padding:10px">Crear bono y cobrar</button>
+      </form>
+    `);
+
+    const typeSel = document.getElementById('cli-nb-type');
+    const credInput = document.getElementById('cli-nb-credits');
+    const amountInput = document.getElementById('cli-nb-amount');
+
+    function recalcSuggested() {
+      const t = typeSel.value;
+      const credits = parseInt(credInput.value) || 0;
+      if (credits > 0) amountInput.value = getPackPrice(t, credits).toFixed(2);
+    }
+    typeSel?.addEventListener('change', recalcSuggested);
+    credInput?.addEventListener('input', recalcSuggested);
+
+    document.getElementById('cli-new-bono-form')?.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const classType = typeSel.value;
+      const credits = parseInt(credInput.value) || 0;
+      const amount = parseFloat(amountInput.value) || 0;
+      const method = document.getElementById('cli-nb-method').value;
+      const expiresAtStr = document.getElementById('cli-nb-expires').value;
+      if (credits <= 0) { showToast('El bono debe tener al menos 1 clase', 'error'); return; }
+      if (!expiresAtStr) { showToast('Indica la fecha de caducidad', 'error'); return; }
+
+      const btn = document.getElementById('cli-nb-submit');
+      btn.disabled = true; btn.textContent = 'Creando…';
+      try {
+        const { data: bonoCreated, error } = await supabase.from('bonos').insert({
+          user_id: c.id,
+          class_type: classType,
+          total_credits: credits,
+          used_credits: 0,
+          status: 'active',
+          total_paid: amount,
+          expires_at: new Date(expiresAtStr + 'T23:59:59').toISOString(),
+        }).select('id').single();
+        if (error) throw error;
+
+        if (method === 'saldo' && amount > 0) {
+          const currentBalance = Number(c.credit_balance || 0);
+          await supabase.from('profiles').update({ credit_balance: Math.max(0, currentBalance - amount) }).eq('id', c.id);
+          c.credit_balance = Math.max(0, currentBalance - amount);
+        }
+
+        if (amount > 0 && bonoCreated?.id) {
+          await createPayment({
+            reservation_type: 'enrollment',
+            reference_id: bonoCreated.id,
+            amount,
+            payment_method: method,
+            concept: `Nuevo bono ${TYPE_LABELS[classType] || classType} (${credits} clases)`,
+          });
+        }
+
+        showToast(`Bono creado: ${credits} clases · ${formatCurrency(amount)}`, 'success');
+        closeModal();
+        loadBonosTab(c);
+      } catch (err) {
+        console.error('Error creando bono:', err);
+        showToast('Error: ' + (err.message || 'No se pudo crear'), 'error');
+        btn.disabled = false; btn.textContent = 'Crear bono y cobrar';
+      }
+    });
   }
 
   async function loadPagosTab(c) {
@@ -1152,6 +1379,8 @@ export async function renderClientes(container) {
       for (const p of payments) {
         const domain = p.reservation_type || 'otros';
         timeline.push({
+          paymentId: p.id,
+          raw: p,
           date: p.payment_date || p.created_at,
           domain,
           type: DOMAIN_CONFIG[domain]?.label || domain,
@@ -1192,14 +1421,28 @@ export async function renderClientes(container) {
         return `<span style="font-size:.75rem;padding:2px 8px;border-radius:99px;background:${cfg.bg};color:${cfg.color};font-weight:600">${cfg.label}</span>`;
       }
 
-      const rows = timeline.map(t => `<tr>
-        <td>${formatDate(t.date)}</td>
-        <td>${domainBadge(t.domain)}</td>
-        <td>${esc(t.concept)}</td>
-        <td style="font-weight:600;color:#065f46">+${formatCurrency(t.amount)}</td>
-        <td>${METHOD_LABELS[t.method] || t.method}</td>
-        <td><span class="status-badge ${t.source === 'web' ? 'active' : ''}">${t.source === 'web' ? 'Web' : 'Manual'}</span></td>
-      </tr>`).join('');
+      const rows = timeline.map((t, i) => {
+        const isEditable = t.source === 'admin' && t.paymentId;
+        const actionCell = isEditable
+          ? `<td style="white-space:nowrap;text-align:right">
+              <button class="cli-pay-edit-btn" data-idx="${i}" title="Editar" style="background:none;border:none;cursor:pointer;color:#0ea5e9;padding:4px 6px;border-radius:4px">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <button class="cli-pay-del-btn" data-idx="${i}" title="Eliminar" style="background:none;border:none;cursor:pointer;color:#dc2626;padding:4px 6px;border-radius:4px">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </button>
+            </td>`
+          : '<td></td>';
+        return `<tr>
+          <td>${formatDate(t.date)}</td>
+          <td>${domainBadge(t.domain)}</td>
+          <td>${esc(t.concept)}</td>
+          <td style="font-weight:600;color:#065f46">+${formatCurrency(t.amount)}</td>
+          <td>${METHOD_LABELS[t.method] || t.method}</td>
+          <td><span class="status-badge ${t.source === 'web' ? 'active' : ''}">${t.source === 'web' ? 'Web' : 'Manual'}</span></td>
+          ${actionCell}
+        </tr>`;
+      }).join('');
 
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
@@ -1230,7 +1473,7 @@ export async function renderClientes(container) {
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Método</th><th>Origen</th>
+                <th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Método</th><th>Origen</th><th></th>
               </tr></thead>
               <tbody>${rows}</tbody>
             </table>
@@ -1239,6 +1482,33 @@ export async function renderClientes(container) {
 
       // Bind add payment button
       el.querySelector('#cli-add-payment')?.addEventListener('click', () => openAddPaymentModal(c));
+
+      // Edit / delete payment
+      el.querySelectorAll('.cli-pay-edit-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const idx = parseInt(btn.dataset.idx);
+          const t = timeline[idx];
+          if (!t?.raw) return;
+          openPaymentEditModal(t.raw, { onSaved: () => loadPagosTab(c) });
+        });
+      });
+      el.querySelectorAll('.cli-pay-del-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const idx = parseInt(btn.dataset.idx);
+          const t = timeline[idx];
+          if (!t?.paymentId) return;
+          if (!confirm(`¿Eliminar este pago de ${formatCurrency(t.amount)}?`)) return;
+          try {
+            await deletePayment(t.paymentId);
+            showToast('Pago eliminado', 'success');
+            loadPagosTab(c);
+          } catch (err) {
+            showToast('Error al eliminar: ' + (err.message || ''), 'error');
+          }
+        });
+      });
     } catch (err) {
       el.innerHTML = `<div class="act-form-card"><p style="color:#b91c1c">Error cargando pagos: ${esc(err.message)}</p></div>`;
     }
