@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# WavePanel SaaS — proyecto independiente, ahora vive en ~/Desktop/wavepanel
+/saas-landing/
+
+# Supabase CLI — artefactos temporales locales
+/supabase/.temp/
