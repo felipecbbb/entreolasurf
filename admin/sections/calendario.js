@@ -1165,21 +1165,54 @@ export async function renderCalendario(container) {
   }
 
   // ======== ENROLLMENTS MODAL ========
+  const ENROLLMENT_STATUS = {
+    paid:      { label: 'Pagado',           color: '#16a34a' },
+    completed: { label: 'Asistió',          color: '#16a34a' },
+    partial:   { label: 'Anticipo pagado',  color: '#d97706' },
+    pending:   { label: 'Pendiente de pago', color: '#dc2626' },
+    unpaid:    { label: 'Pendiente de pago', color: '#dc2626' },
+    no_show:   { label: 'No se presentó',    color: '#6b7280' },
+    cancelled: { label: 'Cancelado',         color: '#6b7280' },
+  };
+
+  function ageFromBirthDate(birthDate) {
+    if (!birthDate) return '';
+    const today = new Date();
+    const birth = new Date(birthDate);
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    return ` (${age})`;
+  }
+
   async function showEnrollments(cls) {
     try {
       const enrollments = await fetchClassEnrollments(cls.id);
+      const active = enrollments.filter(e => e.status !== 'cancelled');
+
       const listHtml = enrollments.length
-        ? `<div class="enrollment-list">${enrollments.map(e => `
-            <div style="padding:10px 0;border-bottom:1px solid var(--color-line,#eee);display:flex;justify-content:space-between;align-items:center">
-              <strong>${e.family_members?.full_name || e.profiles?.full_name || 'Usuario'}</strong>
-              <span class="admin-badge" data-status="${e.status}">${e.status}</span>
-            </div>`).join('')}</div>`
+        ? `<div class="enrollment-list">${enrollments.map(e => {
+            const name = e.guest_name || e.family_members?.full_name || e.profiles?.full_name || 'Sin nombre';
+            const ageLabel = ageFromBirthDate(e.family_members?.birth_date || e.profiles?.birth_date);
+            const bonoLabel = (e.bono && e.bono.status === 'active')
+              ? `<span style="color:#0ea5e9;font-size:.7rem;font-weight:600;white-space:nowrap">Bono ${e.bono.used_credits}/${e.bono.total_credits}</span>`
+              : '';
+            const st = ENROLLMENT_STATUS[e.status] || { label: e.status, color: '#6b7280' };
+            return `
+            <div style="padding:10px 0;border-bottom:1px solid var(--color-line,#eee);display:flex;justify-content:space-between;align-items:center;gap:12px">
+              <strong>${escapeHtml(name)}${ageLabel}</strong>
+              <span style="display:flex;align-items:center;gap:10px">
+                ${bonoLabel}
+                <span style="color:${st.color};font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em">${st.label}</span>
+              </span>
+            </div>`;
+          }).join('')}</div>`
         : '<p style="color:#888;margin-top:12px">No hay inscritos</p>';
 
       const label = TYPE_LABELS[cls.type] || cls.title;
       openModal(`${label} — ${formatDate(cls.date)} ${cls.time_start?.slice(0, 5)}`, `
         <div style="display:flex;gap:16px;margin-bottom:16px">
-          <div><strong>Inscritos:</strong> ${cls.enrolled_count || 0}/${cls.max_students}</div>
+          <div><strong>Inscritos:</strong> ${active.length}/${cls.max_students}</div>
           <div><strong>Publicada:</strong> ${cls.published ? 'Sí' : 'No'}</div>
         </div>
         ${listHtml}
