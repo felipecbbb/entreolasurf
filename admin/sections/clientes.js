@@ -212,7 +212,9 @@ export async function renderClientes(container) {
   // ===================== LIST VIEW =====================
   async function renderList() {
     selectedClient = null;
-    const profiles = await fetchProfiles(searchTerm || undefined);
+    // Solo clientes: los instructores (admin/encargado) se gestionan en Equipo
+    const allProfiles = await fetchProfiles(searchTerm || undefined);
+    const profiles = allProfiles.filter(p => p.role !== 'admin' && p.role !== 'encargado');
 
     // Batch-fetch emails, family members, and enrollments for all listed profiles
     const profileIds = profiles.map(p => p.id);

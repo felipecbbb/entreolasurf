@@ -32,6 +32,26 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
+// Instructores = staff (perfiles admin/encargado). El campo guarda el nombre (texto).
+async function fetchInstructors() {
+  const { data } = await supabase
+    .from('profiles').select('full_name')
+    .in('role', ['admin', 'encargado'])
+    .order('full_name', { ascending: true });
+  return [...new Set((data || []).map(p => p.full_name).filter(Boolean))];
+}
+
+// Rellena un <select> de instructores; conserva el valor previo aunque no esté en la lista (legacy)
+function populateInstructorSelect(selectEl, selected = '') {
+  if (!selectEl) return;
+  fetchInstructors().then(list => {
+    const opts = ['<option value="">Sin asignar</option>'];
+    if (selected && !list.includes(selected)) opts.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`);
+    list.forEach(n => opts.push(`<option value="${escapeHtml(n)}" ${n === selected ? 'selected' : ''}>${escapeHtml(n)}</option>`));
+    selectEl.innerHTML = opts.join('');
+  });
+}
+
 // ---- Notificar a inscritos cuando una clase cambia o se cancela ----
 // kind: 'cancelled' | 'rescheduled'
 // payload: { className, classDate, classTime, instructor?, oldClassDate?, oldClassTime? }
@@ -4732,7 +4752,7 @@ export async function renderCalendario(container) {
                 </div>
                 <div class="ns-field">
                   <label>Instructor</label>
-                  <input type="text" name="instructor" placeholder="Opcional" />
+                  <select name="instructor" id="ns-instructor"><option value="">Sin asignar</option></select>
                 </div>
                 <label class="ns-checkbox">
                   <input type="checkbox" name="published" />
@@ -4982,6 +5002,9 @@ export async function renderCalendario(container) {
       (data || []).forEach(a => { if (a.duracion) durations[a.type_key] = Number(a.duracion); });
       recomputeEnd();
     });
+
+    // Instructor: select de staff registrado
+    populateInstructorSelect(document.getElementById('ns-instructor'));
 
     // Auto-update capacity + hora de fin when type changes (class form)
     document.getElementById('ns-type')?.addEventListener('change', (e) => {
@@ -5602,7 +5625,7 @@ export async function renderCalendario(container) {
         <label>Capacidad Máxima</label>
         <input type="number" name="max_students" value="${cls.max_students || 8}" min="1" required />
         <label>Instructor</label>
-        <input type="text" name="instructor" value="${cls.instructor || ''}" />
+        <select name="instructor" id="es-instructor"><option value="">Sin asignar</option></select>
         <label>Público</label>
         <select name="audience">${audienceOptionsHtml(cls.audience || '')}</select>
         <label>Precio (€)</label>
@@ -5614,6 +5637,8 @@ export async function renderCalendario(container) {
         <button type="submit" class="btn red" style="margin-top:16px">Guardar</button>
       </form>
     `);
+
+    populateInstructorSelect(document.getElementById('es-instructor'), cls.instructor || '');
 
     document.getElementById('edit-session-form').addEventListener('submit', async (e) => {
       e.preventDefault();
