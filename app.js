@@ -1,7 +1,9 @@
 import { updateCartPill } from '/lib/cart.js';
 import { supabase } from '/lib/supabase.js';
 import '/lib/cookie-banner.js';
+import { initCartDrawer } from '/lib/cart-drawer.js';
 updateCartPill();
+initCartDrawer();
 
 /* ---------- Hide nav links for deactivated activities + expired camps ---------- */
 (async () => {

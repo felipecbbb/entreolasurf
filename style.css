@@ -3645,3 +3645,160 @@ td a {
   font-size: .85rem;
   margin: 4px 0 10px;
 }
+
+/* ============================================================
+   Cart Drawer — panel lateral del carrito
+   ============================================================ */
+.cart-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(15, 47, 57, 0.45);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .25s ease, visibility .25s ease;
+}
+.cart-drawer-overlay.open { opacity: 1; visibility: visible; }
+
+.cart-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(420px, 100%);
+  background: var(--color-bg, #fffdf7);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -16px 0 40px rgba(15, 47, 57, 0.2);
+  transform: translateX(100%);
+  transition: transform .3s cubic-bezier(.4, 0, .2, 1);
+}
+.cart-drawer-overlay.open .cart-drawer { transform: translateX(0); }
+
+.cart-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--color-line);
+}
+.cart-drawer-head h3 {
+  margin: 0;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.5rem;
+  letter-spacing: .5px;
+  color: var(--color-navy);
+}
+.cart-drawer-close {
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: var(--color-navy);
+  cursor: pointer;
+}
+.cart-drawer-close:hover { background: var(--color-sand); }
+
+.cart-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 22px;
+}
+.cart-drawer-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-line);
+}
+.cart-drawer-item-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cart-drawer-item-main strong { color: var(--color-navy); font-size: .95rem; }
+.cart-drawer-note {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-muted);
+}
+.cart-drawer-price { font-size: .85rem; color: var(--color-muted); }
+.cart-drawer-item-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.cart-drawer-line { font-weight: 700; color: var(--color-navy); font-size: .92rem; }
+.cart-drawer-qty {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.cart-drawer-qty button {
+  border: none;
+  background: var(--color-paper);
+  width: 28px;
+  height: 28px;
+  font-size: 1rem;
+  cursor: pointer;
+  color: var(--color-navy);
+}
+.cart-drawer-qty button:hover { background: var(--color-sand); }
+.cart-drawer-qty span { min-width: 26px; text-align: center; font-size: .9rem; font-weight: 600; color: var(--color-navy); }
+.cart-drawer-remove {
+  background: none;
+  border: none;
+  color: #b91c1c;
+  cursor: pointer;
+  padding: 2px;
+  opacity: .7;
+}
+.cart-drawer-remove:hover { opacity: 1; }
+
+.cart-drawer-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 60px 20px;
+  color: var(--color-muted);
+  text-align: center;
+}
+.cart-drawer-empty svg { color: var(--color-line); }
+
+.cart-drawer-foot {
+  border-top: 1px solid var(--color-line);
+  padding: 18px 22px calc(18px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--color-paper);
+}
+.cart-drawer-foot:empty { display: none; }
+.cart-drawer-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: .9rem;
+  color: var(--color-muted);
+}
+.cart-drawer-total strong {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.6rem;
+  color: var(--color-navy);
+}
+.cart-drawer-checkout { width: 100%; padding: 13px; }
+.cart-drawer-continue {
+  background: none;
+  border: none;
+  color: var(--color-navy);
+  font-size: .85rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px;
+}
+
+/* Header: iconos de carrito y cuenta */
+.cart-nav a { display: inline-flex; align-items: center; gap: 4px; }
+.nav-cart-icon { display: inline-block; vertical-align: middle; }
+.nav-account-link { display: inline-flex; align-items: center; gap: 6px; }
+.nav-account-icon { flex-shrink: 0; }
