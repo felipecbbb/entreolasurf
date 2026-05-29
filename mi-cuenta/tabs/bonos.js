@@ -1,4 +1,4 @@
-import { fetchUserBonos, fetchPacksForType, upgradeBono } from '/lib/bonos.js';
+import { fetchUserBonos, fetchPacksForType, upgradeBono, startBonoBalanceCheckout } from '/lib/bonos.js';
 import { supabase } from '/lib/supabase.js';
 import { formatDate, formatPrice, TYPE_LABELS } from '/lib/utils.js';
 
@@ -288,11 +288,11 @@ function openPayBonoModal(panel, switchTab, bonos, bonoId, classType, totalCredi
           </div>
         </div>
         <p style="font-size:.82rem;color:var(--color-muted);margin:16px 0 0">
-          Puedes pagar la totalidad del importe pendiente.
-          El pago se realizará en la escuela (efectivo o tarjeta).
+          Pago <strong>opcional</strong>: ab&oacute;nalo ahora con tarjeta o cuando vengas a la
+          escuela. No hace falta para reservar tus clases.
         </p>
         <button class="btn red" id="pay-bono-confirm" style="width:100%;margin-top:18px;padding:12px;font-size:.92rem">
-          Confirmar pago de ${formatPrice(pending)}
+          Pagar ${formatPrice(pending)} con tarjeta
         </button>
       </div>
     </div>`;
@@ -305,31 +305,15 @@ function openPayBonoModal(panel, switchTab, bonos, bonoId, classType, totalCredi
   overlay.querySelector('#pay-bono-confirm').addEventListener('click', async () => {
     const btn = overlay.querySelector('#pay-bono-confirm');
     btn.disabled = true;
-    btn.textContent = 'Procesando…';
+    btn.textContent = 'Redirigiendo al pago…';
     try {
-      const newTotalPaid = alreadyPaid + pending;
-      const { error } = await supabase
-        .from('bonos')
-        .update({ total_paid: newTotalPaid })
-        .eq('id', bonoId);
-      if (error) throw error;
-
-      // Update enrollment statuses to 'paid' if they were 'partial'
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from('class_enrollments')
-          .update({ status: 'paid' })
-          .eq('bono_id', bonoId)
-          .eq('status', 'partial');
-      }
-
-      overlay.remove();
-      await refreshBonosPanel(panel, switchTab);
+      await startBonoBalanceCheckout(bonoId, pending, TYPE_LABELS[classType] || classType);
+      // Redirige a Stripe. Al volver (?pago=ok) el panel recarga y el webhook
+      // habrá actualizado total_paid y marcado las inscripciones como pagadas.
     } catch (err) {
-      alert('Error al registrar pago: ' + err.message);
+      alert('Error al iniciar el pago: ' + err.message);
       btn.disabled = false;
-      btn.textContent = `Confirmar pago de ${formatPrice(pending)}`;
+      btn.textContent = `Pagar ${formatPrice(pending)} con tarjeta`;
     }
   });
 }

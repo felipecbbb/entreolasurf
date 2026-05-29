@@ -220,6 +220,31 @@ Deno.serve(async (req) => {
         }
       }
 
+      // ---- Process BONO BALANCE payments (saldo pendiente pagado online) ----
+      const bonoBalances = cart.filter((i: any) => i.type === "bono_balance");
+      for (const bb of bonoBalances) {
+        const bonoId = bb.metadata?.bonoId;
+        const amt = Number(bb.price || 0) * (bb.quantity || 1);
+        if (!bonoId || amt <= 0) continue;
+        const { data: bono } = await supabase.from("bonos").select("total_paid, class_type").eq("id", bonoId).single();
+        if (bono) {
+          await supabase.from("bonos").update({
+            total_paid: Number(bono.total_paid || 0) + amt,
+            updated_at: new Date().toISOString(),
+          }).eq("id", bonoId);
+          // El bono queda saldado → marca sus inscripciones activas como pagadas
+          await supabase.from("class_enrollments").update({ status: "paid" })
+            .eq("bono_id", bonoId).in("status", ["partial", "confirmed"]);
+          paymentRows.push({
+            ...paymentsBase,
+            amount: amt,
+            reservation_type: "bono",
+            reference_id: bonoId,
+            concept: `Saldo bono ${bono.class_type || ''}`.trim(),
+          });
+        }
+      }
+
       // ---- Process PRODUCT order items ----
       const products = cart.filter((i: any) => i.type === "product");
       let productsTotal = 0;
