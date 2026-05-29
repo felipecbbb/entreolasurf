@@ -4701,11 +4701,11 @@ export async function renderCalendario(container) {
                 <div class="ns-field-2col">
                   <div class="ns-field">
                     <label>Hora de inicio</label>
-                    <input type="time" name="time_start" value="10:00" required />
+                    <input type="time" name="time_start" id="ns-time-start" value="10:00" required />
                   </div>
                   <div class="ns-field">
-                    <label>Hora de fin</label>
-                    <input type="time" name="time_end" value="11:30" required />
+                    <label>Hora de fin <span style="font-weight:400;color:#94a3b8;text-transform:none;letter-spacing:0">· automática</span></label>
+                    <input type="time" id="ns-time-end" value="11:30" readonly tabindex="-1" style="background:#f1f5f9;color:#64748b;cursor:not-allowed" />
                   </div>
                 </div>
                 <div class="ns-field ns-mode-repeat" style="display:none">
@@ -4963,14 +4963,37 @@ export async function renderCalendario(container) {
       summary.innerHTML = `Total: ${total}€${deposit > 0 ? ` · Depósito: ${deposit}€` : ''}`;
     }
 
-    // Auto-update capacity when type changes (class form)
+    // Duración por tipo (min). La hora de fin se calcula sola desde inicio + duración.
+    const durations = { grupal: 90, individual: 90, paddle: 90, surfskate: 90, yoga: 60 };
+    function addMinutes(hhmm, mins) {
+      const [h, m] = (hhmm || '0:0').split(':').map(Number);
+      const total = (h * 60 + m + mins) % (24 * 60);
+      const eh = Math.floor(total / 60), em = total % 60;
+      return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+    }
+    function recomputeEnd() {
+      const t = document.getElementById('ns-type')?.value;
+      const start = document.getElementById('ns-time-start')?.value;
+      const endEl = document.getElementById('ns-time-end');
+      if (endEl && start) endEl.value = addMinutes(start, durations[t] || 90);
+    }
+    // Carga las duraciones reales desde activities (sobrescribe el fallback)
+    supabase.from('activities').select('type_key, duracion').eq('activo', true).then(({ data }) => {
+      (data || []).forEach(a => { if (a.duracion) durations[a.type_key] = Number(a.duracion); });
+      recomputeEnd();
+    });
+
+    // Auto-update capacity + hora de fin when type changes (class form)
     document.getElementById('ns-type')?.addEventListener('change', (e) => {
       const t = e.target.value;
       document.getElementById('ns-capacity').value = defaultCapacities[t] || 8;
+      recomputeEnd();
     });
+    document.getElementById('ns-time-start')?.addEventListener('input', recomputeEnd);
 
     // Dispatch change event on load to sync capacity with default type
     document.getElementById('ns-type')?.dispatchEvent(new Event('change'));
+    recomputeEnd();
 
     // Toggle "Un solo día" / "Varios días"
     let sessionMode = 'single';
@@ -4989,7 +5012,7 @@ export async function renderCalendario(container) {
       const fd = new FormData(e.target);
       const type = fd.get('type');
       const timeStart = fd.get('time_start');
-      const timeEnd = fd.get('time_end');
+      const timeEnd = addMinutes(timeStart, durations[type] || 90);
       let maxStudents = parseInt(fd.get('max_students'));
       // Auto-correct capacity for individual classes
       if (type === 'individual') maxStudents = Math.min(maxStudents, defaultCapacities.individual || 1);
