@@ -220,14 +220,13 @@ body.internal-page.no-hero .logo.logo-surf-house .logo-line {
   top: calc(100% + 16px);
   left: 0;
   min-width: 260px;
-  background: rgba(8, 15, 22, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 12px;
-  box-shadow: 0 20px 34px rgba(0, 0, 0, 0.28);
-  padding: 10px;
+  background: #ffffff;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  box-shadow: 0 20px 40px rgba(15, 47, 57, 0.18);
+  padding: 8px;
   display: none;
   z-index: 60;
-  backdrop-filter: blur(6px);
 }
 
 .dropdown::before {
@@ -245,13 +244,14 @@ body.internal-page.no-hero .logo.logo-surf-house .logo-line {
   font-size: .72rem;
   letter-spacing: .06em;
   font-weight: 600;
-  padding: 9px 10px;
+  padding: 10px 12px;
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--color-navy);
 }
 
 .dropdown a:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--color-sand);
+  color: var(--color-navy);
   opacity: 1;
 }
 
@@ -301,7 +301,7 @@ body.internal-page.no-hero .cart-pill {
 }
 
 body.internal-page.no-hero .dropdown a {
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--color-navy);
 }
 
 .btn {
@@ -1464,6 +1464,16 @@ td a {
     min-width: 0;
     margin-top: 6px;
     width: 100%;
+  }
+
+  .dropdown a,
+  body.internal-page.no-hero .dropdown a {
+    color: rgba(255, 255, 255, 0.94);
+  }
+
+  .dropdown a:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
   }
 
   .nav-item.has-dd.open .dropdown {
