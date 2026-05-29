@@ -155,6 +155,68 @@ Deno.serve(async (req) => {
             reference_id: bono.id,
             concept: `Bono ${classType} · ${sessions} sesiones`,
           });
+
+          // ---- Convertir las plazas preseleccionadas (holds) en inscripciones ----
+          const bookings = Array.isArray(cls.metadata?.bookings) ? cls.metadata.bookings : [];
+          let bookedCount = 0;
+          for (const bk of bookings) {
+            try {
+              const att = bk.attendee || {};
+              let familyMemberId: string | null = null;
+
+              if (att.kind === "family" && att.family_member_id) {
+                // Verifica que el familiar pertenece al usuario
+                const { data: fm } = await supabase
+                  .from("family_members").select("id")
+                  .eq("id", att.family_member_id).eq("user_id", userId).maybeSingle();
+                familyMemberId = fm?.id || null;
+              } else if (att.kind === "guest" && att.guest_data) {
+                // Crea el familiar vinculado a la cuenta del comprador
+                const g = att.guest_data;
+                const { data: newFm } = await supabase.from("family_members").insert({
+                  user_id: userId,
+                  full_name: g.full_name,
+                  last_name: g.last_name || "",
+                  birth_date: g.birth_date || null,
+                  level: g.level || null,
+                  wetsuit_size: g.wetsuit_size || null,
+                  can_swim: typeof g.can_swim === "boolean" ? g.can_swim : null,
+                  has_injury: !!g.has_injury,
+                  injury_detail: g.injury_detail || null,
+                }).select("id").single();
+                familyMemberId = newFm?.id || null;
+              }
+              // kind === 'self' → familyMemberId queda null
+
+              // Revalida plaza (el hold pudo caducar si tardó >10 min en pagar)
+              const { data: sc } = await supabase
+                .from("surf_classes")
+                .select("max_students, enrolled_count, status, published")
+                .eq("id", bk.classId).single();
+              if (!sc || sc.published !== true || sc.status !== "scheduled" ||
+                  sc.enrolled_count >= sc.max_students) {
+                continue; // sin plaza → queda como crédito libre en el bono
+              }
+
+              const { error: enrErr } = await supabase.from("class_enrollments").insert({
+                class_id: bk.classId,
+                user_id: userId,
+                family_member_id: familyMemberId,
+                bono_id: bono.id,
+                status: "confirmed",
+              });
+              if (!enrErr) bookedCount++;
+              else console.error("Enrollment insert error:", enrErr.message);
+            } catch (e: any) {
+              console.error("Hold→enrollment error:", e?.message);
+            }
+          }
+
+          // Libera cualquier hold sobrante del token
+          if (cls.metadata?.cartToken) {
+            try { await supabase.rpc("release_holds", { p_cart_token: cls.metadata.cartToken }); } catch {}
+          }
+          console.log(`Bono ${bono.id}: ${bookedCount}/${sessions * (cls.quantity || 1)} clases preasignadas`);
         }
       }
 

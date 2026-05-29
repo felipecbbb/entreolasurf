@@ -3362,3 +3362,276 @@ td a {
   padding: 10px 20px;
   white-space: nowrap;
 }
+
+/* ============================================================
+   Class Picker — modal de calendario al reservar clases
+   ============================================================ */
+.cp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(15, 47, 57, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  backdrop-filter: blur(2px);
+}
+.cp-modal {
+  position: relative;
+  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  width: min(640px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+  -webkit-overflow-scrolling: touch;
+}
+.cp-loading, .cp-empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--color-muted);
+}
+.cp-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 3;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-navy);
+  cursor: pointer;
+}
+.cp-close:hover { background: var(--color-sand); }
+
+.cp-header {
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--color-line);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.cp-header h3 {
+  margin: 6px 0 2px;
+  color: var(--color-navy);
+  font-size: 1.25rem;
+}
+.cp-sub { margin: 0; color: var(--color-muted); font-size: .9rem; }
+.cp-credits {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cp-credits-count {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.8rem;
+  color: var(--color-navy);
+  letter-spacing: .5px;
+}
+.cp-credits-label { color: var(--color-muted); font-size: .85rem; }
+
+.cp-timer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 24px;
+  background: #fff7d6;
+  color: #8a6d00;
+  font-size: .85rem;
+  border-bottom: 1px solid #f0e2a8;
+}
+.cp-timer .cp-timer-clock {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.1rem;
+  letter-spacing: .5px;
+}
+
+.cp-selection {
+  padding: 14px 24px;
+  background: var(--color-sand);
+}
+.cp-selection > strong {
+  display: block;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-navy);
+  margin-bottom: 8px;
+}
+.cp-sel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: .9rem;
+  border-bottom: 1px dashed var(--color-line);
+}
+.cp-sel-row:last-child { border-bottom: none; }
+.cp-sel-att {
+  margin-left: auto;
+  color: var(--color-navy);
+  font-weight: 600;
+}
+.cp-sel-remove {
+  background: none;
+  border: none;
+  color: #b91c1c;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.cp-strip { padding: 14px 24px 0; }
+.cp-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 24px;
+}
+.cp-mine-badge {
+  background: #dcfce7;
+  color: #15803d;
+  font-size: .72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.cp-full { color: #c0392b; font-size: .85rem; font-weight: 600; }
+
+.cp-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--color-paper);
+  border-top: 1px solid var(--color-line);
+  padding: 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cp-footer-note { font-size: .82rem; color: var(--color-muted); }
+.cp-footer-btns { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* Selector de asistente */
+.cp-attendee-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: rgba(15, 47, 57, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.cp-attendee-box {
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  width: min(440px, 100%);
+  max-height: 86vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+}
+.cp-attendee-box h4 { margin: 0 0 2px; color: var(--color-navy); }
+.cp-att-sub { margin: 0 0 14px; color: var(--color-muted); font-size: .85rem; }
+.cp-att-opts { display: flex; flex-direction: column; gap: 8px; }
+.cp-att-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: .9rem;
+}
+.cp-att-opt:has(input:checked) {
+  border-color: var(--color-navy);
+  background: var(--color-sand);
+}
+.cp-guest-form {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--color-line);
+}
+.cp-guest-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.cp-guest-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: .8rem;
+  color: var(--color-navy);
+  gap: 4px;
+}
+.cp-guest-form input,
+.cp-guest-form select {
+  padding: 7px 9px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  font-size: .85rem;
+}
+.cp-guest-injury { margin-top: 10px; }
+.cp-att-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 520px) {
+  .cp-header, .cp-slots, .cp-selection, .cp-footer { padding-left: 16px; padding-right: 16px; }
+  .cp-strip { padding-left: 16px; padding-right: 16px; }
+  .cp-guest-grid { grid-template-columns: 1fr; }
+  .cp-footer-btns { flex-direction: column-reverse; }
+  .cp-footer-btns .btn { width: 100%; }
+}
+
+/* Class Picker — login inline */
+.cp-auth { padding: 18px 24px 24px; }
+.cp-auth-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  background: var(--color-sand);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+.cp-auth-tab {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+.cp-auth-tab.active { background: var(--color-paper); color: var(--color-navy); box-shadow: var(--shadow-sm); }
+.cp-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  font-size: .82rem;
+  color: var(--color-navy);
+}
+.cp-auth-field input {
+  padding: 9px 11px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  font-size: .92rem;
+}
+.cp-auth-error {
+  color: #b91c1c;
+  font-size: .85rem;
+  margin: 4px 0 10px;
+}
