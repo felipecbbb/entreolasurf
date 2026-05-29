@@ -3814,3 +3814,139 @@ td a {
 .nav-cart-icon { display: inline-block; vertical-align: middle; }
 .nav-account-link { display: inline-flex; align-items: center; gap: 6px; }
 .nav-account-icon { flex-shrink: 0; }
+
+/* ============================================================
+   Class Picker — calendario mensual + resumen
+   ============================================================ */
+.cp-cal { padding: 14px 24px 4px; }
+.cp-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.cp-cal-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  color: var(--color-navy);
+  font-size: 1rem;
+}
+.cp-cal-nav {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--color-line);
+  background: var(--color-paper);
+  color: var(--color-navy);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.cp-cal-nav:hover { background: var(--color-sand); }
+.cp-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.cp-cal-weekdays span {
+  text-align: center;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--color-muted);
+  padding: 4px 0;
+}
+.cp-cal-day {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  color: var(--color-navy);
+  font-size: .92rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.cp-cal-day.cp-cal-off {
+  color: #c8cdd2;
+  cursor: default;
+}
+.cp-cal-day.has-class {
+  background: var(--color-sand);
+  border-color: var(--color-line);
+}
+.cp-cal-day.has-class:hover { border-color: var(--color-navy); }
+.cp-cal-day.active {
+  background: var(--color-navy);
+  color: #fff;
+  border-color: var(--color-navy);
+}
+.cp-cal-dot {
+  position: absolute;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+.cp-cal-day.active .cp-cal-dot { background: #fff; }
+.cp-cal-empty { aspect-ratio: 1; }
+
+/* Resumen */
+.cp-summary { padding: 16px 24px; }
+.cp-sum-block { margin-bottom: 18px; }
+.cp-sum-block h4 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--color-muted);
+  margin: 0 0 10px;
+}
+.cp-sum-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-line);
+}
+.cp-sum-when { display: flex; flex-direction: column; }
+.cp-sum-when strong { color: var(--color-navy); font-size: .92rem; text-transform: capitalize; }
+.cp-sum-when span { font-size: .8rem; color: var(--color-muted); }
+.cp-sum-att {
+  font-weight: 600;
+  color: var(--color-navy);
+  background: var(--color-sand);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: .82rem;
+}
+.cp-sum-empty, .cp-sum-later { font-size: .85rem; color: var(--color-muted); margin: 8px 0 0; }
+.cp-sum-pay {
+  background: var(--color-sand);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+.cp-sum-pay-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: .9rem;
+  color: var(--color-navy);
+  padding: 4px 0;
+}
+.cp-sum-pay-row strong { font-size: 1.1rem; }
+.cp-sum-muted { color: var(--color-muted); }
+.cp-sum-pay-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-line);
+  font-size: .9rem;
+  color: var(--color-muted);
+}
+.cp-sum-pay-total strong { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; color: var(--color-navy); }
