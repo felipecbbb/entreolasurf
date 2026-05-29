@@ -56,8 +56,26 @@ async function fetchClassesForDate(date, level) {
   return data || [];
 }
 
+const CAL_MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const CAL_WEEKDAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const cpad = n => String(n).padStart(2, '0');
+
+async function fetchClassDaysForMonth(type, level, y, m) {
+  const start = `${y}-${cpad(m + 1)}-01`;
+  const end = `${y}-${cpad(m + 1)}-${cpad(new Date(y, m + 1, 0).getDate())}`;
+  let q = supabase.from('surf_classes').select('date')
+    .eq('published', true).eq('status', 'scheduled')
+    .gte('date', start).lte('date', end);
+  if (type) q = q.eq('type', type);
+  const { data } = await q;
+  return new Set((data || []).map(r => r.date));
+}
+
 export async function renderCalendar(panel) {
-  let dateOffset = 0;
+  const _t = new Date();
+  let calY = _t.getFullYear();
+  let calM = _t.getMonth();
+  let markedDays = new Set();
   let selectedDate = null;
   let filterLevel = 'principiante';
   let filterType = '';
@@ -74,8 +92,7 @@ export async function renderCalendar(panel) {
     const activeBonos = allBonos.filter(b => b.status === 'active' && b.used_credits < b.total_credits && new Date(b.expires_at) > new Date());
     const activeTypes = [...new Set(activeBonos.map(b => b.class_type))];
 
-    const dates = getDateRange(dateOffset);
-    if (!selectedDate || !dates.includes(selectedDate)) selectedDate = dates[0];
+    try { markedDays = await fetchClassDaysForMonth(filterType, filterLevel, calY, calM); } catch { markedDays = new Set(); }
 
     let html = '';
 
@@ -123,16 +140,39 @@ export async function renderCalendar(panel) {
       </select>
     </div>`;
 
-    // Date strip
+    // Calendario mensual
+    const tStr = new Date().toISOString().slice(0, 10);
+    const firstWd = (new Date(calY, calM, 1).getDay() + 6) % 7;
+    const daysInMonth = new Date(calY, calM + 1, 0).getDate();
+    let cells = '';
+    for (let i = 0; i < firstWd; i++) cells += '<span class="mc-empty"></span>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = `${calY}-${cpad(calM + 1)}-${cpad(d)}`;
+      const has = markedDays.has(ds);
+      const past = ds < tStr;
+      const sel = ds === selectedDate;
+      const cl = ['mc-day'];
+      if (sel) cl.push('active');
+      if (has && !past) cl.push('has-class'); else cl.push('mc-off');
+      cells += `<button class="${cl.join(' ')}" data-date="${ds}" ${has && !past ? '' : 'disabled'}>${d}</button>`;
+    }
     html += `
-      <div class="date-strip">
-        <button class="date-strip-arrow" id="cal-prev">&lsaquo;</button>
-        ${dates.map(d => `<button class="date-strip-day ${d === selectedDate ? 'active' : ''}" data-date="${d}">${formatDayLabel(d)}</button>`).join('')}
-        <button class="date-strip-arrow" id="cal-next">&rsaquo;</button>
+      <div class="mc-cal">
+        <div class="mc-head">
+          <button class="mc-nav" id="cal-prev" aria-label="Mes anterior">&lsaquo;</button>
+          <span class="mc-title">${CAL_MONTHS[calM]} ${calY}</span>
+          <button class="mc-nav" id="cal-next" aria-label="Mes siguiente">&rsaquo;</button>
+        </div>
+        <div class="mc-grid mc-weekdays">${CAL_WEEKDAYS.map(w => `<span>${w}</span>`).join('')}</div>
+        <div class="mc-grid mc-days">${cells}</div>
       </div>`;
 
-    // Fetch ALL classes for this date
-    let allClasses = await fetchClassesForDate(selectedDate, filterLevel);
+    if (!selectedDate || !markedDays.has(selectedDate)) {
+      html += `<div class="cal-pick-hint">Elige un día con clases (marcados en el calendario).</div>`;
+    }
+
+    // Fetch ALL classes for this date (solo si hay día seleccionado con clases)
+    let allClasses = (selectedDate && markedDays.has(selectedDate)) ? await fetchClassesForDate(selectedDate, filterLevel) : [];
 
     // Apply type filter if selected
     if (filterType) {
@@ -214,8 +254,8 @@ export async function renderCalendar(panel) {
           </div>`;
       }).join('');
       html += `</div>`;
-    } else {
-      html += '<p style="color:var(--color-muted);margin-top:20px;text-align:center">No hay clases publicadas para esta fecha.</p>';
+    } else if (selectedDate && markedDays.has(selectedDate)) {
+      html += '<p style="color:var(--color-muted);margin-top:20px;text-align:center">No hay clases para tu nivel en esta fecha.</p>';
     }
 
     // Booking modal (hidden)
@@ -246,15 +286,13 @@ export async function renderCalendar(panel) {
     });
 
     panel.querySelector('#cal-prev')?.addEventListener('click', () => {
-      dateOffset = Math.max(dateOffset - 10, 0);
-      render();
+      calM--; if (calM < 0) { calM = 11; calY--; } render();
     });
     panel.querySelector('#cal-next')?.addEventListener('click', () => {
-      dateOffset += 10;
-      render();
+      calM++; if (calM > 11) { calM = 0; calY++; } render();
     });
 
-    panel.querySelectorAll('.date-strip-day').forEach(btn => {
+    panel.querySelectorAll('.mc-day:not([disabled])').forEach(btn => {
       btn.addEventListener('click', () => {
         selectedDate = btn.dataset.date;
         render();

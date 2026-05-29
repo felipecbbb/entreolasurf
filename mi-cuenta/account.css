@@ -1307,3 +1307,63 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
     border-radius: 12px;
   }
 }
+
+/* --- Calendario mensual (Reservar Clases) --- */
+.mc-cal {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin: 16px 0;
+  max-width: 520px;
+}
+.mc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.mc-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  color: var(--color-navy);
+  font-size: 1.05rem;
+}
+.mc-nav {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--color-line);
+  background: #fff;
+  color: var(--color-navy);
+  font-size: 1.3rem; line-height: 1;
+  cursor: pointer;
+}
+.mc-nav:hover { background: var(--color-sand, #f3ecdd); }
+.mc-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.mc-weekdays span {
+  text-align: center;
+  font-size: .7rem; font-weight: 700;
+  color: var(--color-muted);
+  padding: 4px 0;
+}
+.mc-day {
+  aspect-ratio: 1;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  color: var(--color-navy);
+  font-size: .95rem; font-weight: 600;
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.mc-day.mc-off { color: #c8cdd2; cursor: default; }
+.mc-day.has-class { background: var(--color-sand, #f3ecdd); border-color: var(--color-line); }
+.mc-day.has-class:hover { border-color: var(--color-navy); }
+.mc-day.active { background: var(--color-navy); color: #fff; border-color: var(--color-navy); }
+.mc-empty { aspect-ratio: 1; }
+.cal-pick-hint {
+  color: var(--color-muted);
+  font-size: .9rem;
+  text-align: center;
+  padding: 24px 12px;
+}
