@@ -4866,8 +4866,8 @@ export async function renderCalendario(container) {
                   <select name="instructor" id="ns-instructor"><option value="">Sin asignar</option></select>
                 </div>
                 <label class="ns-checkbox">
-                  <input type="checkbox" name="published" />
-                  <span>Publicar inmediatamente</span>
+                  <input type="checkbox" name="published" checked />
+                  <span>Publicar inmediatamente (visible para clientes)</span>
                 </label>
               </section>
             </form>
