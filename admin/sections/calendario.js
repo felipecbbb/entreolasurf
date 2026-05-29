@@ -2490,17 +2490,9 @@ export async function renderCalendario(container) {
                 }
                 await createEnrollment(enrollData);
               }
-
-              // Consume bono credits (accumulate locally to avoid stale values when multiple persons use same bono)
-              if (usingCredit) {
-                const selectedBono = pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono;
-                const sessionsUsed = p.sessions.length;
-                bonoCreditsUsed[selectedBono.id] = (bonoCreditsUsed[selectedBono.id] || 0) + sessionsUsed;
-                await supabase.from('bonos').update({
-                  used_credits: selectedBono.used_credits + bonoCreditsUsed[selectedBono.id],
-                  updated_at: new Date().toISOString(),
-                }).eq('id', selectedBono.id);
-              }
+              // El consumo de crédito lo gestiona el trigger update_bono_credits
+              // (cuenta inscripciones no canceladas). No se actualiza a mano para
+              // que al cancelar se devuelva el crédito correctamente.
             }
 
             const total = getTotal();
