@@ -1258,7 +1258,7 @@ export async function renderCalendario(container) {
     let personIdCounter = 1;
     let sessionQuantities = {}; // classId → quantity
     sessionQuantities[cls.id] = 1;
-    let persons = [{ id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, sessions: [cls.id] }];
+    let persons = [{ id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: false, email: '', sessions: [cls.id] }];
 
     function getTotalQuantity() {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
@@ -1406,6 +1406,17 @@ export async function renderCalendario(container) {
                       <option value="avanzado" ${p.nivelSurf === 'avanzado' ? 'selected' : ''}>Avanzado (+15 clases)</option>
                     </select>
                   </div>
+                  ${idx === 0 ? '' : `
+                  <div class="bk-field bk-field-full">
+                    <label class="bk-familiar-check">
+                      <input type="checkbox" class="bk-is-familiar" data-pid="${p.id}" ${p.isFamilyOfResponsable ? 'checked' : ''} />
+                      <span>Es hijo/familiar del responsable de la reserva</span>
+                    </label>
+                  </div>
+                  <div class="bk-field bk-field-full bk-email-wrap" data-pid="${p.id}" style="display:${p.isFamilyOfResponsable ? 'none' : ''}">
+                    <label class="bk-field-label">Email <small style="font-weight:400;color:#94a3b8;text-transform:none">· para invitarle a gestionar su reserva (opcional)</small></label>
+                    <input type="email" class="bk-field-input bk-person-email" data-pid="${p.id}" value="${p.email || ''}" placeholder="email@ejemplo.com" />
+                  </div>`}
                 </div>`
             }
             <div class="bk-person-sessions">
@@ -1531,7 +1542,7 @@ export async function renderCalendario(container) {
                 nombre: '', apellidos: '', edad: '', sabeNadar: '',
                 lesion: 'no', lesionDetalle: '', tallaNeopreno: '',
                 nivelSurf: 'principiante', profileId: null, profileName: null,
-                familyMemberId: null, sessions: []
+                familyMemberId: null, isFamilyOfResponsable: false, email: '', sessions: []
               });
             }
 
@@ -1614,6 +1625,8 @@ export async function renderCalendario(container) {
           profileId: null,
           profileName: null,
           familyMemberId: null,
+          isFamilyOfResponsable: false,
+          email: '',
           sessions: selectedSessions.length ? [selectedSessions[0]] : []
         });
         renderPanel();
@@ -1680,6 +1693,22 @@ export async function renderCalendario(container) {
         sel.addEventListener('change', () => {
           const p = persons.find(p => String(p.id) === sel.dataset.pid);
           if (p) p.nivelSurf = sel.value;
+        });
+      });
+
+      // Familiar del responsable toggle (muestra/oculta email)
+      overlay.querySelectorAll('.bk-is-familiar').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const p = persons.find(p => String(p.id) === cb.dataset.pid);
+          if (p) p.isFamilyOfResponsable = cb.checked;
+          const wrap = overlay.querySelector(`.bk-email-wrap[data-pid="${cb.dataset.pid}"]`);
+          if (wrap) wrap.style.display = cb.checked ? 'none' : '';
+        });
+      });
+      overlay.querySelectorAll('.bk-person-email').forEach(input => {
+        input.addEventListener('input', () => {
+          const p = persons.find(p => String(p.id) === input.dataset.pid);
+          if (p) p.email = input.value.trim();
         });
       });
 
@@ -1910,7 +1939,7 @@ export async function renderCalendario(container) {
                     </div>
                     ${contactData.profileId ? `<div style="padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                      <span style="font-size:.82rem;color:#065f46;font-weight:600">Cliente vinculado</span>
+                      <span style="font-size:.82rem;color:#065f46;font-weight:600">Cliente con ficha${contactData.nombre ? ': ' + contactData.nombre : ' vinculado'}</span>
                     </div>` : ''}
 
                     <div class="bk-contact-fields">
@@ -2212,6 +2241,29 @@ export async function renderCalendario(container) {
             contactData[key] = e.target.value;
           });
         });
+
+        // Auto-detectar cliente existente al escribir el email del responsable
+        let emailDetectDebounce = null;
+        overlay.querySelector('#bk-co-email')?.addEventListener('input', (e) => {
+          const email = e.target.value.trim().toLowerCase();
+          clearTimeout(emailDetectDebounce);
+          if (contactData.profileId || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
+          emailDetectDebounce = setTimeout(async () => {
+            try {
+              const { data: rows } = await supabase.from('profiles').select('*').eq('email', email).limit(1);
+              const prof = rows?.[0];
+              if (prof && !contactData.profileId) {
+                contactData.profileId = prof.id;
+                contactData.nombre = (prof.full_name || '').trim();
+                contactData.apellidos = (prof.last_name || '').trim();
+                contactData.telefono = prof.phone || '';
+                contactData.email = email;
+                renderCheckout();
+                showToast(`Ya es cliente con ficha: ${prof.full_name || email}`, 'success');
+              }
+            } catch { /* silent */ }
+          }, 500);
+        });
         overlay.querySelector('#bk-co-pais')?.addEventListener('change', (e) => { contactData.pais = e.target.value; });
         overlay.querySelector('#bk-co-idioma')?.addEventListener('change', (e) => { contactData.idioma = e.target.value; });
 
@@ -2305,33 +2357,85 @@ export async function renderCalendario(container) {
             // Track accumulated bono credit usage across persons
             const bonoCreditsUsed = {}; // bonoId → total credits consumed in this booking
 
-            // NOTE: NO heredamos contactData.profileId a persons[0]. El responsable es
-            // un concepto independiente de los inscritos — heredarlo provocaba violación
-            // del índice único (class_id, user_id, family_member_id) cuando el responsable
-            // ya estaba inscrito en la clase.
+            // ---- Resolver la cuenta del RESPONSABLE ----
+            // Prioridad: ya vinculado → email existente en BD → crear cuenta + invitación.
+            let responsableId = contactData.profileId || null;
+            const respEmail = contactData.email.trim().toLowerCase();
+            if (!responsableId && respEmail) {
+              try {
+                const { data: rows } = await supabase.from('profiles').select('id').eq('email', respEmail).limit(1);
+                if (rows?.[0]) responsableId = rows[0].id;
+              } catch {}
+            }
+            if (!responsableId && respEmail) {
+              try {
+                const nc = await createClientFromAdmin({
+                  full_name: `${contactData.nombre} ${contactData.apellidos}`.trim(),
+                  email: contactData.email.trim(),
+                  phone: contactData.telefono || null,
+                });
+                responsableId = nc?.id || null;
+              } catch (e) { console.warn('No se pudo crear responsable:', e.message); }
+            }
 
-            // Create client accounts for new persons (not linked to existing client)
+            // Persona (índice) que ES el responsable y asiste, si aplica
+            const respPersonIdx = contactSource.startsWith('persona_') ? (parseInt(contactSource.split('_')[1]) - 1) : -1;
+
+            // Reutiliza un familiar existente del responsable (por nombre) o lo crea
+            async function ensureFamilyMember(p) {
+              const fullName = `${p.nombre} ${p.apellidos}`.trim();
+              if (!responsableId || !fullName) return null;
+              try {
+                const { data: existing } = await supabase.from('family_members').select('id, full_name, last_name').eq('user_id', responsableId);
+                const match = (existing || []).find(m => `${m.full_name || ''} ${m.last_name || ''}`.trim().toLowerCase() === fullName.toLowerCase());
+                if (match) return match.id;
+                const { data: created } = await supabase.from('family_members').insert({
+                  user_id: responsableId,
+                  full_name: p.nombre || fullName,
+                  last_name: p.apellidos || '',
+                  level: p.nivelSurf || null,
+                  can_swim: p.sabeNadar === 'si' ? true : p.sabeNadar === 'no' ? false : null,
+                  has_injury: p.lesion === 'si',
+                  injury_detail: p.lesion === 'si' ? (p.lesionDetalle || null) : null,
+                  wetsuit_size: p.tallaNeopreno || null,
+                }).select('id').single();
+                return created?.id || null;
+              } catch (e) { console.warn('ensureFamilyMember', e.message); return null; }
+            }
+            // Cuenta propia de un adulto independiente (por email): existente o crear + invitar
+            async function ensureAccountByEmail(p) {
+              const email = (p.email || '').trim().toLowerCase();
+              if (!email) return null;
+              try {
+                const { data: rows } = await supabase.from('profiles').select('id').eq('email', email).limit(1);
+                if (rows?.[0]) return rows[0].id;
+                const nc = await createClientFromAdmin({ full_name: `${p.nombre} ${p.apellidos}`.trim(), email });
+                return nc?.id || null;
+              } catch (e) { console.warn('ensureAccountByEmail', e.message); return null; }
+            }
+
+            // Destino de inscripción por persona
+            const personTarget = {}; // pid → { user_id?, family_member_id?, guest_name? }
             for (let pi = 0; pi < persons.length; pi++) {
               const p = persons[pi];
-              if (!p.profileId && p.nombre.trim()) {
-                // First person uses contact email; others are guest-only
-                const personEmail = (pi === 0 && contactData.email) ? contactData.email : null;
-                if (personEmail) {
-                  try {
-                    const newClient = await createClientFromAdmin({
-                      full_name: `${p.nombre} ${p.apellidos}`.trim(),
-                      email: personEmail,
-                      phone: (pi === 0 && contactData.telefono) ? contactData.telefono : null,
-                    });
-                    if (newClient?.id) {
-                      p.profileId = newClient.id;
-                      p.profileName = newClient.full_name;
-                    }
-                  } catch (profileErr) {
-                    console.warn('Could not create client for', p.nombre, profileErr.message);
-                    // Continue without profile — will use guest_name instead
-                  }
-                }
+              const fullName = `${p.nombre} ${p.apellidos}`.trim();
+              if (p.profileId) {
+                // Vinculado manualmente (cliente existente o familiar)
+                personTarget[p.id] = { user_id: p.profileId, family_member_id: p.familyMemberId || null, guest_name: p.familyMemberId ? p.profileName : null };
+              } else if (pi === respPersonIdx && responsableId) {
+                // Esta persona ES el responsable → asiste como titular
+                personTarget[p.id] = { user_id: responsableId, family_member_id: null, guest_name: null };
+              } else if (p.isFamilyOfResponsable && responsableId) {
+                // Hijo/familiar del responsable → familiar (reutiliza o crea)
+                const fid = await ensureFamilyMember(p);
+                personTarget[p.id] = { user_id: responsableId, family_member_id: fid, guest_name: fullName || null };
+              } else if ((p.email || '').trim()) {
+                // Adulto independiente con email → su propia cuenta + invitación
+                const uid = await ensureAccountByEmail(p);
+                personTarget[p.id] = uid ? { user_id: uid, family_member_id: null, guest_name: null } : { guest_name: fullName || 'Invitado' };
+              } else {
+                // Sin cuenta → invitado
+                personTarget[p.id] = { guest_name: fullName || 'Invitado' };
               }
             }
 
@@ -2362,14 +2466,15 @@ export async function renderCalendario(container) {
                   enrollData.status = (cobrarAnticipo && anticipoAmount >= getTotal()) ? 'paid' : (cobrarAnticipo && anticipoAmount > 0) ? 'partial' : 'confirmed';
                 }
 
-                if (p.profileId) {
-                  enrollData.user_id = p.profileId;
-                  if (p.familyMemberId) {
-                    enrollData.family_member_id = p.familyMemberId;
-                    enrollData.guest_name = p.profileName;
+                const tgt = personTarget[p.id] || { guest_name: `${p.nombre} ${p.apellidos}`.trim() || 'Invitado' };
+                if (tgt.user_id) {
+                  enrollData.user_id = tgt.user_id;
+                  if (tgt.family_member_id) {
+                    enrollData.family_member_id = tgt.family_member_id;
+                    enrollData.guest_name = tgt.guest_name || null;
                   }
                 } else {
-                  enrollData.guest_name = `${p.nombre} ${p.apellidos}`.trim() || 'Invitado';
+                  enrollData.guest_name = tgt.guest_name || 'Invitado';
                 }
                 await createEnrollment(enrollData);
               }
