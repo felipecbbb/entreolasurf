@@ -3950,3 +3950,19 @@ td a {
   color: var(--color-muted);
 }
 .cp-sum-pay-total strong { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; color: var(--color-navy); }
+
+/* Class Picker — selector múltiple de asistentes */
+.cp-att-hint { font-size: .82rem; color: var(--color-muted); margin: 0 0 12px; }
+.cp-att-hint strong { color: var(--color-navy); }
+.cp-att-opt input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--color-navy); }
+.cp-att-newtoggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--color-navy);
+  cursor: pointer;
+}
+.cp-att-newtoggle input { width: 16px; height: 16px; accent-color: var(--color-navy); }
