@@ -1,9 +1,11 @@
 import { supabase } from '/lib/supabase.js';
 import '/lib/cookie-banner.js';
 import { initHeader } from '/lib/header.js';
+import { initFooter } from '/lib/footer.js';
 
-// Header único (logo, navegación, menú móvil, carrito) — ver lib/header.js
+// Header y footer únicos (sin duplicar markup) — ver lib/header.js / lib/footer.js
 initHeader();
+initFooter();
 
 const revealNodes = document.querySelectorAll('.reveal-up');
 if (revealNodes.length && 'IntersectionObserver' in window) {
