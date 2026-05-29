@@ -3966,3 +3966,41 @@ td a {
   cursor: pointer;
 }
 .cp-att-newtoggle input { width: 16px; height: 16px; accent-color: var(--color-navy); }
+
+/* Class Picker — acompañantes nuevos múltiples */
+.cp-add-guest {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px dashed var(--color-line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-navy);
+  font-weight: 600;
+  font-size: .85rem;
+  cursor: pointer;
+}
+.cp-add-guest:hover { background: var(--color-sand); border-color: var(--color-navy); }
+.cp-guest-block {
+  position: relative;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-sand);
+}
+.cp-guest-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
