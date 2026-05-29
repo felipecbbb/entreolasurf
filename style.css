@@ -4004,3 +4004,5 @@ td a {
   line-height: 1;
   cursor: pointer;
 }
+
+.cp-att-opt.cp-att-disabled { opacity: .5; cursor: not-allowed; }

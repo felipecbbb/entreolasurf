@@ -174,20 +174,22 @@ export async function renderCalendar(panel) {
         const isEnrolled = myEnrollments.length > 0;
 
         let footerAction = '';
+        // Inscripciones ya hechas \u2192 mostrar qui\u00e9n va + cancelar
         if (isEnrolled) {
-          // Show enrolled status + cancel buttons
           const cancelBtns = myEnrollments.map(e => {
             const label = e.family_member_id ? (e.family_members?.full_name || 'Familiar') : 'Mi reserva';
             return `<button class="btn line" data-action="cancel" data-enrollment-id="${e.id}" style="font-size:.78rem;padding:5px 12px;color:#b91c1c;border-color:#b91c1c">\u2715 ${label}</button>`;
           }).join(' ');
-          footerAction = `
-            <span class="spots-badge" style="background:#dcfce7;color:#15803d">Reservado</span>
-            ${cancelBtns}`;
-        } else if (full) {
+          footerAction = `<span class="spots-badge" style="background:#dcfce7;color:#15803d">Reservado</span> ${cancelBtns}`;
+        }
+        // Adem\u00e1s, permitir A\u00d1ADIR a alguien m\u00e1s si hay plazas, cr\u00e9ditos y gente sin inscribir
+        if (!full && hasBono) {
+          const enrolledCount = myEnrollments.length;
+          // \u00bfqueda alguien del usuario por meter? (\u00e9l + familiares) \u2014 se valida fino en el modal
+          footerAction += ` <button class="btn red" data-action="book" data-class-id="${c.id}" data-class-type="${c.type}" data-spots="${spotsLeft}" style="font-size:.8rem;padding:6px 14px">${isEnrolled ? 'A\u00f1adir' : 'Reservar'}</button>`;
+        } else if (!isEnrolled && full) {
           footerAction = '<span class="meta" style="color:#c0392b">Completa</span>';
-        } else if (hasBono) {
-          footerAction = `<button class="btn red" data-action="book" data-class-id="${c.id}" data-class-type="${c.type}" style="font-size:.8rem;padding:6px 14px">Reservar</button>`;
-        } else {
+        } else if (!isEnrolled && !hasBono) {
           const buyLink = c.type === 'grupal' ? 'clases-de-surf-grupales' : c.type === 'individual' ? 'clases-de-surf-individuales' : c.type === 'yoga' ? 'clases-de-yoga' : c.type === 'paddle' ? 'paddle-surf' : 'clases-de-surfskate';
           footerAction = `<a href="/${buyLink}/" class="btn line" style="font-size:.8rem;padding:6px 14px">Comprar bono</a>`;
         }
@@ -260,7 +262,7 @@ export async function renderCalendar(panel) {
     });
 
     panel.querySelectorAll('[data-action="book"]').forEach(btn => {
-      btn.addEventListener('click', () => openBookingModal(btn.dataset.classId, btn.dataset.classType));
+      btn.addEventListener('click', () => openBookingModal(btn.dataset.classId, btn.dataset.classType, Number(btn.dataset.spots) || 0));
     });
 
     // Cancel enrollment
@@ -309,7 +311,7 @@ export async function renderCalendar(panel) {
     });
   }
 
-  async function openBookingModal(classId, classType) {
+  async function openBookingModal(classId, classType, spotsLeft = 99) {
     const modal = panel.querySelector('#booking-modal');
     const body = panel.querySelector('#booking-modal-body');
 
@@ -325,6 +327,20 @@ export async function renderCalendar(panel) {
       members = [];
     }
 
+    // Quién del usuario ya está inscrito en esta clase (para no duplicar)
+    let selfEnrolled = false;
+    const enrolledFam = new Set();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: enr } = await supabase.from('class_enrollments')
+          .select('family_member_id')
+          .eq('class_id', classId).eq('user_id', user.id)
+          .in('status', ['confirmed', 'paid', 'partial', 'completed']);
+        (enr || []).forEach(e => { if (e.family_member_id) enrolledFam.add(e.family_member_id); else selfEnrolled = true; });
+      }
+    } catch {}
+
     if (!bonos.length) {
       body.innerHTML = `
         <p>No tienes bonos activos para <strong>${TYPE_LABELS[classType] || classType}</strong>.</p>
@@ -334,21 +350,23 @@ export async function renderCalendar(panel) {
       let html = `
         <p style="font-size:.9rem;color:var(--color-muted);margin-bottom:12px">Selecciona quién asistirá a esta clase:</p>
         <div id="booking-persons" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
-          <label class="booking-person-check" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--color-line);border-radius:8px;cursor:pointer">
-            <input type="checkbox" name="person" value="" checked>
+          <label class="booking-person-check" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--color-line);border-radius:8px;cursor:pointer;${selfEnrolled ? 'opacity:.5' : ''}">
+            <input type="checkbox" name="person" value="" ${selfEnrolled ? 'disabled' : 'checked'}>
             <div>
-              <strong>Yo mismo</strong>
+              <strong>Yo mismo${selfEnrolled ? ' \u00b7 ya inscrito' : ''}</strong>
             </div>
           </label>
-          ${members.map(m => `
-            <label class="booking-person-check" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--color-line);border-radius:8px;cursor:pointer">
-              <input type="checkbox" name="person" value="${m.id}">
+          ${members.map(m => {
+            const dis = enrolledFam.has(m.id);
+            return `
+            <label class="booking-person-check" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--color-line);border-radius:8px;cursor:pointer;${dis ? 'opacity:.5' : ''}">
+              <input type="checkbox" name="person" value="${m.id}" ${dis ? 'disabled' : ''}>
               <div>
-                <strong>${m.full_name}</strong>
+                <strong>${m.full_name}${dis ? ' \u00b7 ya inscrito' : ''}</strong>
                 <span style="font-size:.8rem;color:var(--color-muted)">${m.level || ''}${m.wetsuit_size ? ' \u00b7 ' + m.wetsuit_size : ''}</span>
               </div>
-            </label>
-          `).join('')}
+            </label>`;
+          }).join('')}
         </div>
         <label style="display:block">
           Usar bono:
@@ -395,6 +413,7 @@ export async function renderCalendar(panel) {
       const selectedBono = bonos.find(b => b.id === bonoId);
       const remaining = selectedBono ? (selectedBono.total_credits - selectedBono.used_credits) : 0;
       if (checkedPersons.length > remaining) { alert('No tienes suficientes cr\u00e9ditos'); return; }
+      if (checkedPersons.length > spotsLeft) { alert('No hay tantas plazas libres en esta clase'); return; }
 
       const confirmBtn = panel.querySelector('#confirm-booking');
       confirmBtn.disabled = true;
