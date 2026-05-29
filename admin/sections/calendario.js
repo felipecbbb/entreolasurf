@@ -32,6 +32,14 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
+// Duración por tipo (min) — la hora de fin se calcula sola desde inicio + duración.
+const TYPE_DURATIONS = { grupal: 90, individual: 90, paddle: 90, surfskate: 90, yoga: 60 };
+function addMinutesToTime(hhmm, mins) {
+  const [h, m] = (hhmm || '0:0').split(':').map(Number);
+  const total = (h * 60 + m + (mins || 0)) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 // Instructores = staff (perfiles admin/encargado). El campo guarda el nombre (texto).
 async function fetchInstructors() {
   const { data } = await supabase
@@ -241,6 +249,13 @@ export async function renderCalendario(container) {
                 <div>
                   <strong>Nueva clase / alquiler</strong>
                   <small>Crear sesión en el horario o material</small>
+                </div>
+              </button>
+              <button class="cal-add-menu-item" id="cal-menu-bulk-edit" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                <div>
+                  <strong>Editar en bloque</strong>
+                  <small>Cambiar hora, instructor… de varias clases</small>
                 </div>
               </button>
               <div class="cal-add-menu-divider"></div>
@@ -651,6 +666,10 @@ export async function renderCalendario(container) {
       container.querySelector('#cal-menu-new-session')?.addEventListener('click', () => {
         closeMenu();
         openNewSessionModal();
+      });
+      container.querySelector('#cal-menu-bulk-edit')?.addEventListener('click', () => {
+        closeMenu();
+        openBulkEditClasses();
       });
       container.querySelector('#cal-menu-bulk-delete')?.addEventListener('click', () => {
         closeMenu();
@@ -4763,6 +4782,173 @@ export async function renderCalendario(container) {
     });
   }
 
+  // ======== BULK EDIT CLASSES ========
+  async function openBulkEditClasses() {
+    document.getElementById('be-overlay')?.remove();
+    const today = getDateStr(new Date());
+    const inThreeMonths = new Date(); inThreeMonths.setMonth(inThreeMonths.getMonth() + 3);
+    const defaultTo = getDateStr(inThreeMonths);
+    const typeOptions = Object.entries(TYPE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'be-overlay';
+    overlay.className = 'ns-overlay';
+    overlay.innerHTML = `
+      <div class="ns-panel">
+        <header class="ns-header">
+          <div><h2>Editar clases en bloque</h2><p>Aplica un cambio a varias clases a la vez</p></div>
+          <button class="ns-close" id="be-close" title="Cerrar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </header>
+        <div class="ns-body">
+          <section class="ns-section">
+            <h3>1. Qué clases</h3>
+            <div class="ns-field-2col">
+              <div class="ns-field"><label>Desde</label><input type="date" id="be-from" value="${today}" /></div>
+              <div class="ns-field"><label>Hasta</label><input type="date" id="be-to" value="${defaultTo}" /></div>
+            </div>
+            <div class="ns-field"><label>Tipo de clase</label>
+              <select id="be-type"><option value="">Todas las actividades</option>${typeOptions}</select>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
+              <button type="button" class="ns-btn ns-btn-secondary" id="be-load" style="padding:8px 16px;font-size:.82rem">Cargar clases</button>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:#6b7280;cursor:pointer"><input type="checkbox" id="be-all" /> Seleccionar todas</label>
+              <span id="be-counter" style="font-size:.82rem;color:#6b7280;margin-left:auto"></span>
+            </div>
+            <div id="be-list" style="max-height:38vh;overflow-y:auto;border:1px solid #e5e7eb;border-radius:9px;padding:6px;background:#fff;min-height:90px;margin-top:8px">
+              <p style="text-align:center;color:#9ca3af;padding:24px 16px;font-size:.85rem">Pulsa "Cargar clases" para ver el listado</p>
+            </div>
+          </section>
+          <section class="ns-section">
+            <h3>2. Cambios a aplicar</h3>
+            <p style="font-size:.82rem;color:#6b7280;margin:0 0 10px">Marca solo lo que quieras cambiar. El resto se queda igual.</p>
+            <label class="be-change-row"><input type="checkbox" class="be-chg" data-field="time"> <span>Hora de inicio</span>
+              <input type="time" id="be-time" value="10:00" disabled /></label>
+            <label class="be-change-row"><input type="checkbox" class="be-chg" data-field="instructor"> <span>Instructor</span>
+              <select id="be-instructor" disabled><option value="">Sin asignar</option></select></label>
+            <label class="be-change-row"><input type="checkbox" class="be-chg" data-field="capacity"> <span>Capacidad máxima</span>
+              <input type="number" id="be-capacity" min="1" value="6" disabled /></label>
+            <label class="be-change-row"><input type="checkbox" class="be-chg" data-field="published"> <span>Estado</span>
+              <select id="be-published" disabled><option value="true">Publicar</option><option value="false">Ocultar</option></select></label>
+          </section>
+        </div>
+        <footer class="ns-footer">
+          <button type="button" class="ns-btn ns-btn-secondary" id="be-cancel">Cancelar</button>
+          <button type="button" class="ns-btn" id="be-submit">Aplicar cambios</button>
+        </footer>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const closeBe = () => overlay.remove();
+    overlay.querySelector('#be-close').onclick = closeBe;
+    overlay.querySelector('#be-cancel').onclick = closeBe;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeBe(); });
+    populateInstructorSelect(overlay.querySelector('#be-instructor'));
+
+    // Habilitar/deshabilitar inputs según su checkbox
+    overlay.querySelectorAll('.be-chg').forEach(chk => {
+      chk.addEventListener('change', () => {
+        const f = chk.dataset.field;
+        const map = { time: '#be-time', instructor: '#be-instructor', capacity: '#be-capacity', published: '#be-published' };
+        const input = overlay.querySelector(map[f]);
+        if (input) input.disabled = !chk.checked;
+      });
+    });
+
+    let classes = [];
+    function renderList() {
+      const listEl = overlay.querySelector('#be-list');
+      if (!classes.length) { listEl.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:24px 16px;font-size:.85rem">No hay clases en el rango/tipo seleccionado</p>'; return; }
+      const byDate = {};
+      classes.forEach(c => { (byDate[c.date] = byDate[c.date] || []).push(c); });
+      listEl.innerHTML = Object.keys(byDate).sort().map(d => `
+        <div class="bd-day-group">
+          <div class="bd-day-header">${formatDate(d)}</div>
+          ${byDate[d].map(c => `
+            <label class="bd-row" data-class-id="${c.id}">
+              <input type="checkbox" class="be-row-check" data-class-id="${c.id}" checked />
+              <span class="bd-row-time">${c.time_start?.slice(0,5) || '--:--'}</span>
+              <span class="bd-row-title">${TYPE_LABELS[c.type] || c.type}${c.instructor ? ' · ' + escapeHtml(c.instructor) : ''}</span>
+              <span class="bd-row-cap">${c.enrolled_count || 0} / ${c.max_students || 0}</span>
+            </label>`).join('')}
+        </div>`).join('');
+      listEl.querySelectorAll('.be-row-check').forEach(cb => cb.addEventListener('change', updateCounter));
+      updateCounter();
+    }
+    function updateCounter() {
+      const n = overlay.querySelectorAll('.be-row-check:checked').length;
+      overlay.querySelector('#be-counter').textContent = n ? `${n} seleccionadas` : '';
+    }
+
+    overlay.querySelector('#be-load').onclick = async () => {
+      const from = overlay.querySelector('#be-from').value;
+      const to = overlay.querySelector('#be-to').value;
+      const type = overlay.querySelector('#be-type').value;
+      if (!from || !to) { showToast('Indica un rango', 'error'); return; }
+      overlay.querySelector('#be-list').innerHTML = '<p style="text-align:center;color:#9ca3af;padding:20px;font-size:.85rem">Cargando…</p>';
+      try {
+        const all = await fetchClassesInRange(from, to);
+        classes = all.filter(c => !type || c.type === type);
+        renderList();
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    };
+    overlay.querySelector('#be-all').onchange = (e) => {
+      overlay.querySelectorAll('.be-row-check').forEach(cb => { cb.checked = e.target.checked; });
+      updateCounter();
+    };
+
+    overlay.querySelector('#be-submit').onclick = async () => {
+      const ids = [...overlay.querySelectorAll('.be-row-check:checked')].map(cb => cb.dataset.classId);
+      if (!ids.length) { showToast('Selecciona al menos una clase', 'error'); return; }
+      const selected = classes.filter(c => ids.includes(c.id));
+
+      // Construir cambios marcados
+      const changes = {};
+      let changeTime = false, newTime = null;
+      overlay.querySelectorAll('.be-chg:checked').forEach(chk => {
+        const f = chk.dataset.field;
+        if (f === 'time') { changeTime = true; newTime = overlay.querySelector('#be-time').value; }
+        else if (f === 'instructor') changes.instructor = overlay.querySelector('#be-instructor').value || null;
+        else if (f === 'capacity') changes.max_students = parseInt(overlay.querySelector('#be-capacity').value) || 1;
+        else if (f === 'published') changes.published = overlay.querySelector('#be-published').value === 'true';
+      });
+      if (!changeTime && !Object.keys(changes).length) { showToast('Marca al menos un cambio', 'error'); return; }
+
+      const submit = overlay.querySelector('#be-submit');
+      submit.disabled = true;
+      let done = 0, failed = 0;
+      const notifySum = { sent: 0, withoutEmail: 0, failed: 0 };
+      for (const c of selected) {
+        const upd = { ...changes };
+        let scheduleChanged = false;
+        if (changeTime && newTime) {
+          upd.time_start = newTime;
+          upd.time_end = addMinutesToTime(newTime, TYPE_DURATIONS[c.type] || 90);
+          scheduleChanged = (c.time_start?.slice(0,5) || '') !== newTime;
+        }
+        try {
+          const { error } = await supabase.from('surf_classes').update({ ...upd, updated_at: new Date().toISOString() }).eq('id', c.id);
+          if (error) throw error;
+          if (scheduleChanged && (c.enrolled_count || 0) > 0) {
+            const r = await notifyEnrolledClients(c.id, 'rescheduled', {
+              className: TYPE_LABELS[c.type] || c.title || 'Clase',
+              classDate: formatDate(c.date),
+              classTime: `${upd.time_start} - ${upd.time_end}`,
+              oldClassDate: formatDate(c.date),
+              oldClassTime: `${c.time_start?.slice(0,5) || ''} - ${c.time_end?.slice(0,5) || ''}`,
+            });
+            notifySum.sent += r.sent; notifySum.withoutEmail += r.withoutEmail; notifySum.failed += r.failed;
+          }
+          done++;
+        } catch (err) { console.error('bulk edit', c.id, err); failed++; }
+        submit.textContent = `Aplicando ${done} / ${selected.length}…`;
+      }
+      closeBe();
+      const base = failed > 0 ? `${done} actualizadas · ${failed} con error` : `${done} clases actualizadas`;
+      showToast(notifyToastMessage(base, notifySum), failed > 0 ? 'error' : 'success');
+      render();
+    };
+  }
+
   function openNewSessionModal() {
     const dateStr = getDateStr(currentDate);
     const typeOptions = Object.entries(TYPE_LABELS)
@@ -5722,39 +5908,102 @@ export async function renderCalendario(container) {
     const typeOptions = Object.entries(TYPE_LABELS)
       .map(([val, label]) => `<option value="${val}" ${cls.type === val ? 'selected' : ''}>${label}</option>`)
       .join('');
+    const color = TYPE_COLORS[cls.type] || '#0f2f39';
 
-    openModal('Editar Sesión', `
-      <form id="edit-session-form" class="trip-form">
-        <label>Actividad</label>
-        <select name="type">${typeOptions}</select>
-        <label>Fecha</label>
-        <input type="date" name="date" value="${cls.date}" required />
-        <label>Hora de Inicio</label>
-        <input type="time" name="time_start" value="${cls.time_start?.slice(0, 5) || ''}" required />
-        <label>Hora de Fin</label>
-        <input type="time" name="time_end" value="${cls.time_end?.slice(0, 5) || ''}" required />
-        <label>Capacidad Máxima</label>
-        <input type="number" name="max_students" value="${cls.max_students || 8}" min="1" required />
-        <label>Instructor</label>
-        <select name="instructor" id="es-instructor"><option value="">Sin asignar</option></select>
-        <label>Público</label>
-        <select name="audience">${audienceOptionsHtml(cls.audience || '')}</select>
-        <label>Precio (€)</label>
-        <input type="number" name="price" step="0.01" value="${cls.price || ''}" required />
-        <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
-          <input type="checkbox" name="published" ${cls.published ? 'checked' : ''} style="width:auto" />
-          Publicada (visible para clientes)
-        </label>
-        <button type="submit" class="btn red" style="margin-top:16px">Guardar</button>
-      </form>
-    `);
+    document.getElementById('ns-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'ns-overlay';
+    overlay.className = 'ns-overlay';
+    overlay.innerHTML = `
+      <div class="ns-panel">
+        <header class="ns-header" style="background:${color}">
+          <div>
+            <h2>Editar sesión</h2>
+            <p>${formatDate(cls.date)} · ${TYPE_LABELS[cls.type] || 'Clase'}</p>
+          </div>
+          <button class="ns-close" id="es-close" title="Cerrar">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+        <div class="ns-body">
+          <form id="edit-session-form" class="ns-grid">
+            <section class="ns-section ns-section-when">
+              <h3>Cuándo</h3>
+              <div class="ns-field">
+                <label>Fecha</label>
+                <input type="date" name="date" value="${cls.date}" required />
+              </div>
+              <div class="ns-field-2col">
+                <div class="ns-field">
+                  <label>Hora de inicio</label>
+                  <input type="time" name="time_start" id="es-start" value="${cls.time_start?.slice(0, 5) || '10:00'}" required />
+                </div>
+                <div class="ns-field">
+                  <label>Hora de fin <small style="font-weight:400;color:#94a3b8;text-transform:none">· automática</small></label>
+                  <input type="time" id="es-end" value="${cls.time_end?.slice(0, 5) || '11:30'}" readonly tabindex="-1" style="background:#f1f5f9;color:#64748b;cursor:not-allowed" />
+                </div>
+              </div>
+              <div class="ns-field">
+                <label>Precio (€)</label>
+                <input type="number" name="price" step="0.01" value="${cls.price || ''}" required />
+              </div>
+            </section>
+            <section class="ns-section ns-section-detail">
+              <h3>Detalles</h3>
+              <div class="ns-field">
+                <label>Actividad</label>
+                <select name="type" id="es-type" required>${typeOptions}</select>
+              </div>
+              <div class="ns-field-2col">
+                <div class="ns-field">
+                  <label>Capacidad máxima</label>
+                  <input type="number" name="max_students" value="${cls.max_students || 8}" min="1" required />
+                </div>
+                <div class="ns-field">
+                  <label>Público</label>
+                  <select name="audience">${audienceOptionsHtml(cls.audience || '')}</select>
+                </div>
+              </div>
+              <div class="ns-field">
+                <label>Instructor</label>
+                <select name="instructor" id="es-instructor"><option value="">Sin asignar</option></select>
+              </div>
+              <label class="ns-checkbox">
+                <input type="checkbox" name="published" ${cls.published ? 'checked' : ''} />
+                <span>Publicada (visible para clientes)</span>
+              </label>
+            </section>
+          </form>
+        </div>
+        <footer class="ns-footer">
+          <button type="button" class="ns-btn ns-btn-secondary" id="es-cancel">Cancelar</button>
+          <button type="submit" form="edit-session-form" class="ns-btn" id="es-submit">Guardar cambios</button>
+        </footer>
+      </div>`;
+    document.body.appendChild(overlay);
 
-    populateInstructorSelect(document.getElementById('es-instructor'), cls.instructor || '');
+    const closeEs = () => overlay.remove();
+    overlay.querySelector('#es-close').onclick = closeEs;
+    overlay.querySelector('#es-cancel').onclick = closeEs;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEs(); });
 
-    document.getElementById('edit-session-form').addEventListener('submit', async (e) => {
+    populateInstructorSelect(overlay.querySelector('#es-instructor'), cls.instructor || '');
+
+    // Hora de fin automática según duración del tipo
+    function recomputeEnd() {
+      const t = overlay.querySelector('#es-type').value;
+      const start = overlay.querySelector('#es-start').value;
+      const endEl = overlay.querySelector('#es-end');
+      if (endEl && start) endEl.value = addMinutesToTime(start, TYPE_DURATIONS[t] || 90);
+    }
+    overlay.querySelector('#es-type').addEventListener('change', recomputeEnd);
+    overlay.querySelector('#es-start').addEventListener('input', recomputeEnd);
+
+    overlay.querySelector('#edit-session-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       const obj = Object.fromEntries(fd);
+      obj.time_end = addMinutesToTime(obj.time_start, TYPE_DURATIONS[obj.type] || 90);
       obj.published = e.target.published.checked;
       obj.id = cls.id;
       obj.title = TYPE_LABELS[obj.type] || cls.title;
@@ -5772,9 +6021,11 @@ export async function renderCalendario(container) {
       const newTimeEnd = obj.time_end?.slice(0, 5) || '';
       const scheduleChanged = oldDate !== obj.date || oldTimeStart !== newTimeStart || oldTimeEnd !== newTimeEnd;
 
+      const submitBtn = overlay.querySelector('#es-submit');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Guardando…'; }
       try {
         await upsertClass(obj);
-        closeModal();
+        closeEs();
         let toastMsg = 'Sesión actualizada';
         if (scheduleChanged && (cls.enrolled_count || 0) > 0) {
           const r = await notifyEnrolledClients(cls.id, 'rescheduled', {
@@ -5789,7 +6040,10 @@ export async function renderCalendario(container) {
         }
         showToast(toastMsg, 'success');
         render();
-      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Guardar cambios'; }
+      }
     });
   }
 

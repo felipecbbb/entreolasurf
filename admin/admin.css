@@ -8173,3 +8173,30 @@ a.admin-nav-item-external .nav-icon svg {
   .rv-booking-row { grid-template-columns: 1fr; gap: 8px; padding: 14px 18px; }
   .rv-booking-amounts { text-align: left; }
 }
+
+/* Editar en bloque — filas de cambio */
+.be-change-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line, #e5e7eb);
+  border-radius: 9px;
+  margin-bottom: 8px;
+  font-size: .9rem;
+  color: var(--color-navy, #0f2f39);
+  cursor: pointer;
+}
+.be-change-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--color-navy, #0f2f39); }
+.be-change-row > span { font-weight: 600; }
+.be-change-row > input:not([type="checkbox"]),
+.be-change-row > select {
+  margin-left: auto;
+  max-width: 55%;
+  padding: 7px 10px;
+  border: 1px solid var(--color-line, #e5e7eb);
+  border-radius: 8px;
+  font-size: .88rem;
+}
+.be-change-row > input:disabled,
+.be-change-row > select:disabled { opacity: .45; background: #f1f5f9; }
