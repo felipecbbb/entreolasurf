@@ -3,28 +3,45 @@
    Brand: yellow (#FFCC01/#f3c900), navy (#0f2f39), cream (#fffdf7)
    ============================================================ */
 
-/* --- Dashboard Layout (pantalla completa) --- */
+/* --- Dashboard Layout (pantalla completa, sin header) --- */
 .account-app {
   display: flex;
   align-items: stretch;
   min-height: 100vh;
-  padding-top: 108px;            /* deja sitio al header absoluto */
   background: var(--color-bg, #fffdf7);
 }
 
-/* --- Sidebar --- */
+/* --- Sidebar (sticky a toda la altura) --- */
 .account-sidebar {
   width: 264px;
   flex-shrink: 0;
   background: #fff;
   border-right: 1px solid var(--color-line);
-  padding: 24px 0;
+  padding: 18px 0 24px;
   position: sticky;
-  top: 108px;
+  top: 0;
   align-self: flex-start;
-  height: calc(100vh - 108px);
+  height: 100vh;
   overflow-y: auto;
 }
+
+/* --- Botón volver al inicio --- */
+.account-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 18px 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--color-navy);
+  text-decoration: none;
+  transition: background .15s;
+}
+.account-back:hover { background: var(--color-sand, #f3ecdd); }
 
 .account-avatar {
   display: flex;
@@ -278,7 +295,6 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-height: 100vh;
-  padding-top: 80px;
 }
 
 .auth-page-left {
@@ -689,7 +705,6 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 @media (max-width: 768px) {
   .account-app {
     flex-direction: column;
-    padding-top: 96px;
     min-height: auto;
   }
 
@@ -1313,10 +1328,11 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   background: #fff;
   border: 1px solid var(--color-line);
   border-radius: 14px;
-  padding: 16px 18px;
+  padding: 18px 22px;
   margin: 16px 0;
-  max-width: 520px;
+  width: 100%;
 }
+.mc-day { font-size: 1.05rem; }
 .mc-head {
   display: flex;
   align-items: center;

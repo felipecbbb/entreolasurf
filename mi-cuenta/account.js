@@ -1,6 +1,5 @@
 import { getSession, getProfile, signIn, signUp, signOut, updateProfile } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
-import { initHeader } from '/lib/header.js';
 import { esc, formatDate, formatPrice } from '/lib/utils.js';
 import { WETSUIT_SIZES, LEVEL_OPTIONS, wetsuitOptionsHtml, levelOptionsHtml } from '/lib/shared-constants.js';
 import { TERMS_HTML, WAIVER_HTML, openLegalModal } from '/mi-cuenta/legal-texts.js';
@@ -37,6 +36,10 @@ function renderAuth() {
     <div class="auth-page">
       <div class="auth-page-left">
         <div class="auth-page-form">
+          <a href="/" class="account-back" style="margin-bottom:20px">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            Volver al inicio
+          </a>
           <div id="auth-view-login" class="auth-view active">
             <h1 class="auth-title">Bienvenido de nuevo</h1>
             <p class="auth-subtitle">Accede a tu cuenta para gestionar tus reservas y clases</p>
@@ -446,6 +449,10 @@ async function renderDashboard() {
   mainEl.innerHTML = `
     <div class="account-app">
         <aside class="account-sidebar">
+          <a href="/" class="account-back">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            Volver al inicio
+          </a>
           <div class="account-avatar">
             <div class="account-avatar-circle">${getInitials(name)}</div>
             <div>
@@ -709,5 +716,4 @@ async function init() {
   }
 }
 
-initHeader();
 init();
