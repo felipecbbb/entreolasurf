@@ -455,10 +455,13 @@ async function renderDashboard() {
           </a>
           <div class="account-avatar">
             <div class="account-avatar-circle">${getInitials(name)}</div>
-            <div>
+            <div class="account-avatar-info">
               <div class="account-avatar-name">${esc(name)}</div>
               <div class="account-avatar-email">${esc(email)}</div>
             </div>
+            <button class="account-menu-btn" id="account-menu-btn" aria-label="Abrir menú" aria-expanded="false">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
           </div>
           <nav class="account-nav">
             ${TABS.map((t, i) => `
@@ -533,8 +536,17 @@ async function renderDashboard() {
     }
   }
 
+  // Menú colapsable (móvil)
+  const sidebar = mainEl.querySelector('.account-sidebar');
+  const menuBtn = mainEl.querySelector('#account-menu-btn');
+  menuBtn?.addEventListener('click', () => {
+    const open = sidebar.classList.toggle('menu-open');
+    menuBtn.setAttribute('aria-expanded', String(open));
+  });
+
   mainEl.querySelectorAll('.account-nav-item').forEach(nav => {
     nav.addEventListener('click', async () => {
+      sidebar?.classList.remove('menu-open');   // cierra el menú al elegir
       if (nav.dataset.tab === 'logout') {
         await signOut();
         renderAuth();

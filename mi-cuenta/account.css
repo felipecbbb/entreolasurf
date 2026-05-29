@@ -43,6 +43,9 @@
 }
 .account-back:hover { background: var(--color-sand, #f3ecdd); }
 
+/* Botón menú: solo visible en móvil (ver media query) */
+.account-menu-btn { display: none; }
+
 .account-avatar {
   display: flex;
   flex-direction: row;
@@ -727,11 +730,13 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 
   .account-avatar {
     flex-direction: row;
+    align-items: center;
     gap: 10px;
     padding: 12px 16px;
     margin-bottom: 0;
     border-bottom: none;
   }
+  .account-avatar-info { flex: 1; min-width: 0; }
 
   .account-avatar-circle {
     width: 36px;
@@ -742,46 +747,53 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
   .account-avatar-name { text-align: left; font-size: .82rem; }
   .account-avatar-email { text-align: left; font-size: .7rem; }
 
-  .account-nav {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--color-line);
-    overflow: hidden;
-  }
-
-  .account-nav-item {
-    padding: 10px 6px;
-    font-size: .68rem;
-    white-space: normal;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    border-left: none;
-    border: 1px solid var(--color-line);
-    border-radius: 8px;
-    min-height: 42px;
-    display: flex;
+  /* Botón hamburguesa (solo móvil) */
+  .account-menu-btn {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    text-align: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--color-line);
+    border-radius: 10px;
     background: #fff;
-    line-height: 1.2;
+    color: var(--color-navy);
+    cursor: pointer;
+    flex-shrink: 0;
   }
+
+  /* Nav como menú desplegable */
+  .account-nav {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 12px 14px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .account-sidebar.menu-open .account-nav { display: flex; }
+
+  .account-nav-item {
+    width: 100%;
+    padding: 13px 14px;
+    font-size: .92rem;
+    border: none;
+    border-left: 3px solid transparent;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 11px;
+    text-align: left;
+    background: none;
+  }
+  .account-nav-item svg { display: inline-block; }
   .account-nav-item.active {
-    border-color: var(--color-yellow, #f3c900);
     background: #fef9e7;
+    border-left-color: var(--color-yellow, #f3c900);
     color: var(--color-navy);
   }
-  .account-nav-item svg { display: none; }
-
-  .account-nav-divider { display: none; }
-  .account-nav-item.danger {
-    grid-column: 1 / -1;
-    background: none;
-    border-color: #fecaca;
-    color: #b91c1c;
-  }
+  .account-nav-divider { display: block; }
+  .account-nav-item.danger { color: #b91c1c; }
 
   .account-content {
     padding: 20px 16px;
