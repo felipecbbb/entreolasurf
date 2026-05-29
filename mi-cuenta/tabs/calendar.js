@@ -156,19 +156,28 @@ export async function renderCalendar(panel) {
       if (has && !past) cl.push('has-class'); else cl.push('mc-off');
       cells += `<button class="${cl.join(' ')}" data-date="${ds}" ${has && !past ? '' : 'disabled'}>${d}</button>`;
     }
+    const selLabel = selectedDate ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
     html += `
-      <div class="mc-cal">
-        <div class="mc-head">
-          <button class="mc-nav" id="cal-prev" aria-label="Mes anterior">&lsaquo;</button>
-          <span class="mc-title">${CAL_MONTHS[calM]} ${calY}</span>
-          <button class="mc-nav" id="cal-next" aria-label="Mes siguiente">&rsaquo;</button>
+      <div class="cal-main">
+        <div class="cal-left">
+          <div class="mc-cal">
+            <div class="mc-head">
+              <button class="mc-nav" id="cal-prev" aria-label="Mes anterior">&lsaquo;</button>
+              <span class="mc-title">${CAL_MONTHS[calM]} ${calY}</span>
+              <button class="mc-nav" id="cal-next" aria-label="Mes siguiente">&rsaquo;</button>
+            </div>
+            <div class="mc-grid mc-weekdays">${CAL_WEEKDAYS.map(w => `<span>${w}</span>`).join('')}</div>
+            <div class="mc-grid mc-days">${cells}</div>
+          </div>
         </div>
-        <div class="mc-grid mc-weekdays">${CAL_WEEKDAYS.map(w => `<span>${w}</span>`).join('')}</div>
-        <div class="mc-grid mc-days">${cells}</div>
-      </div>`;
+        <div class="cal-right">
+          ${selectedDate && markedDays.has(selectedDate) ? `<h3 class="cal-day-title">${selLabel}</h3>` : ''}`;
 
     if (!selectedDate || !markedDays.has(selectedDate)) {
-      html += `<div class="cal-pick-hint">Elige un día con clases (marcados en el calendario).</div>`;
+      html += `<div class="cal-pick-hint">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <p>Elige un día con clases (marcados en el calendario).</p>
+      </div>`;
     }
 
     // Fetch ALL classes for this date (solo si hay día seleccionado con clases)
@@ -255,8 +264,10 @@ export async function renderCalendar(panel) {
       }).join('');
       html += `</div>`;
     } else if (selectedDate && markedDays.has(selectedDate)) {
-      html += '<p style="color:var(--color-muted);margin-top:20px;text-align:center">No hay clases para tu nivel en esta fecha.</p>';
+      html += '<p style="color:var(--color-muted);margin-top:8px">No hay clases para tu nivel en esta fecha.</p>';
     }
+
+    html += `</div></div>`; // cierra .cal-right y .cal-main
 
     // Booking modal (hidden)
     html += `<div id="booking-modal" class="booking-modal" style="display:none">

@@ -1324,15 +1324,33 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 }
 
 /* --- Calendario mensual (Reservar Clases) --- */
+/* Layout 2 columnas: calendario compacto + clases del día */
+.cal-main {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) 1fr;
+  gap: 28px;
+  align-items: start;
+  margin-top: 16px;
+}
+.cal-left { position: sticky; top: 16px; }
+.cal-right { min-width: 0; }
+.cal-day-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.05rem;
+  color: var(--color-navy);
+  text-transform: capitalize;
+  margin: 0 0 14px;
+}
 .mc-cal {
   background: #fff;
   border: 1px solid var(--color-line);
-  border-radius: 14px;
-  padding: 18px 22px;
-  margin: 16px 0;
-  width: 100%;
+  border-radius: 16px;
+  padding: 18px 20px;
 }
-.mc-day { font-size: 1.05rem; }
+@media (max-width: 900px) {
+  .cal-main { grid-template-columns: 1fr; gap: 20px; }
+  .cal-left { position: static; }
+}
 .mc-head {
   display: flex;
   align-items: center;
@@ -1378,8 +1396,17 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 .mc-day.active { background: var(--color-navy); color: #fff; border-color: var(--color-navy); }
 .mc-empty { aspect-ratio: 1; }
 .cal-pick-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   color: var(--color-muted);
-  font-size: .9rem;
+  font-size: .92rem;
   text-align: center;
-  padding: 24px 12px;
+  padding: 48px 20px;
+  border: 1px dashed var(--color-line);
+  border-radius: 16px;
 }
+.cal-pick-hint svg { color: var(--color-line); }
+.cal-pick-hint p { margin: 0; }

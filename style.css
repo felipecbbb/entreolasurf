@@ -2811,12 +2811,13 @@ td a {
 /* No bonos prompt */
 .no-bonos-prompt {
   text-align: center;
-  padding: 40px 20px;
+  padding: 22px 20px;
   background: #fff;
   border: 1px solid var(--color-line, #e5e7eb);
   border-radius: var(--radius-md, 8px);
 }
-.no-bonos-icon { margin-bottom: 12px; }
+.no-bonos-icon { margin-bottom: 6px; }
+.no-bonos-icon svg { width: 32px; height: 32px; }
 .no-bonos-prompt h3 {
   font-family: 'Bebas Neue', sans-serif;
   font-size: 1.4rem;
