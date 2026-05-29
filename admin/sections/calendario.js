@@ -1258,7 +1258,7 @@ export async function renderCalendario(container) {
     let personIdCounter = 1;
     let sessionQuantities = {}; // classId → quantity
     sessionQuantities[cls.id] = 1;
-    let persons = [{ id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: false, email: '', sessions: [cls.id] }];
+    let persons = [{ id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: [cls.id] }];
 
     function getTotalQuantity() {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
@@ -1406,7 +1406,6 @@ export async function renderCalendario(container) {
                       <option value="avanzado" ${p.nivelSurf === 'avanzado' ? 'selected' : ''}>Avanzado (+15 clases)</option>
                     </select>
                   </div>
-                  ${idx === 0 ? '' : `
                   <div class="bk-field bk-field-full">
                     <label class="bk-familiar-check">
                       <input type="checkbox" class="bk-is-familiar" data-pid="${p.id}" ${p.isFamilyOfResponsable ? 'checked' : ''} />
@@ -1414,9 +1413,9 @@ export async function renderCalendario(container) {
                     </label>
                   </div>
                   <div class="bk-field bk-field-full bk-email-wrap" data-pid="${p.id}" style="display:${p.isFamilyOfResponsable ? 'none' : ''}">
-                    <label class="bk-field-label">Email <small style="font-weight:400;color:#94a3b8;text-transform:none">· para invitarle a gestionar su reserva (opcional)</small></label>
+                    <label class="bk-field-label">Email <small style="font-weight:400;color:#94a3b8;text-transform:none">· solo si es un adulto con cuenta propia (se le invita)</small></label>
                     <input type="email" class="bk-field-input bk-person-email" data-pid="${p.id}" value="${p.email || ''}" placeholder="email@ejemplo.com" />
-                  </div>`}
+                  </div>
                 </div>`
             }
             <div class="bk-person-sessions">
@@ -1542,7 +1541,7 @@ export async function renderCalendario(container) {
                 nombre: '', apellidos: '', edad: '', sabeNadar: '',
                 lesion: 'no', lesionDetalle: '', tallaNeopreno: '',
                 nivelSurf: 'principiante', profileId: null, profileName: null,
-                familyMemberId: null, isFamilyOfResponsable: false, email: '', sessions: []
+                familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: []
               });
             }
 
@@ -1625,7 +1624,7 @@ export async function renderCalendario(container) {
           profileId: null,
           profileName: null,
           familyMemberId: null,
-          isFamilyOfResponsable: false,
+          isFamilyOfResponsable: true,
           email: '',
           sessions: selectedSessions.length ? [selectedSessions[0]] : []
         });
@@ -1931,7 +1930,7 @@ export async function renderCalendario(container) {
                       <h4 style="margin:0">Responsable de la reserva</h4>
                       <select class="bk-contact-select" id="bk-contact-source" style="margin-top:10px">
                         ${personOptions}
-                        <option value="otra" ${contactSource === 'otra' ? 'selected' : ''}>Otra persona</option>
+                        <option value="otra" ${contactSource === 'otra' ? 'selected' : ''}>${contactData.profileId ? `${contactData.nombre} ${contactData.apellidos}`.trim() + ' (cliente)' : 'Otra persona'}</option>
                       </select>
                     </div>
                     <div style="position:relative;margin-bottom:16px">
@@ -2224,10 +2223,17 @@ export async function renderCalendario(container) {
                     }
                   } catch {}
                   contactData.email = btn.dataset.email || '';
+                  // Si el cliente coincide con una persona del grupo → esa persona es el titular.
+                  // Si es distinto → responsable aparte ('otra'), y los asistentes serán familiares suyos.
+                  {
+                    const tgt = `${contactData.nombre} ${contactData.apellidos}`.trim().toLowerCase();
+                    const mIdx = persons.findIndex(pp => tgt && `${pp.nombre} ${pp.apellidos}`.trim().toLowerCase() === tgt);
+                    contactSource = mIdx >= 0 ? `persona_${mIdx + 1}` : 'otra';
+                  }
                   searchInput.value = '';
                   resultsEl.remove();
                   renderCheckout();
-                  showToast(`Cliente vinculado: ${btn.dataset.name || btn.dataset.email}`, 'success');
+                  showToast(`Responsable vinculado: ${btn.dataset.name || btn.dataset.email}`, 'success');
                 });
               });
             } catch (err) { /* silent */ }
@@ -2258,6 +2264,11 @@ export async function renderCalendario(container) {
                 contactData.apellidos = (prof.last_name || '').trim();
                 contactData.telefono = prof.phone || '';
                 contactData.email = email;
+                {
+                  const tgt = `${contactData.nombre} ${contactData.apellidos}`.trim().toLowerCase();
+                  const mIdx = persons.findIndex(pp => tgt && `${pp.nombre} ${pp.apellidos}`.trim().toLowerCase() === tgt);
+                  contactSource = mIdx >= 0 ? `persona_${mIdx + 1}` : 'otra';
+                }
                 renderCheckout();
                 showToast(`Ya es cliente con ficha: ${prof.full_name || email}`, 'success');
               }
@@ -2419,14 +2430,15 @@ export async function renderCalendario(container) {
             for (let pi = 0; pi < persons.length; pi++) {
               const p = persons[pi];
               const fullName = `${p.nombre} ${p.apellidos}`.trim();
-              if (p.profileId) {
-                // Vinculado manualmente (cliente existente o familiar)
-                personTarget[p.id] = { user_id: p.profileId, family_member_id: p.familyMemberId || null, guest_name: p.familyMemberId ? p.profileName : null };
-              } else if (pi === respPersonIdx && responsableId) {
-                // Esta persona ES el responsable → asiste como titular
+              if (pi === respPersonIdx && responsableId) {
+                // Esta persona ES el responsable → asiste como titular (su propio nombre)
                 personTarget[p.id] = { user_id: responsableId, family_member_id: null, guest_name: null };
+              } else if (p.profileId) {
+                // Vinculado manualmente vía 👤+ (cliente existente o familiar concreto)
+                personTarget[p.id] = { user_id: p.profileId, family_member_id: p.familyMemberId || null, guest_name: p.familyMemberId ? p.profileName : null };
               } else if (p.isFamilyOfResponsable && responsableId) {
-                // Hijo/familiar del responsable → familiar (reutiliza o crea)
+                // Hijo/familiar del responsable → se crea/reutiliza como familiar suyo.
+                // guest_name guarda el nombre del asistente para que el calendario muestre quién va.
                 const fid = await ensureFamilyMember(p);
                 personTarget[p.id] = { user_id: responsableId, family_member_id: fid, guest_name: fullName || null };
               } else if ((p.email || '').trim()) {
