@@ -5421,6 +5421,11 @@ a.admin-nav-item-external .nav-icon svg {
 }
 .cli-form-row:last-child { margin-bottom: 0; }
 
+/* Modal compacto de miembro familiar: el espaciado lo da la fila, no el campo */
+.fm-modal-form .cli-form-row { margin-bottom: 14px; }
+.fm-modal-form .act-form-field { margin-bottom: 0; }
+.fm-modal-form .act-form-label { margin-bottom: 6px; }
+
 .cli-other-details {
   margin-top: 8px;
 }

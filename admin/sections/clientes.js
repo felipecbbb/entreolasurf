@@ -776,40 +776,74 @@ export async function renderClientes(container) {
   function openFamilyMemberModal(userId, member) {
     const isEdit = !!member;
     openModal(isEdit ? 'Editar miembro' : 'Añadir miembro familiar', `
-      <form id="family-member-form" class="trip-form">
-        <label>Nombre completo</label>
-        <input type="text" name="full_name" value="${esc(member?.full_name)}" required />
-        <label>Fecha de nacimiento</label>
-        <input type="date" name="birth_date" value="${member?.birth_date || ''}" />
-        <label>Nivel</label>
-        <select name="level">
-          <option value="">Sin definir</option>
-          <option value="principiante" ${member?.level === 'principiante' ? 'selected' : ''}>Principiante</option>
-          <option value="intermedio" ${member?.level === 'intermedio' ? 'selected' : ''}>Intermedio</option>
-          <option value="avanzado" ${member?.level === 'avanzado' ? 'selected' : ''}>Avanzado</option>
-        </select>
-        <label>¿Sabe nadar?</label>
-        <select name="can_swim">
-          <option value="" ${member?.can_swim == null ? 'selected' : ''}>Sin definir</option>
-          <option value="true" ${member?.can_swim === true ? 'selected' : ''}>Sí</option>
-          <option value="false" ${member?.can_swim === false ? 'selected' : ''}>No</option>
-        </select>
-        <label>¿Tiene lesión?</label>
-        <select name="has_injury">
-          <option value="false" ${!member?.has_injury ? 'selected' : ''}>No</option>
-          <option value="true" ${member?.has_injury ? 'selected' : ''}>Sí</option>
-        </select>
-        <label>Detalle lesión</label>
-        <input type="text" name="injury_detail" value="${esc(member?.injury_detail)}" placeholder="Describe la lesión…" />
-        <label>Talla neopreno</label>
-        <select name="wetsuit_size">
-          ${wetsuitOptionsHtml(member?.wetsuit_size || '')}
-        </select>
-        <label>Notas</label>
-        <input type="text" name="notes" value="${esc(member?.notes)}" placeholder="Alergias, observaciones…" />
-        <button type="submit" class="btn red" style="margin-top:12px">${isEdit ? 'Guardar cambios' : 'Añadir miembro'}</button>
+      <form id="family-member-form" class="fm-modal-form">
+        <div class="cli-form-row" style="grid-template-columns:1fr">
+          <div class="act-form-field">
+            <label class="act-form-label">Nombre completo</label>
+            <input type="text" class="act-form-input" name="full_name" value="${esc(member?.full_name)}" placeholder="Nombre y apellidos" required />
+          </div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">Fecha de nacimiento</label>
+            <input type="date" class="act-form-input" name="birth_date" value="${member?.birth_date || ''}" />
+          </div>
+          <div class="act-form-field">
+            <label class="act-form-label">Nivel</label>
+            <select class="act-form-input" name="level">
+              <option value="">Sin definir</option>
+              <option value="principiante" ${member?.level === 'principiante' ? 'selected' : ''}>Principiante</option>
+              <option value="intermedio" ${member?.level === 'intermedio' ? 'selected' : ''}>Intermedio</option>
+              <option value="avanzado" ${member?.level === 'avanzado' ? 'selected' : ''}>Avanzado</option>
+            </select>
+          </div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">¿Sabe nadar?</label>
+            <select class="act-form-input" name="can_swim">
+              <option value="" ${member?.can_swim == null ? 'selected' : ''}>Sin definir</option>
+              <option value="true" ${member?.can_swim === true ? 'selected' : ''}>Sí</option>
+              <option value="false" ${member?.can_swim === false ? 'selected' : ''}>No</option>
+            </select>
+          </div>
+          <div class="act-form-field">
+            <label class="act-form-label">Talla neopreno</label>
+            <select class="act-form-input" name="wetsuit_size">
+              ${wetsuitOptionsHtml(member?.wetsuit_size || '')}
+            </select>
+          </div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label">¿Tiene lesión?</label>
+            <select class="act-form-input" name="has_injury" id="fm-has-injury">
+              <option value="false" ${!member?.has_injury ? 'selected' : ''}>No</option>
+              <option value="true" ${member?.has_injury ? 'selected' : ''}>Sí</option>
+            </select>
+          </div>
+          <div class="act-form-field" id="fm-injury-wrap" style="${member?.has_injury ? '' : 'display:none'}">
+            <label class="act-form-label">Detalle lesión</label>
+            <input type="text" class="act-form-input" name="injury_detail" value="${esc(member?.injury_detail)}" placeholder="Describe la lesión…" />
+          </div>
+        </div>
+        <div class="cli-form-row" style="grid-template-columns:1fr">
+          <div class="act-form-field">
+            <label class="act-form-label">Notas</label>
+            <input type="text" class="act-form-input" name="notes" value="${esc(member?.notes)}" placeholder="Alergias, observaciones…" />
+          </div>
+        </div>
+        <button type="submit" class="btn red" style="margin-top:4px;width:100%">${isEdit ? 'Guardar cambios' : 'Añadir miembro'}</button>
       </form>
     `);
+
+    // Mostrar "Detalle lesión" solo si hay lesión
+    const injurySel = document.getElementById('fm-has-injury');
+    const injuryWrap = document.getElementById('fm-injury-wrap');
+    injurySel?.addEventListener('change', () => {
+      injuryWrap.style.display = injurySel.value === 'true' ? '' : 'none';
+    });
+
     document.getElementById('family-member-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
