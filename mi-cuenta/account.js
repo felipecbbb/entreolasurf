@@ -1,5 +1,6 @@
 import { getSession, getProfile, signIn, signUp, signOut, updateProfile } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
+import { initHeader } from '/lib/header.js';
 import { esc, formatDate, formatPrice } from '/lib/utils.js';
 import { WETSUIT_SIZES, LEVEL_OPTIONS, wetsuitOptionsHtml, levelOptionsHtml } from '/lib/shared-constants.js';
 import { TERMS_HTML, WAIVER_HTML, openLegalModal } from '/mi-cuenta/legal-texts.js';
@@ -443,8 +444,7 @@ async function renderDashboard() {
   ];
 
   mainEl.innerHTML = `
-    <section class="section" style="padding-top:110px"><div class="container">
-      <div class="account-dashboard">
+    <div class="account-app">
         <aside class="account-sidebar">
           <div class="account-avatar">
             <div class="account-avatar-circle">${getInitials(name)}</div>
@@ -478,8 +478,7 @@ async function renderDashboard() {
           <div id="tab-pagos" class="tab-panel"></div>
           <div id="tab-pedidos" class="tab-panel"></div>
         </div>
-      </div>
-    </div></section>`;
+    </div>`;
 
   const loaded = new Set();
 
@@ -710,4 +709,5 @@ async function init() {
   }
 }
 
+initHeader();
 init();
