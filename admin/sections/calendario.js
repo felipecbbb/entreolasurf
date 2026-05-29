@@ -339,7 +339,9 @@ export async function renderCalendario(container) {
     const label = TYPE_LABELS[c.type] || c.title;
     const timeStart = c.time_start?.slice(0, 5) || '--:--';
     const timeEnd = c.time_end?.slice(0, 5) || '--:--';
-    const enrollments = enrollmentsCache[c.id] || [];
+    const allEnrollments = enrollmentsCache[c.id] || [];
+    // Las inscripciones canceladas no se muestran ni cuentan en el calendario
+    const enrollments = allEnrollments.filter(e => e.status !== 'cancelled');
     const hasCachedEnrollments = c.id in enrollmentsCache;
     const enrolled = hasCachedEnrollments ? enrollments.length : (c.enrolled_count || 0);
     const max = c.max_students || 0;
