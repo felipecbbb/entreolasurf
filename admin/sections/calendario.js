@@ -4685,6 +4685,16 @@ export async function renderCalendario(container) {
               <section class="ns-section ns-section-when">
                 <h3>Cuándo</h3>
                 <div class="ns-field">
+                  <div class="ns-mode-toggle">
+                    <button type="button" class="ns-mode-btn active" data-mode="single">Un solo día</button>
+                    <button type="button" class="ns-mode-btn" data-mode="repeat">Varios días</button>
+                  </div>
+                </div>
+                <div class="ns-field ns-mode-single">
+                  <label>Fecha</label>
+                  <input type="date" name="single_date" value="${startDateStr}" />
+                </div>
+                <div class="ns-field ns-mode-repeat" style="display:none">
                   <label>Días de repetición</label>
                   <div class="ns-days-row">${dayCheckboxes}</div>
                 </div>
@@ -4698,9 +4708,9 @@ export async function renderCalendario(container) {
                     <input type="time" name="time_end" value="11:30" required />
                   </div>
                 </div>
-                <div class="ns-field">
+                <div class="ns-field ns-mode-repeat" style="display:none">
                   <label>Repetir hasta</label>
-                  <input type="date" name="repeat_until" value="${getEndOfMonthStr(currentDate)}" required />
+                  <input type="date" name="repeat_until" value="${getEndOfMonthStr(currentDate)}" />
                 </div>
               </section>
 
@@ -4962,6 +4972,17 @@ export async function renderCalendario(container) {
     // Dispatch change event on load to sync capacity with default type
     document.getElementById('ns-type')?.dispatchEvent(new Event('change'));
 
+    // Toggle "Un solo día" / "Varios días"
+    let sessionMode = 'single';
+    overlay.querySelectorAll('.ns-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        sessionMode = btn.dataset.mode;
+        overlay.querySelectorAll('.ns-mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+        overlay.querySelectorAll('.ns-mode-single').forEach(el => el.style.display = sessionMode === 'single' ? '' : 'none');
+        overlay.querySelectorAll('.ns-mode-repeat').forEach(el => el.style.display = sessionMode === 'repeat' ? '' : 'none');
+      });
+    });
+
     // Class session form submit
     document.getElementById('new-session-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -4975,22 +4996,29 @@ export async function renderCalendario(container) {
       const instructor = fd.get('instructor') || null;
       const audience = fd.get('audience') || null;
       const published = e.target.published.checked;
-      const repeatUntil = fd.get('repeat_until');
-      const repeatDays = fd.getAll('repeat_days').map(Number);
-
-      if (!repeatDays.length) { showToast('Selecciona al menos un día', 'error'); return; }
 
       const dates = [];
-      const start = new Date(getDateStr(currentDate) + 'T00:00:00');
-      const end = new Date(repeatUntil + 'T00:00:00');
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        if (repeatDays.includes(d.getDay())) dates.push(getDateStr(new Date(d)));
+      if (sessionMode === 'single') {
+        const single = fd.get('single_date');
+        if (!single) { showToast('Elige una fecha', 'error'); return; }
+        dates.push(single);
+      } else {
+        const repeatUntil = fd.get('repeat_until');
+        const repeatDays = fd.getAll('repeat_days').map(Number);
+        if (!repeatDays.length) { showToast('Selecciona al menos un día', 'error'); return; }
+        if (!repeatUntil) { showToast('Indica hasta qué fecha repetir', 'error'); return; }
+        const start = new Date(getDateStr(currentDate) + 'T00:00:00');
+        const end = new Date(repeatUntil + 'T00:00:00');
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          if (repeatDays.includes(d.getDay())) dates.push(getDateStr(new Date(d)));
+        }
       }
 
       if (!dates.length) { showToast('No hay fechas que coincidan', 'error'); return; }
 
       const submitBtn = document.getElementById('ns-submit') || e.target.querySelector('button[type="submit"]');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = `Creando ${dates.length} sesiones…`; }
+      const nLabel = dates.length === 1 ? '1 sesión' : `${dates.length} sesiones`;
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = `Creando ${nLabel}…`; }
 
       try {
         for (const date of dates) {
@@ -5003,7 +5031,7 @@ export async function renderCalendario(container) {
         }
         document.getElementById('ns-overlay')?.remove();
         closeModal();
-        showToast(`${dates.length} sesiones creadas`, 'success');
+        showToast(dates.length === 1 ? 'Sesión creada' : `${dates.length} sesiones creadas`, 'success');
         render();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');

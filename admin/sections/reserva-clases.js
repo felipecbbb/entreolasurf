@@ -37,27 +37,26 @@ async function fetchBonos(statusFilter) {
 }
 
 async function fetchClassPayments() {
-  // All enrollment payments (includes class + bono payments)
+  // Pagos de clases: anticipos de bono (online, type='bono') + inscripciones (presencial, type='enrollment')
   const { data, error } = await supabase
     .from('payments')
     .select('*')
-    .eq('reservation_type', 'enrollment')
+    .in('reservation_type', ['bono', 'enrollment'])
     .order('payment_date', { ascending: false });
   if (error) { console.warn('fetchClassPayments:', error.message); return []; }
   return data || [];
 }
 
 async function fetchBonoPayments(bonoId) {
-  // Bono payments use reservation_type='enrollment' and reference_id=bonoId
-  // Also check enrollments linked to this bono
+  // Anticipo del bono (online): reservation_type='bono', reference_id=bonoId
   const { data: directPayments } = await supabase
     .from('payments')
     .select('*')
-    .eq('reservation_type', 'enrollment')
+    .eq('reservation_type', 'bono')
     .eq('reference_id', bonoId)
     .order('payment_date', { ascending: false });
 
-  // Also find payments via enrollment IDs linked to this bono
+  // Pagos de inscripción (presencial) ligados a este bono vía enrollment IDs
   const { data: enrollments } = await supabase
     .from('class_enrollments')
     .select('id')
@@ -111,15 +110,18 @@ export async function renderReservaClases(container) {
       fetchClassPayments(),
     ]);
 
-    // Resolve profile names for payments
-    const userIds = [...new Set(payments.filter(p => p.user_id).map(p => p.user_id))];
-    let profileMap = {};
-    if (userIds.length) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .in('id', userIds);
-      if (profiles) profiles.forEach(p => { profileMap[p.id] = p; });
+    // Resolve client names for payments. La tabla payments no tiene user_id:
+    // se resuelve por reference_id → bono (type 'bono') o enrollment (type 'enrollment').
+    const refName = {};
+    const bonoRefs = [...new Set(payments.filter(p => p.reservation_type === 'bono').map(p => p.reference_id).filter(Boolean))];
+    const enrollRefs = [...new Set(payments.filter(p => p.reservation_type === 'enrollment').map(p => p.reference_id).filter(Boolean))];
+    if (bonoRefs.length) {
+      const { data } = await supabase.from('bonos').select('id, profiles:user_id(full_name)').in('id', bonoRefs);
+      (data || []).forEach(b => { refName[b.id] = b.profiles?.full_name || '—'; });
+    }
+    if (enrollRefs.length) {
+      const { data } = await supabase.from('class_enrollments').select('id, profiles:user_id(full_name), family_members:family_member_id(full_name)').in('id', enrollRefs);
+      (data || []).forEach(e => { refName[e.id] = e.family_members?.full_name || e.profiles?.full_name || '—'; });
     }
 
     const totalBonoRevenue = bonos.reduce((s, b) => s + Number(b.total_paid || 0), 0);
@@ -226,7 +228,7 @@ export async function renderReservaClases(container) {
               ${payments.length ? payments.map(p => {
                 const typeLabel = p.reservation_type === 'bono' ? 'Bono' : 'Clase';
                 const method = METHOD_LABELS[p.payment_method] || p.payment_method || '—';
-                const clientName = (p.user_id && profileMap[p.user_id]?.full_name) || '—';
+                const clientName = refName[p.reference_id] || '—';
                 return `<tr>
                   <td>${clientName}</td>
                   <td><span class="admin-badge" data-status="${p.reservation_type === 'bono' ? 'active' : 'confirmed'}">${typeLabel}</span></td>

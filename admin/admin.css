@@ -2362,6 +2362,29 @@ a.admin-nav-item-external .nav-icon svg {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.ns-mode-toggle {
+  display: inline-flex;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 10px;
+}
+.ns-mode-btn {
+  border: none;
+  background: transparent;
+  padding: 7px 16px;
+  border-radius: 7px;
+  font-size: .85rem;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.ns-mode-btn.active {
+  background: #fff;
+  color: var(--color-navy, #0f2f39);
+  box-shadow: 0 1px 3px rgba(0,0,0,.1);
+}
 .ns-days-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
