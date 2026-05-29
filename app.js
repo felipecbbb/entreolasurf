@@ -2,10 +2,13 @@ import { supabase } from '/lib/supabase.js';
 import '/lib/cookie-banner.js';
 import { initHeader } from '/lib/header.js';
 import { initFooter } from '/lib/footer.js';
+import { initI18n } from '/lib/i18n.js';
 
 // Header y footer únicos (sin duplicar markup) — ver lib/header.js / lib/footer.js
 initHeader();
 initFooter();
+// Traducción ES→EN (idioma en localStorage). Traduce todo el documento + dinámico.
+initI18n();
 
 const revealNodes = document.querySelectorAll('.reveal-up');
 if (revealNodes.length && 'IntersectionObserver' in window) {

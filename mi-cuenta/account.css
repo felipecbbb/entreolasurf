@@ -1429,3 +1429,11 @@ body.no-hero:has(.auth-page) .site-header .menu-btn {
 }
 .cal-pick-hint svg { color: var(--color-line); }
 .cal-pick-hint p { margin: 0; }
+
+/* Selector de idioma en el panel */
+.account-lang {
+  margin: 14px 18px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+.account-lang .lang-opt, .account-lang .lang-sep { color: var(--color-navy); }

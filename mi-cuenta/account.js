@@ -1,5 +1,6 @@
 import { getSession, getProfile, signIn, signUp, signOut, updateProfile } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
+import { langSelectorHtml, wireLangSelector, initI18n } from '/lib/i18n.js';
 import { esc, formatDate, formatPrice } from '/lib/utils.js';
 import { WETSUIT_SIZES, LEVEL_OPTIONS, wetsuitOptionsHtml, levelOptionsHtml } from '/lib/shared-constants.js';
 import { TERMS_HTML, WAIVER_HTML, openLegalModal } from '/mi-cuenta/legal-texts.js';
@@ -474,6 +475,7 @@ async function renderDashboard() {
               ${ICONS.logout} Cerrar sesión
             </button>
           </nav>
+          <div class="account-lang">${langSelectorHtml('panel')}</div>
         </aside>
         <div class="account-content">
           <div class="account-content-header" id="account-header">
@@ -535,6 +537,8 @@ async function renderDashboard() {
         break;
     }
   }
+
+  wireLangSelector(mainEl);
 
   // Menú colapsable (móvil)
   const sidebar = mainEl.querySelector('.account-sidebar');
@@ -729,3 +733,4 @@ async function init() {
 }
 
 init();
+initI18n();
