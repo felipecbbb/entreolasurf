@@ -72,13 +72,19 @@ async function fetchClientBookings(userId) {
 }
 
 async function fetchClientOrders(userId) {
+  // Solo pedidos de TIENDA reales: pagados y con productos (order_items).
+  // Excluye checkouts abandonados (pending) y órdenes que en realidad eran
+  // señal de surf camp o bono de clases (sin order_items) — caso Maite/Adrián.
   const { data, error } = await supabase
     .from('orders')
-    .select('*')
+    .select('*, order_items!inner(id)')
     .eq('user_id', userId)
+    .eq('status', 'paid')
     .order('created_at', { ascending: false });
   if (error) { console.warn('fetchClientOrders:', error.message); return []; }
-  return data || [];
+  // Dedup (el inner join puede repetir la orden por cada item)
+  const seen = new Set();
+  return (data || []).filter(o => { if (seen.has(o.id)) return false; seen.add(o.id); return true; });
 }
 
 async function fetchClientBonos(userId) {
@@ -1659,11 +1665,11 @@ export async function renderClientes(container) {
   async function loadPagosTab(c) {
     const el = container.querySelector('#cli-tab-content');
     try {
-      // Fetch payments from DB + online orders
-      const [payments, orders] = await Promise.all([
-        fetchClientPayments(c.id),
-        fetchClientOrders(c.id),
-      ]);
+      // El historial se construye SOLO desde la tabla payments, donde cada pago
+      // lleva su reservation_type (booking, bono, enrollment, rental, order, custom).
+      // Así la categoría es siempre fiel al origen real del pago y no se infiere
+      // de la tabla orders (que no sabe si fue camp, bono o producto).
+      const payments = await fetchClientPayments(c.id);
 
       // Merge into unified timeline with domain info
       const timeline = [];
@@ -1680,29 +1686,18 @@ export async function renderClientes(container) {
 
       for (const p of payments) {
         const domain = p.reservation_type || 'otros';
+        // Origen: 'web' (online, no editable) vs 'admin' (manual, editable)
+        const isWeb = p.channel === 'web';
         timeline.push({
           paymentId: p.id,
           raw: p,
           date: p.payment_date || p.created_at,
           domain,
           type: DOMAIN_CONFIG[domain]?.label || domain,
-          concept: p.concept || (domain === 'enrollment' ? 'Pago clase' : domain === 'custom' ? 'Saldo a favor' : 'Pago alquiler'),
+          concept: p.concept || (domain === 'enrollment' ? 'Pago clase' : domain === 'custom' ? 'Saldo a favor' : domain === 'booking' ? 'Surf camp' : domain === 'bono' ? 'Bono de clases' : domain === 'order' ? 'Pedido tienda' : 'Pago'),
           amount: Number(p.amount),
           method: p.payment_method || '—',
-          source: 'admin',
-        });
-      }
-
-      // Online orders (checkout) — tienda domain
-      for (const o of orders) {
-        timeline.push({
-          date: o.created_at,
-          domain: 'order',
-          type: 'Tienda',
-          concept: `Pedido #${o.id.substring(0, 8)}`,
-          amount: Number(o.total),
-          method: 'online',
-          source: 'web',
+          source: isWeb ? 'web' : 'admin',
         });
       }
 
