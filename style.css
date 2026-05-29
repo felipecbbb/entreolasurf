@@ -201,6 +201,14 @@ body.internal-page.no-hero .logo.logo-surf-house .logo-line {
   font-weight: 700;
 }
 
+/* Enlaces de primer nivel: todo en una línea, centrado vertical */
+.main-nav .nav-item > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1;
+}
+
 .main-nav a:hover {
   opacity: 1;
   color: #fff;
@@ -208,11 +216,15 @@ body.internal-page.no-hero .logo.logo-surf-house .logo-line {
 
 .nav-item {
   position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .caret {
   font-size: .75em;
-  margin-left: 4px;
+  margin-left: 2px;
+  position: relative;
+  top: 1px;
 }
 
 .dropdown {
