@@ -135,7 +135,7 @@ export async function renderCalendar(panel) {
         <button class="cal-type-btn ${!filterType ? 'active' : ''}" data-type="">Todas</button>
         ${allTypes.map(t => `<button class="cal-type-btn ${filterType === t ? 'active' : ''}" data-type="${t}" style="--type-color:${TYPE_COLORS[t]}">${TYPE_LABELS[t]}</button>`).join('')}
       </div>
-      <select id="cal-filter-level" style="padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--color-line);font-size:.85rem">
+      <select id="cal-filter-level" style="padding:8px 14px;border-radius:999px;border:1px solid var(--color-line);font-size:.84rem;background:#fff;cursor:pointer">
         ${LEVEL_OPTIONS.map(l => `<option value="${l.value}" ${filterLevel === l.value ? 'selected' : ''}>${l.label}</option>`).join('')}
       </select>
     </div>`;

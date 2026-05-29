@@ -2811,13 +2811,15 @@ td a {
 /* No bonos prompt */
 .no-bonos-prompt {
   text-align: center;
-  padding: 22px 20px;
+  padding: 30px 24px;
   background: #fff;
   border: 1px solid var(--color-line, #e5e7eb);
   border-radius: var(--radius-md, 8px);
 }
-.no-bonos-icon { margin-bottom: 6px; }
-.no-bonos-icon svg { width: 32px; height: 32px; }
+.no-bonos-icon { margin-bottom: 10px; }
+.no-bonos-icon svg { width: 34px; height: 34px; }
+.no-bonos-prompt h3 { margin-bottom: 8px; }
+.no-bonos-prompt p { margin-bottom: 20px; }
 .no-bonos-prompt h3 {
   font-family: 'Bebas Neue', sans-serif;
   font-size: 1.4rem;
@@ -2831,13 +2833,14 @@ td a {
 }
 .no-bonos-links {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
   justify-content: center;
+  margin-top: 4px;
 }
 .no-bonos-links .btn {
   font-size: .82rem;
-  padding: 8px 16px;
+  padding: 9px 18px;
 }
 
 /* Calendar filters */
@@ -2846,21 +2849,21 @@ td a {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin: 26px 0 22px;
 }
 .cal-filter-types {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 9px;
   flex-wrap: wrap;
 }
 .cal-type-btn {
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  border-radius: 999px;
   border: 1px solid var(--color-line);
   background: #fff;
-  font-size: .82rem;
+  font-size: .84rem;
   cursor: pointer;
   transition: all .2s;
 }
