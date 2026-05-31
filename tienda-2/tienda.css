@@ -198,6 +198,20 @@
   cursor: not-allowed;
 }
 
+/* La card es un enlace a la ficha */
+a.shop-card { text-decoration: none; color: inherit; cursor: pointer; display: flex; flex-direction: column; }
+.shop-card-view {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--color-navy);
+  white-space: nowrap;
+  transition: transform .2s ease;
+}
+.shop-card:hover .shop-card-view { transform: translateX(3px); }
+.shop-card--sold-out { opacity: .6; }
+.shop-card--sold-out .shop-card-view { color: var(--color-muted); }
+
 /* ---- Galería de miniaturas ---- */
 .shop-thumbs {
   display: flex;

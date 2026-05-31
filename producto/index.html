@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <title>Producto | Entre Olas</title>
+  <meta name="description" content="Producto de Entre Olas.">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/tienda-2/tienda.css">
+  <link rel="stylesheet" href="/producto/producto.css">
+</head>
+<body class="internal-page">
+
+<main>
+  <section class="pdp">
+    <div class="container">
+      <a href="/tienda-2/" class="pdp-back">← Volver a la tienda</a>
+      <div id="pdp-root" class="pdp-wrap">
+        <!-- Skeleton -->
+        <div class="pdp-gallery">
+          <div class="pdp-main-img skeleton-shimmer"></div>
+        </div>
+        <div class="pdp-info">
+          <div class="skeleton-line w40"></div>
+          <div class="skeleton-line w70" style="height:28px;margin:10px 0"></div>
+          <div class="skeleton-line w40"></div>
+        </div>
+      </div>
+      <div id="pdp-notfound" class="pdp-notfound" style="display:none">
+        <p>Producto no encontrado.</p>
+        <a href="/tienda-2/" class="btn red">Ir a la tienda</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="/app.js"></script>
+<script type="module" src="/producto/producto.js"></script>
+</body>
+</html>

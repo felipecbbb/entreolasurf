@@ -1,0 +1,125 @@
+/* ============================================================
+   PDP — página de detalle de producto
+   ============================================================ */
+.pdp { padding: 110px 0 80px; }
+
+.pdp-back {
+  display: inline-block;
+  margin-bottom: 24px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-decoration: none;
+  transition: color .2s ease;
+}
+.pdp-back:hover { color: var(--color-navy); }
+
+.pdp-wrap {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 48px;
+  align-items: start;
+}
+
+/* ---- Galería ---- */
+.pdp-main-wrap {
+  aspect-ratio: 4 / 5;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--color-sand);
+}
+.pdp-main-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pdp-main-img.skeleton-shimmer, .pdp-gallery .skeleton-shimmer { aspect-ratio: 4/5; border-radius: 18px; }
+
+.pdp-thumbs { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.pdp-thumb {
+  width: 70px; height: 84px;
+  border-radius: 12px; overflow: hidden;
+  border: 2px solid var(--color-line);
+  background: var(--color-sand);
+  cursor: pointer; padding: 0;
+  transition: border-color .2s ease, transform .2s ease;
+}
+.pdp-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.pdp-thumb:hover { transform: translateY(-2px); }
+.pdp-thumb.active { border-color: var(--color-navy); }
+
+/* ---- Info ---- */
+.pdp-info { padding-top: 6px; }
+.pdp-category {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .68rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .1em;
+  color: var(--color-muted);
+}
+.pdp-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 2rem; font-weight: 800;
+  color: var(--color-navy);
+  line-height: 1.15; margin: 8px 0 12px;
+}
+.pdp-price {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.7rem; font-weight: 800;
+  color: var(--color-navy); margin-bottom: 18px;
+}
+.pdp-price .decimals { font-size: 1rem; font-weight: 700; }
+.pdp-desc {
+  font-size: .95rem; line-height: 1.65;
+  color: var(--color-muted); margin-bottom: 24px;
+}
+
+.pdp-variant { margin-bottom: 18px; }
+.pdp-variant-label {
+  display: block;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--color-navy); margin-bottom: 8px;
+}
+.pdp-colors { display: flex; gap: 8px; flex-wrap: wrap; }
+.pdp-color {
+  padding: 8px 18px; border-radius: 22px;
+  border: 1.5px solid var(--color-line); background: #fff;
+  font-size: .85rem; font-weight: 600; color: var(--color-navy);
+  cursor: pointer; transition: all .18s ease;
+}
+.pdp-color:hover { border-color: var(--color-navy); }
+.pdp-color.active { background: var(--color-navy); color: #fff; border-color: var(--color-navy); }
+
+.pdp-size {
+  width: 100%; max-width: 280px;
+  padding: 12px 14px; border-radius: 12px;
+  border: 1.5px solid var(--color-line); background: #fff;
+  font-size: .9rem; font-weight: 600; color: var(--color-navy);
+  cursor: pointer; font-family: inherit;
+}
+.pdp-size:focus { outline: none; border-color: var(--color-navy); }
+.pdp-size--error { border-color: #ef4444; background: #fef2f2; animation: pdpShake .35s ease; }
+@keyframes pdpShake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+
+.pdp-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
+.pdp-actions .btn { flex: 1; min-width: 160px; justify-content: center; }
+.pdp-add[disabled] { margin-top: 28px; opacity: .5; cursor: not-allowed; }
+
+.pdp-trust {
+  display: flex; gap: 20px; flex-wrap: wrap;
+  margin-top: 24px; padding-top: 20px;
+  border-top: 1px solid var(--color-line);
+  font-size: .8rem; color: var(--color-muted);
+}
+
+.pdp-notfound { text-align: center; padding: 80px 0; }
+.pdp-notfound p { color: var(--color-muted); margin-bottom: 20px; }
+
+/* ---- Responsive ---- */
+@media (max-width: 860px) {
+  .pdp { padding: 90px 0 60px; }
+  .pdp-wrap { grid-template-columns: 1fr; gap: 28px; }
+  .pdp-name { font-size: 1.6rem; }
+  .pdp-price { font-size: 1.4rem; }
+}
+@media (max-width: 520px) {
+  .pdp-actions .btn { flex: 1 1 100%; }
+}
