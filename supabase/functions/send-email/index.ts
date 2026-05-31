@@ -30,6 +30,13 @@ const corsHeaders = {
 const F = "Helvetica,Arial,sans-serif"; // body
 const FU = "'Trebuchet MS',Helvetica,sans-serif"; // ui/labels
 
+// Escapa HTML (evita inyección en los emails desde el formulario de contacto)
+function esc(s: any): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string)
+  ).slice(0, 2000);
+}
+
 /* Logos */
 function logoDefault() {
   return `<table cellpadding="0" cellspacing="0"><tr>
@@ -292,11 +299,11 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
 
     case "contact": {
       const fields = Object.entries(d)
-        .filter(([k]) => !["customerName", "page"].includes(k))
-        .map(([k, v]) => `<p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0"><strong style="color:#0f2f39">${k}:</strong> ${v}</p>`)
+        .filter(([k]) => !["customerName", "page", "_hp", "_hp_website", "_elapsed"].includes(k))
+        .map(([k, v]) => `<p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0"><strong style="color:#0f2f39">${esc(k)}:</strong> ${esc(v)}</p>`)
         .join("");
       return {
-        subject: `Nuevo mensaje de contacto — ${d.nombre || "Sin nombre"}`,
+        subject: `Nuevo mensaje de contacto — ${esc(d.nombre || "Sin nombre")}`,
         html: emailWrap(logoDefault(), [
           heading("Nuevo mensaje de contacto"),
           sub(`Enviado desde ${d.page || "la web"}`),
@@ -391,6 +398,18 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Missing 'to' or 'type'" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Anti-bot en el formulario de contacto: honeypot relleno o envío demasiado
+    // rápido (<2s) → fingir éxito y NO enviar (no revelar el filtro).
+    if (type === "contact") {
+      const hp = (data?._hp ?? data?._hp_website ?? "").toString().trim();
+      const elapsed = Number(data?._elapsed ?? 99999);
+      if (hp || elapsed < 2000) {
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const { subject, html } = buildEmail(type, data);

@@ -48,14 +48,36 @@ if (autoVideos.length && 'IntersectionObserver' in window) {
 
 /* ---------- Contact forms — send via Supabase Edge Function ---------- */
 document.querySelectorAll('form[data-mailto]').forEach(form => {
+  // Anti-bot: honeypot oculto + marca de tiempo de carga
+  if (!form.querySelector('.hp-field')) {
+    const hp = document.createElement('input');
+    hp.type = 'text'; hp.name = '_hp_website'; hp.className = 'hp-field';
+    hp.tabIndex = -1; hp.autocomplete = 'off'; hp.setAttribute('aria-hidden', 'true');
+    hp.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none';
+    form.appendChild(hp);
+  }
+  form.dataset.loadedAt = String(Date.now());
+
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const btn = form.querySelector('button[type="submit"]');
     const originalText = btn?.textContent;
-    if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
 
     const fd = new FormData(form);
     const fields = Object.fromEntries(fd.entries());
+    const honeypot = fields._hp_website || '';
+    const elapsed = Date.now() - Number(form.dataset.loadedAt || 0);
+    delete fields._hp_website;
+
+    // Bot detectado: honeypot relleno o envío demasiado rápido (<2,5s) → fingir éxito y no enviar
+    if (honeypot || elapsed < 2500) {
+      form.reset();
+      if (btn) { btn.textContent = '¡Enviado!'; btn.style.background = '#22c55e'; }
+      setTimeout(() => { if (btn) { btn.textContent = originalText; btn.style.background = ''; btn.disabled = false; } }, 3000);
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
     const page = window.location.pathname;
 
     try {
@@ -63,7 +85,7 @@ document.querySelectorAll('form[data-mailto]').forEach(form => {
         body: {
           to: form.dataset.mailto,
           type: 'contact',
-          data: { ...fields, page, customerName: fields.nombre || '' },
+          data: { ...fields, page, customerName: fields.nombre || '', _hp: honeypot, _elapsed: elapsed },
         },
       });
 
