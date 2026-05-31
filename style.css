@@ -386,6 +386,12 @@ body.internal-page.no-hero .dropdown a {
   background-position: center;
   transform: scale(1.04);
   z-index: 0;
+  animation: heroReveal .7s ease-out both;
+}
+
+@keyframes heroReveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .hero::after {
