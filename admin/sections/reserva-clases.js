@@ -326,8 +326,8 @@ export async function renderReservaClases(container) {
         const clsType = cls ? (TYPE_LABELS[cls.type] || cls.type) : '—';
         const clsDate = cls ? formatDate(cls.date) : '—';
         const clsTime = cls ? `${(cls.time_start || '').slice(0,5)} – ${(cls.time_end || '').slice(0,5)}` : '';
-        const eStatus = e.status === 'completed' ? 'Asistió' : e.status === 'cancelled' ? 'Cancelada' : 'Inscrito';
-        const eColor = e.status === 'completed' ? '#22c55e' : e.status === 'cancelled' ? '#ef4444' : '#0ea5e9';
+        const eStatus = e.status === 'cancelled' ? 'Cancelada' : e.attendance === true ? 'Asistió' : e.attendance === false ? 'No asistió' : 'Inscrito';
+        const eColor = e.status === 'cancelled' ? '#ef4444' : e.attendance === true ? '#22c55e' : e.attendance === false ? '#6b7280' : '#0ea5e9';
         return `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;gap:12px">
             <div style="min-width:0">

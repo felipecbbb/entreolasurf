@@ -999,6 +999,15 @@ export async function updateEnrollmentStatus(enrollmentId, status) {
   if (error) throw error;
 }
 
+// Asistencia, independiente del pago: true=asistió, false=no se presentó, null=sin marcar
+export async function updateEnrollmentAttendance(enrollmentId, attendance) {
+  const { error } = await supabase
+    .from('class_enrollments')
+    .update({ attendance, updated_at: new Date().toISOString() })
+    .eq('id', enrollmentId);
+  if (error) throw error;
+}
+
 // ---- Activities ----
 export async function fetchActivities() {
   const { data, error } = await supabase

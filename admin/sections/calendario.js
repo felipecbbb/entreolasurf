@@ -4,7 +4,7 @@
 import {
   fetchClassesInRange, fetchClassEnrollments, publishClasses,
   upsertClass, deleteClass, createEnrollment, deleteEnrollment,
-  searchProfiles, moveEnrollment, updateEnrollmentStatus,
+  searchProfiles, moveEnrollment, updateEnrollmentStatus, updateEnrollmentAttendance,
   createClientFromAdmin, fetchEquipment, createEquipmentReservation,
   fetchEquipmentReservationsOverlapping, updateEquipmentReservationStatus,
   updateEquipmentReservation, markEquipmentReservationPaid, markEquipmentReservationUnpaid,
@@ -379,10 +379,10 @@ export async function renderCalendario(container) {
       if (e.bono && e.bono.status === 'active') {
         bonoLabel = `${e.bono.used_credits}/${e.bono.total_credits}`;
       }
-      const isPaid = e.status === 'paid' || e.status === 'completed';
+      const isPaid = e.status === 'paid';
       const isPartial = e.status === 'partial';
-      const isAttended = e.status === 'completed';
-      const isNoShow = e.status === 'no_show';
+      const isAttended = e.attendance === true;
+      const isNoShow = e.attendance === false;
       const payClass = isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid';
       const attendClass = isAttended ? 'attended' : isNoShow ? 'noshow' : '';
       const statusClass = `${payClass} ${attendClass}`.trim();
@@ -774,23 +774,12 @@ export async function renderCalendario(container) {
                   return;
                 }
               }
-              // Mark as attended (completed)
-              await updateEnrollmentStatus(eid, 'completed');
+              // Marcar asistencia: solo toca attendance, NO el estado de pago
+              await updateEnrollmentAttendance(eid, true);
               showToast('Asistencia confirmada', 'success');
             } else {
-              // Revert attendance — preserve payment status
-              const payments = await fetchPayments('enrollment', eid);
-              const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-              let newStatus = 'confirmed';
-              if (totalPaid > 0) {
-                // Determine paid vs partial using class price
-                const row = cb.closest('.cal-client-row');
-                const classId = row?.dataset.classId;
-                const cls = classes.find(c => c.id === classId);
-                const expectedPrice = cls ? Number(cls.price) || 0 : 0;
-                newStatus = (expectedPrice > 0 && totalPaid >= expectedPrice) ? 'paid' : 'partial';
-              }
-              await updateEnrollmentStatus(eid, newStatus);
+              // Revertir asistencia: el color de pago no se toca
+              await updateEnrollmentAttendance(eid, null);
               showToast('Asistencia revertida', 'success');
             }
             render();
@@ -1206,13 +1195,13 @@ export async function renderCalendario(container) {
   }
 
   // ======== ENROLLMENTS MODAL ========
+  // Estado de PAGO (color). La asistencia se muestra aparte (columna attendance).
   const ENROLLMENT_STATUS = {
     paid:      { label: 'Pagado',           color: '#16a34a' },
-    completed: { label: 'Asistió',          color: '#16a34a' },
     partial:   { label: 'Anticipo pagado',  color: '#d97706' },
+    confirmed: { label: 'Pendiente de pago', color: '#dc2626' },
     pending:   { label: 'Pendiente de pago', color: '#dc2626' },
     unpaid:    { label: 'Pendiente de pago', color: '#dc2626' },
-    no_show:   { label: 'No se presentó',    color: '#6b7280' },
     cancelled: { label: 'Cancelado',         color: '#6b7280' },
   };
 
@@ -1239,11 +1228,15 @@ export async function renderCalendario(container) {
               ? `<span style="color:#0ea5e9;font-size:.7rem;font-weight:600;white-space:nowrap">Bono ${e.bono.used_credits}/${e.bono.total_credits}</span>`
               : '';
             const st = ENROLLMENT_STATUS[e.status] || { label: e.status, color: '#6b7280' };
+            const att = e.attendance === true
+              ? { label: 'Asistió', color: '#16a34a' }
+              : e.attendance === false ? { label: 'No asistió', color: '#6b7280' } : null;
             return `
             <div style="padding:10px 0;border-bottom:1px solid var(--color-line,#eee);display:flex;justify-content:space-between;align-items:center;gap:12px">
               <strong>${escapeHtml(name)}${ageLabel}</strong>
               <span style="display:flex;align-items:center;gap:10px">
                 ${bonoLabel}
+                ${att ? `<span style="color:${att.color};font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em">${att.label}</span>` : ''}
                 <span style="color:${st.color};font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em">${st.label}</span>
               </span>
             </div>`;
@@ -4244,8 +4237,8 @@ export async function renderCalendario(container) {
       if (totalPaid <= 0) newStatus = 'confirmed';
       else if (clsPrice > 0 && totalPaid >= clsPrice) newStatus = 'paid';
       else newStatus = 'partial';
-      // No tocar si está completed/no_show/cancelled (asistencia)
-      if (!['completed', 'no_show', 'cancelled'].includes(enrollment.status)) {
+      // El pago se recalcula desde los pagos; una reserva cancelada no se toca
+      if (enrollment.status !== 'cancelled') {
         if (enrollment.status !== newStatus) {
           try { await updateEnrollmentStatus(eid, newStatus); enrollment.status = newStatus; } catch {}
         }

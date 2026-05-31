@@ -79,7 +79,7 @@ export async function renderEnrollments(panel) {
           ${past.map(e => {
             const cls = e.surf_classes;
             const attendee = e.family_members?.full_name || 'Yo';
-            let statusLabel = e.status === 'cancelled' ? 'Cancelada' : e.status === 'completed' ? 'Completada' : e.status === 'no_show' ? 'No asistió' : e.status;
+            let statusLabel = e.status === 'cancelled' ? 'Cancelada' : e.attendance === true ? 'Asistió' : e.attendance === false ? 'No asistió' : 'Completada';
             if (e.status === 'cancelled' && e.cancelled_by) {
               statusLabel = e.cancelled_by === 'admin' ? 'Cancelada por la escuela' : 'Cancelada por mí';
             }

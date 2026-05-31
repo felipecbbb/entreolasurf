@@ -254,9 +254,9 @@ export async function renderClientes(container) {
     } else if (activeFilter === 'pending_assign') {
       filtered = profiles.filter(p => p._enrollments.some(e => !e.class_id));
     } else if (activeFilter === 'paid') {
-      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'paid' || e.status === 'completed'));
+      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'paid'));
     } else if (activeFilter === 'cancelled') {
-      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'cancelled' || e.status === 'no_show'));
+      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'cancelled'));
     }
 
     const filterBtn = (key, label, icon) => `<button class="cli-filter-btn ${activeFilter === key ? 'active' : ''}" data-filter="${key}">${icon} ${label}</button>`;
@@ -1410,8 +1410,6 @@ export async function renderClientes(container) {
     { v: 'confirmed', l: 'Confirmado' },
     { v: 'partial', l: 'Anticipo pagado' },
     { v: 'paid', l: 'Pagado' },
-    { v: 'completed', l: 'Completado' },
-    { v: 'no_show', l: 'No se presentó' },
     { v: 'cancelled', l: 'Cancelado' },
   ];
   const RENTAL_STATUS_OPTIONS = [
