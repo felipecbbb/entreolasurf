@@ -768,6 +768,20 @@ export async function upsertProduct(product) {
   invalidateCache('products');
 }
 
+// Sube una imagen de producto al Storage y devuelve su URL pública.
+export async function uploadProductImage(file, slug) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const safeSlug = (slug || 'producto').replace(/[^a-z0-9-]+/gi, '-').toLowerCase() || 'producto';
+  const rand = Math.random().toString(36).slice(2, 8);
+  const path = `productos/${safeSlug}/${Date.now()}-${rand}.${ext}`;
+  const { data, error } = await supabase.storage
+    .from('activity-photos')
+    .upload(path, file, { cacheControl: '3600', upsert: false });
+  if (error) throw error;
+  const { data: publicData } = supabase.storage.from('activity-photos').getPublicUrl(data.path);
+  return publicData.publicUrl;
+}
+
 export async function deleteProduct(id) {
   const { error } = await supabase.from('products').delete().eq('id', id);
   if (error) throw error;
