@@ -250,21 +250,35 @@ Deno.serve(async (req) => {
       let productsTotal = 0;
       for (const prod of products) {
         const productId = prod.metadata?.productId || prod.id || null;
+        const variant = [prod.metadata?.color, prod.metadata?.size && `Talla ${prod.metadata.size}`]
+          .filter(Boolean).join(" · ") || null;
         if (productId) {
           await supabase.from("order_items").insert({
             order_id: orderId,
             product_id: productId,
             quantity: prod.quantity || 1,
             unit_price: prod.price,
+            variant,
           });
           productsTotal += Number(prod.price || 0) * (prod.quantity || 1);
-          // Decrease stock
+          // Descontar stock (por talla si el producto las gestiona)
+          const qty = prod.quantity || 1;
+          const sz = prod.metadata?.size || "";
           const { data: product } = await supabase
-            .from("products").select("stock").eq("id", productId).single();
-          if (product && product.stock !== null) {
-            await supabase.from("products")
-              .update({ stock: Math.max((product.stock || 0) - (prod.quantity || 1), 0) })
-              .eq("id", productId);
+            .from("products").select("stock, sizes_stock").eq("id", productId).single();
+          if (product) {
+            let ss = Array.isArray(product.sizes_stock) ? product.sizes_stock : [];
+            if (sz && ss.length) {
+              ss = ss.map((s: any) => s.size === sz
+                ? { ...s, stock: Math.max((Number(s.stock) || 0) - qty, 0) }
+                : s);
+              const total = ss.reduce((a: number, s: any) => a + (Number(s.stock) || 0), 0);
+              await supabase.from("products").update({ sizes_stock: ss, stock: total }).eq("id", productId);
+            } else if (product.stock !== null) {
+              await supabase.from("products")
+                .update({ stock: Math.max((product.stock || 0) - qty, 0) })
+                .eq("id", productId);
+            }
           }
         }
       }

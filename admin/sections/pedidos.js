@@ -117,7 +117,7 @@ export async function renderPedidos(container) {
           <tbody>
             ${items.map(i => `
               <tr>
-                <td style="padding:8px;border-bottom:1px solid #f3f1e8">${i.products?.name || '—'}</td>
+                <td style="padding:8px;border-bottom:1px solid #f3f1e8">${i.products?.name || '—'}${i.variant ? `<br><span style="font-size:.78rem;color:var(--color-muted)">${i.variant}</span>` : ''}</td>
                 <td style="padding:8px;border-bottom:1px solid #f3f1e8">${i.quantity}</td>
                 <td style="padding:8px;border-bottom:1px solid #f3f1e8">${formatCurrency(i.unit_price)}</td>
                 <td style="padding:8px;border-bottom:1px solid #f3f1e8">${formatCurrency(i.quantity * i.unit_price)}</td>

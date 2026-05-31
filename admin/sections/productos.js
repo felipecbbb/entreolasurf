@@ -56,12 +56,26 @@ export async function renderProductos(container) {
     });
   }
 
+  function sizeRowHtml(size = '', stock = 0) {
+    return `
+      <div class="size-row" style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+        <input type="text" class="size-name" placeholder="Talla (ej: M, 8 años)" value="${size}" style="flex:1" />
+        <input type="number" class="size-stock" placeholder="Stock" value="${stock}" min="0" style="width:90px" />
+        <button type="button" class="admin-action-btn danger size-remove" title="Quitar">✕</button>
+      </div>`;
+  }
+
   function openProductModal(product = null) {
     const isEdit = !!product;
 
     const statusOptions = STATUSES.map(s =>
       `<option value="${s}" ${product?.status === s ? 'selected' : ''}>${s}</option>`
     ).join('');
+
+    const sizeStock = Array.isArray(product?.sizes_stock) ? product.sizes_stock : [];
+    const sizeRowsHtml = sizeStock.length
+      ? sizeStock.map(s => sizeRowHtml(s.size, s.stock)).join('')
+      : '';
 
     openModal(isEdit ? 'Editar Producto' : 'Nuevo Producto', `
       <form id="product-form" class="trip-form">
@@ -77,14 +91,27 @@ export async function renderProductos(container) {
         <label>Precio (€)</label>
         <input type="number" name="price" step="0.01" value="${product?.price || ''}" required />
 
-        <label>Stock</label>
-        <input type="number" name="stock" value="${product?.stock ?? 0}" required />
-
         <label>Categoría</label>
         <input type="text" name="category" value="${product?.category || ''}" />
 
-        <label>Imagen (URL)</label>
+        <label>Imagen principal (URL)</label>
         <input type="url" name="image_url" value="${product?.image_url || ''}" />
+
+        <label>Galería (URLs separadas por comas)</label>
+        <input type="text" name="gallery" value="${product?.gallery || ''}" placeholder="/uploads/a.jpg, /uploads/b.jpg" />
+
+        <label>Colores (separados por comas)</label>
+        <input type="text" name="colors" value="${product?.colors || ''}" placeholder="Negro, Blanco" />
+
+        <label>Tallas y stock</label>
+        <div id="sizes-stock-wrap">${sizeRowsHtml}</div>
+        <button type="button" class="btn ghost" id="add-size-btn" style="margin:4px 0 8px">+ Añadir talla</button>
+        <p style="font-size:.72rem;color:var(--color-muted);margin:0 0 8px">
+          Cada talla con su stock. El stock total se calcula automáticamente. Si no añades tallas, se usa el stock simple de abajo.
+        </p>
+
+        <label>Stock (sin tallas)</label>
+        <input type="number" name="stock" value="${product?.stock ?? 0}" min="0" />
 
         <label>Estado</label>
         <select name="status">${statusOptions}</select>
@@ -93,14 +120,45 @@ export async function renderProductos(container) {
       </form>
     `);
 
-    document.getElementById('product-form').addEventListener('submit', async (e) => {
+    const form = document.getElementById('product-form');
+    const wrap = form.querySelector('#sizes-stock-wrap');
+
+    form.querySelector('#add-size-btn').addEventListener('click', () => {
+      wrap.insertAdjacentHTML('beforeend', sizeRowHtml());
+    });
+    wrap.addEventListener('click', (e) => {
+      if (e.target.closest('.size-remove')) e.target.closest('.size-row').remove();
+    });
+
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       const obj = Object.fromEntries(fd);
 
+      // Construye sizes_stock desde las filas
+      const rows = [...wrap.querySelectorAll('.size-row')];
+      const sizesStock = rows
+        .map(r => ({
+          size: r.querySelector('.size-name').value.trim(),
+          stock: Math.max(parseInt(r.querySelector('.size-stock').value, 10) || 0, 0),
+        }))
+        .filter(s => s.size);
+
+      obj.sizes_stock = sizesStock;
+      // Mantiene 'sizes' CSV por compatibilidad y stock total = suma de tallas
+      if (sizesStock.length) {
+        obj.sizes = sizesStock.map(s => s.size).join(', ');
+        obj.stock = sizesStock.reduce((a, s) => a + s.stock, 0);
+      } else {
+        obj.sizes = null;
+        obj.stock = Math.max(parseInt(obj.stock, 10) || 0, 0);
+      }
+
       if (!obj.description) obj.description = null;
       if (!obj.category) obj.category = null;
       if (!obj.image_url) obj.image_url = null;
+      if (!obj.gallery) obj.gallery = null;
+      if (!obj.colors) obj.colors = null;
       if (isEdit) obj.id = product.id;
 
       try {
