@@ -79,11 +79,21 @@ Deno.serve(async (req) => {
         meta.couponCode ? `Cupon: ${meta.couponCode}` : "",
       ].filter(Boolean).join(" | ") || null;
 
-      await supabase.from("orders").update({
-        status: "paid",
-        total: totalPaid,
-        notes: finalNotes,
-      }).eq("id", orderId);
+      // IDEMPOTENCIA: reclama el pedido de forma atómica. Solo pasa de
+      // 'pending' a 'paid' una vez; si el webhook se reintenta (Stripe
+      // entrega "at least once"), el UPDATE no afecta filas y salimos sin
+      // reprocesar (no se duplican bonos/inscripciones/stock/pagos/emails).
+      const { data: claimed } = await supabase.from("orders")
+        .update({ status: "paid", total: totalPaid, notes: finalNotes })
+        .eq("id", orderId)
+        .eq("status", "pending")
+        .select("id");
+      if (!claimed || claimed.length === 0) {
+        console.log(`Order ${orderId} ya procesado — webhook duplicado, ignorado`);
+        return new Response(JSON.stringify({ received: true, duplicate: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
       // Save address/phone to profile
       const profileUpdate: Record<string, any> = {};
@@ -157,9 +167,14 @@ Deno.serve(async (req) => {
           });
 
           // ---- Convertir las plazas preseleccionadas (holds) en inscripciones ----
-          const bookings = Array.isArray(cls.metadata?.bookings) ? cls.metadata.bookings : [];
+          // Tope: nunca inscribir más plazas que créditos pagados (el array
+          // bookings viene del cliente y podría venir manipulado).
+          const maxCredits = sessions * (cls.quantity || 1);
+          const bookings = (Array.isArray(cls.metadata?.bookings) ? cls.metadata.bookings : [])
+            .slice(0, maxCredits);
           let bookedCount = 0;
           for (const bk of bookings) {
+            if (bookedCount >= maxCredits) break;
             try {
               const att = bk.attendee || {};
               let familyMemberId: string | null = null;
@@ -249,9 +264,14 @@ Deno.serve(async (req) => {
       const products = cart.filter((i: any) => i.type === "product");
       let productsTotal = 0;
       for (const prod of products) {
-        const productId = prod.metadata?.productId || prod.id || null;
+        // Solo el UUID real del producto sirve como FK; prod.id es el id de
+        // variante (slug-color-talla), no vale como product_id.
+        const productId = prod.metadata?.productId || null;
         const variant = [prod.metadata?.color, prod.metadata?.size && `Talla ${prod.metadata.size}`]
           .filter(Boolean).join(" · ") || null;
+        if (!productId) {
+          console.error("Item de producto sin productId (carrito antiguo), omitido:", prod.name);
+        }
         if (productId) {
           await supabase.from("order_items").insert({
             order_id: orderId,

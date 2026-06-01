@@ -35,6 +35,36 @@ Deno.serve(async (req) => {
       });
     }
 
+    // --- Revalidación de precios en el servidor (anti-manipulación de localStorage) ---
+    // Productos: precio y disponibilidad reales desde la BD (ignora el precio del cliente).
+    const productItems = items.filter((i: any) => i.type === "product");
+    if (productItems.length) {
+      const ids = [...new Set(productItems.map((i: any) => i.metadata?.productId).filter(Boolean))];
+      const { data: dbProducts } = await supabase
+        .from("products").select("id, price, status")
+        .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+      const pmap: Record<string, any> = {};
+      (dbProducts || []).forEach((p: any) => { pmap[p.id] = p; });
+      for (const it of productItems) {
+        const p = pmap[it.metadata?.productId];
+        if (!p || p.status !== "active") {
+          return new Response(JSON.stringify({ error: `Producto no disponible: ${it.name}` }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        it.price = Number(p.price); // precio real
+      }
+    }
+    // Sanidad general: precio no negativo y cantidad razonable
+    for (const it of items) {
+      if (!(Number(it.price) >= 0)) {
+        return new Response(JSON.stringify({ error: "Precio inválido en el carrito" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      it.quantity = Math.min(Math.max(parseInt(it.quantity, 10) || 1, 1), 50);
+    }
+
     // Store cart in a temporary DB row to avoid Stripe metadata 500-char limit
     const pendingOrder = {
       user_id: userId,
@@ -75,17 +105,33 @@ Deno.serve(async (req) => {
 
       if (couponData) {
         const now = new Date();
+        const cartTotal = items.reduce((s: number, i: any) => s + Number(i.price) * (i.quantity || 1), 0);
+        // Mismas reglas que el cliente, pero aquí mandan (no se puede saltar)
+        const eligible = items.some((i: any) => {
+          switch (couponData.applies_to) {
+            case "all": return true;
+            case "camps": return i.type === "camp_reservation";
+            case "classes": return i.type === "class_reservation" &&
+              (!couponData.activity_type || i.metadata?.classType === couponData.activity_type);
+            case "products": return i.type === "product";
+            case "rentals": return i.type === "rental";
+            default: return false;
+          }
+        });
         const valid =
           (!couponData.starts_at || new Date(couponData.starts_at) <= now) &&
           (!couponData.expires_at || new Date(couponData.expires_at) > now) &&
-          (!couponData.max_uses || couponData.used_count < couponData.max_uses);
+          (!couponData.max_uses || couponData.used_count < couponData.max_uses) &&
+          (!couponData.min_amount || cartTotal >= Number(couponData.min_amount)) &&
+          eligible;
 
         if (valid) {
           coupon = couponData;
           const stripeCoupon = await stripe.coupons.create(
             couponData.discount_type === "percentage"
-              ? { percent_off: Number(couponData.discount_value), duration: "once" }
-              : { amount_off: Math.round(Number(couponData.discount_value) * 100), currency: "eur", duration: "once" }
+              ? { percent_off: Math.min(Number(couponData.discount_value), 100), duration: "once" }
+              // Tope: el descuento fijo nunca supera el total del carrito
+              : { amount_off: Math.min(Math.round(Number(couponData.discount_value) * 100), Math.round(cartTotal * 100)), currency: "eur", duration: "once" }
           );
           stripeDiscounts = [{ coupon: stripeCoupon.id }];
         }
