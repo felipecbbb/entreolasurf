@@ -3728,10 +3728,18 @@ export async function renderCalendario(container) {
           bono.pendingAmount = Math.max(0, Math.round((bono.expectedPrice - newPaid) * 100) / 100);
           bono.isFullyPaid = bono.pendingAmount <= 0;
 
+          // Si el bono queda saldado, sus inscripciones pasan a 'paid' (verde en
+          // el calendario). Así el icono de pago refleja el cobro del bono.
+          if (bono.isFullyPaid) {
+            await supabase.from('class_enrollments').update({ status: 'paid' })
+              .eq('bono_id', bonoId).in('status', ['confirmed', 'partial']);
+          }
+
           modal.remove();
           showToast(`Pago de ${amount.toFixed(2)}€ registrado para el bono`, 'success');
           renderDetail();
           if (overlayRef) bindDetailEvents(overlayRef, res);
+          render(); // refresca el grid del calendario (re-fetchea inscripciones)
         } catch (err) {
           showToast('Error: ' + err.message, 'error');
           btn.disabled = false; btn.textContent = 'Registrar Pago del Bono';

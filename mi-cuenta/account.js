@@ -492,7 +492,6 @@ async function renderDashboard() {
         </div>
     </div>`;
 
-  const loaded = new Set();
 
   function switchTab(tabKey) {
     mainEl.querySelectorAll('.account-nav-item').forEach(t => t.classList.remove('active'));
@@ -510,9 +509,9 @@ async function renderDashboard() {
   }
 
   async function loadTab(key) {
-    if (loaded.has(key)) return;
-    loaded.add(key);
-
+    // Re-renderiza siempre al entrar a la pestaña: así los créditos del bono,
+    // estados de clase, pagos, etc. salen actualizados a tiempo real (antes
+    // cada pestaña se cargaba una sola vez y mostraba datos viejos).
     switch (key) {
       case 'datos':
         renderDatos(session, profile);
