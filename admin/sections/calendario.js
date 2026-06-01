@@ -6004,10 +6004,6 @@ export async function renderCalendario(container) {
                   <input type="time" id="es-end" value="${cls.time_end?.slice(0, 5) || '11:30'}" readonly tabindex="-1" style="background:#f1f5f9;color:#64748b;cursor:not-allowed" />
                 </div>
               </div>
-              <div class="ns-field">
-                <label>Precio (€)</label>
-                <input type="number" name="price" step="0.01" value="${cls.price || ''}" required />
-              </div>
             </section>
             <section class="ns-section ns-section-detail">
               <h3>Detalles</h3>
@@ -6046,7 +6042,7 @@ export async function renderCalendario(container) {
               <div class="ns-field" id="es-apply-list-wrap" style="display:none">
                 <label>Clases del mismo tipo</label>
                 <div id="es-apply-list" class="es-apply-list"><p style="font-size:.8rem;color:#94a3b8">Cargando…</p></div>
-                <p style="font-size:.72rem;color:#94a3b8;margin-top:6px">Se aplican los detalles (hora, instructor, capacidad, precio, público, publicada). La fecha de cada clase se mantiene.</p>
+                <p style="font-size:.72rem;color:#94a3b8;margin-top:6px">Se aplican los detalles (hora, instructor, capacidad, público, publicada). La fecha de cada clase se mantiene.</p>
               </div>
             </section>
           </form>
@@ -6113,6 +6109,8 @@ export async function renderCalendario(container) {
       obj.status = cls.status || 'scheduled';
       if (!obj.instructor) obj.instructor = null;
       if (!obj.audience) obj.audience = null;
+      // El precio no se pide: lo rige el pack pricing del tipo. Se preserva el de la clase.
+      obj.price = Number(cls.price) || 0;
 
       // Alcance del cambio (no es columna de la tabla → fuera del obj)
       const applyScope = obj.apply_scope || 'this';
@@ -6142,7 +6140,7 @@ export async function renderCalendario(container) {
           const propagate = {
             type: obj.type, time_start: obj.time_start, time_end: obj.time_end,
             title: obj.title, max_students: Number(obj.max_students) || cls.max_students || 8,
-            price: Number(obj.price) || 0, audience: obj.audience, instructor: obj.instructor,
+            audience: obj.audience, instructor: obj.instructor,
             published: obj.published, updated_at: new Date().toISOString(),
           };
           for (const id of targetIds) {
