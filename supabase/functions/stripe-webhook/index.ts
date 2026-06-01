@@ -39,6 +39,10 @@ Deno.serve(async (req) => {
     const meta = session.metadata || {};
     const orderId = meta.orderId;
     const userId = meta.userId || null;
+    // Una vez reclamado el pedido (pending→paid), un fallo posterior NO debe
+    // devolver 500 (haría que Stripe reintente y, al estar ya 'paid', salte el
+    // pedido dejándolo a medias). Se marca para reconciliación y se responde 200.
+    let orderClaimed = false;
 
     if (!orderId || !userId) {
       console.error("Missing orderId or userId in metadata");
@@ -94,6 +98,7 @@ Deno.serve(async (req) => {
           headers: { "Content-Type": "application/json" },
         });
       }
+      orderClaimed = true;
 
       // Save address/phone to profile
       const profileUpdate: Record<string, any> = {};
@@ -353,7 +358,13 @@ Deno.serve(async (req) => {
           reference_id: orderId,
         });
       }
-      await supabase.from("payments").insert(paymentRows);
+      // El registro de pagos es crítico para la contabilidad: si falla, se
+      // marca el pedido para reconciliación (supabase-js no lanza, devuelve error).
+      const { error: payErr } = await supabase.from("payments").insert(paymentRows);
+      if (payErr) {
+        console.error(`payments.insert error order ${orderId}:`, payErr.message);
+        await supabase.from("orders").update({ notes: `⚠ ERROR_PAGOS: ${payErr.message} (pedido pagado, revisar pagos)` }).eq("id", orderId);
+      }
 
       // ---- Increment coupon usage ----
       if (meta.couponId) {
@@ -406,6 +417,19 @@ Deno.serve(async (req) => {
       console.log(`Order ${orderId} completed for user ${userId}, total: ${totalPaid}€, items: ${cart.length}`);
     } catch (err: any) {
       console.error("Webhook processing error:", err);
+      if (orderClaimed) {
+        // El pedido ya está pagado: NO devolver 500 (Stripe reintentaría y, al
+        // estar 'paid', saltaría el pedido). Se marca para reconciliación manual.
+        try {
+          await supabase.from("orders")
+            .update({ notes: `⚠ ERROR_PROC: ${err.message} (pedido pagado, revisar)` })
+            .eq("id", orderId);
+        } catch (_) { /* nada que hacer */ }
+        return new Response(JSON.stringify({ received: true, partial_error: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      // Aún no reclamado (fallo antes del claim): 500 para que Stripe reintente.
       return new Response(`Processing error: ${err.message}`, { status: 500 });
     }
   }
