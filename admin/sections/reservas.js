@@ -506,10 +506,20 @@ export async function renderReservas(container) {
     block.querySelectorAll('[data-action="delete"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.pid;
-        if (!confirm('¿Eliminar este pago? El estado de la reserva no se ajusta automáticamente.')) return;
+        if (!confirm('¿Eliminar este pago? El estado de la reserva se recalculará según los pagos restantes.')) return;
         try {
           await deletePayment(id);
-          showToast('Pago eliminado', 'success');
+          // Recalcular estado desde los pagos restantes (payments = única verdad)
+          const { data: pays } = await supabase.from('payments')
+            .select('amount').eq('reservation_type', 'booking').eq('reference_id', booking.id);
+          const totalPaid = (pays || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+          const total = Number(booking.total_amount || 0);
+          const newStatus = totalPaid <= 0 ? 'pending' : (total > 0 && totalPaid >= total ? 'fully_paid' : 'deposit_paid');
+          await supabase.from('bookings').update({
+            deposit_amount: totalPaid, status: newStatus, updated_at: new Date().toISOString(),
+          }).eq('id', booking.id);
+          booking.deposit_amount = totalPaid; booking.status = newStatus;
+          showToast('Pago eliminado · estado recalculado', 'success');
           await renderBookingPayments(overlay, booking);
         } catch (err) {
           showToast('Error: ' + err.message, 'error');
@@ -618,13 +628,14 @@ export async function renderReservas(container) {
           concept: `Resto surf camp ${booking.surf_camps?.title || ''}`.trim(),
         });
 
-        const newDeposit = Math.min(
-          Number(booking.deposit_amount || 0) + amount,
-          Number(booking.total_amount || 0)
-        );
-        const fullyPaid = newDeposit >= Number(booking.total_amount || 0);
+        // Estado derivado de la suma real de pagos (payments = única verdad)
+        const { data: pays } = await supabase.from('payments')
+          .select('amount').eq('reservation_type', 'booking').eq('reference_id', booking.id);
+        const totalPaid = (pays || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+        const total = Number(booking.total_amount || 0);
+        const fullyPaid = total > 0 && totalPaid >= total;
         await supabase.from('bookings').update({
-          deposit_amount: newDeposit,
+          deposit_amount: totalPaid,
           status: fullyPaid ? 'fully_paid' : 'deposit_paid',
           updated_at: new Date().toISOString(),
         }).eq('id', booking.id);
