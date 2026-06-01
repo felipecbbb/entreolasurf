@@ -11,6 +11,7 @@ import {
   fetchPayments, createPayment, deletePayment,
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
+import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING, DEPOSIT } from '../modules/constants.js';
 import { supabase } from '/lib/supabase.js';
 import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml } from '/lib/shared-constants.js';
@@ -851,7 +852,12 @@ export async function renderCalendario(container) {
                   const { data: fm } = await supabase.from('family_members').select('*').eq('id', enrollment.family_member_id).single();
                   familyMember = fm;
                 }
-                const payments = await fetchPayments('enrollment', eid);
+                // Histórico de pagos de la reserva: si va con bono, los pagos
+                // están en el bono (web o playa); si es suelta, en la inscripción.
+                const _bonoId = enrollment?.bono_id || null;
+                const payments = _bonoId
+                  ? [...(await fetchPayments('bono', _bonoId)), ...(await fetchPayments('enrollment', eid))]
+                  : await fetchPayments('enrollment', eid);
                 const isPaid = row.classList.contains('paid');
 
                 // Check if enrollment is linked to a bono
@@ -3106,17 +3112,21 @@ export async function renderCalendario(container) {
             const dateLabel = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
             const payId = p.id || '';
             const isAnticipo = idx === 0 && res.cobrarAnticipo && res.anticipoAmount > 0;
-            const deleteBtn = payId && !isAnticipo
-              ? `<button class="rv-delete-payment-btn" data-payment-id="${payId}" data-payment-amount="${amt}" title="Eliminar pago" style="background:none;border:none;cursor:pointer;color:#94a3b8;padding:2px 4px;margin-left:6px;border-radius:4px;transition:color .15s">
+            const channelLabel = p.channel === 'web' || methodKey === 'online' ? ' · web' : (p.channel === 'in_person' ? ' · en playa' : '');
+            const actionBtns = payId && !isAnticipo
+              ? `<button class="rv-edit-payment-btn" data-payment-id="${payId}" title="Editar pago" style="background:none;border:none;cursor:pointer;color:#94a3b8;padding:2px 4px;margin-left:6px;border-radius:4px;transition:color .15s">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="rv-delete-payment-btn" data-payment-id="${payId}" data-payment-amount="${amt}" title="Eliminar pago" style="background:none;border:none;cursor:pointer;color:#94a3b8;padding:2px 4px;border-radius:4px;transition:color .15s">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
                 </button>`
               : '';
             return `
               <div class="rv-pay-row" style="align-items:center">
-                <span>${dateLabel} · ${METHOD_LABELS[methodKey] || methodKey}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}${p.concept ? ` · ${p.concept}` : ''}</span>
+                <span>${dateLabel} · ${METHOD_LABELS[methodKey] || methodKey}${channelLabel}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}${p.concept ? ` · ${p.concept}` : ''}</span>
                 <span style="display:flex;align-items:center;gap:2px">
                   <strong style="color:#166534">+${amt.toFixed(2)}€</strong>
-                  ${deleteBtn}
+                  ${actionBtns}
                 </span>
               </div>`;
           }).join('');
@@ -3310,6 +3320,33 @@ export async function renderCalendario(container) {
       overlay.querySelector('#rv-add-payment')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
       overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
 
+      // Recarga el histórico de pagos de la reserva (bono + inscripción)
+      async function reloadResPayments() {
+        res.payments = res.linkedBonoId
+          ? [...(await fetchPayments('bono', res.linkedBonoId)), ...(await fetchPayments('enrollment', res.id))]
+          : await fetchPayments('enrollment', res.id);
+        const totalPaid = res.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+        res.pending = Math.max(0, Math.round((res.totalFinal - totalPaid) * 100) / 100);
+        res.status = totalPaid <= 0 ? 'confirmed' : (res.pending <= 0 ? 'paid' : 'partial');
+      }
+      // Mantiene total_paid del bono = suma de sus pagos (al editar/borrar)
+      async function syncBonoPaid() {
+        if (!res.linkedBonoId) return;
+        const bp = await fetchPayments('bono', res.linkedBonoId);
+        const sum = bp.reduce((s, p) => s + Number(p.amount || 0), 0);
+        await supabase.from('bonos').update({ total_paid: sum, updated_at: new Date().toISOString() }).eq('id', res.linkedBonoId);
+      }
+
+      // Editar pago (método/fecha/concepto) — da igual web o playa
+      overlay.querySelectorAll('.rv-edit-payment-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const pay = (res.payments || []).find(p => p.id === btn.dataset.paymentId);
+          if (!pay) return;
+          openPaymentEditModal(pay, { onSaved: async () => { await reloadResPayments(); renderDetail(); } });
+        });
+      });
+
       // Delete payment buttons
       overlay.querySelectorAll('.rv-delete-payment-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
@@ -3323,17 +3360,9 @@ export async function renderCalendario(container) {
           btn.disabled = true;
           try {
             await deletePayment(paymentId);
-
-            // Remove from res.payments
-            const idx = res.payments.findIndex(p => p.id === paymentId);
-            if (idx !== -1) res.payments.splice(idx, 1);
-
-            // Recalculate pending and status
-            res.pending = Math.round((res.pending + paymentAmount) * 100) / 100;
-            const totalPaid = res.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-            const newStatus = totalPaid <= 0 ? 'confirmed' : (res.pending <= 0 ? 'paid' : 'partial');
-            res.status = newStatus;
-            await updateEnrollmentStatus(res.id, newStatus).catch(() => {});
+            await syncBonoPaid();          // si era pago de bono, recalcula su total_paid
+            await reloadResPayments();     // refresca histórico + pendiente + estado
+            if (!res.linkedBonoId) await updateEnrollmentStatus(res.id, res.status).catch(() => {});
 
             showToast('Pago eliminado', 'success');
             renderDetail();
