@@ -886,18 +886,23 @@ export async function updateOrderStatus(id, status) {
 
 // ---- Profiles ----
 // Create a new client: signs them up via Auth (sends invite email), then updates profile
-export async function createClientFromAdmin({ full_name, email, phone }) {
+export async function createClientFromAdmin(fields) {
+  const {
+    full_name, email, phone, last_name, birth_date, address, city, postal_code,
+    level, wetsuit_size, can_swim, has_injury, injury_detail,
+  } = fields || {};
   if (!email) throw new Error('Email es obligatorio para crear un cliente');
 
   // Generate a random secure password (user will reset via email)
   const tempPassword = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-  // Create auth user via signUp (will send confirmation email)
+  // Create auth user via signUp — todos los datos van en el metadata para que
+  // el trigger handle_new_user los persista en el perfil al crear la cuenta.
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password: tempPassword,
     options: {
-      data: { full_name, phone },
+      data: { full_name, last_name, phone, birth_date, address, city, postal_code, level, wetsuit_size, can_swim, has_injury, injury_detail },
       emailRedirectTo: window.location.origin + '/mi-cuenta/',
     }
   });
@@ -906,13 +911,23 @@ export async function createClientFromAdmin({ full_name, email, phone }) {
   const userId = authData.user?.id;
   if (!userId) throw new Error('No se pudo crear el usuario');
 
-  // Update the profile (trigger should have created it, but upsert to be safe)
+  // Refuerzo: upsert del perfil con todos los datos (el admin tiene policy is_admin)
   const { error: profileError } = await supabase
     .from('profiles')
     .upsert({
       id: userId,
       full_name,
+      last_name: last_name || null,
       phone: phone || null,
+      birth_date: birth_date || null,
+      address: address || null,
+      city: city || null,
+      postal_code: postal_code || null,
+      level: level || null,
+      wetsuit_size: wetsuit_size || null,
+      can_swim: typeof can_swim === 'boolean' ? can_swim : null,
+      has_injury: !!has_injury,
+      injury_detail: injury_detail || null,
       role: 'client',
       updated_at: new Date().toISOString(),
     });

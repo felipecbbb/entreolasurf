@@ -458,27 +458,115 @@ export async function renderClientes(container) {
 
   // ===================== NEW CLIENT MODAL =====================
   function openNewClientModal() {
+    const levelOpts = (sel = '') => `
+      <option value="">Sin definir</option>
+      <option value="principiante" ${sel === 'principiante' ? 'selected' : ''}>Principiante</option>
+      <option value="intermedio" ${sel === 'intermedio' ? 'selected' : ''}>Intermedio</option>
+      <option value="avanzado" ${sel === 'avanzado' ? 'selected' : ''}>Avanzado</option>`;
+    const familyRowHtml = () => `
+      <div class="ncl-fam-row">
+        <input type="text" class="act-form-input ncl-fam-name" placeholder="Nombre*" />
+        <input type="text" class="act-form-input ncl-fam-last" placeholder="Apellidos" />
+        <input type="date" class="act-form-input ncl-fam-birth" />
+        <select class="act-form-input ncl-fam-level">${levelOpts()}</select>
+        <button type="button" class="ncl-fam-remove" title="Quitar">✕</button>
+      </div>`;
+
     openModal('Nuevo Cliente', `
-      <form id="new-client-form" class="trip-form">
-        <label>Nombre completo</label>
-        <input type="text" name="full_name" required />
-        <label>Email</label>
-        <input type="email" name="email" required />
-        <label>Teléfono</label>
-        <input type="tel" name="phone" />
-        <button type="submit" class="btn red" style="margin-top:12px">Crear Cliente</button>
+      <form id="new-client-form" class="ncl-form">
+        <div class="ncl-card">
+          <h3 class="ncl-card-title">Datos del cliente</h3>
+          <div class="cli-form-row">
+            <div class="act-form-field"><label class="act-form-label">Nombre*</label><input type="text" class="act-form-input" name="full_name" required></div>
+            <div class="act-form-field"><label class="act-form-label">Apellidos</label><input type="text" class="act-form-input" name="last_name"></div>
+          </div>
+          <div class="cli-form-row">
+            <div class="act-form-field"><label class="act-form-label">Email*</label><input type="email" class="act-form-input" name="email" required></div>
+            <div class="act-form-field"><label class="act-form-label">Teléfono</label><input type="tel" class="act-form-input" name="phone"></div>
+          </div>
+          <div class="cli-form-row">
+            <div class="act-form-field"><label class="act-form-label">Fecha de nacimiento</label><input type="date" class="act-form-input" name="birth_date"></div>
+            <div class="act-form-field"><label class="act-form-label">Nivel</label><select class="act-form-input" name="level">${levelOpts()}</select></div>
+          </div>
+          <div class="cli-form-row">
+            <div class="act-form-field"><label class="act-form-label">Dirección</label><input type="text" class="act-form-input" name="address"></div>
+            <div class="act-form-field"><label class="act-form-label">Ciudad</label><input type="text" class="act-form-input" name="city"></div>
+          </div>
+          <div class="cli-form-row">
+            <div class="act-form-field"><label class="act-form-label">Código postal</label><input type="text" class="act-form-input" name="postal_code"></div>
+            <div class="act-form-field"><label class="act-form-label">Talla neopreno</label><select class="act-form-input" name="wetsuit_size">${wetsuitOptionsHtml('')}</select></div>
+          </div>
+          <div class="cli-form-row">
+            <div class="act-form-field"><label class="act-form-label">¿Sabe nadar?</label><select class="act-form-input" name="can_swim"><option value="">Sin definir</option><option value="true">Sí</option><option value="false">No</option></select></div>
+            <div class="act-form-field"><label class="act-form-label">¿Lesión?</label><select class="act-form-input" name="has_injury" id="ncl-injury"><option value="false">No</option><option value="true">Sí</option></select></div>
+          </div>
+          <div class="cli-form-row" id="ncl-injury-wrap" style="display:none;grid-template-columns:1fr">
+            <div class="act-form-field"><label class="act-form-label">Detalle lesión</label><input type="text" class="act-form-input" name="injury_detail" placeholder="Describe la lesión…"></div>
+          </div>
+        </div>
+
+        <div class="ncl-card">
+          <div class="ncl-card-title-row"><h3 class="ncl-card-title">Familiares</h3><span class="ncl-card-hint">Se crean y se le asignan al cliente</span></div>
+          <div class="ncl-fam-head"><span>Nombre</span><span>Apellidos</span><span>Fecha nac.</span><span>Nivel</span><span></span></div>
+          <div id="ncl-family"></div>
+          <button type="button" class="btn ghost ncl-add-fam" id="ncl-add-fam">+ Añadir familiar</button>
+        </div>
+
+        <button type="submit" class="btn red" style="width:100%;margin-top:4px" id="ncl-submit">Crear cliente</button>
       </form>
     `);
+
+    const famWrap = document.getElementById('ncl-family');
+    document.getElementById('ncl-add-fam').addEventListener('click', () => {
+      famWrap.insertAdjacentHTML('beforeend', familyRowHtml());
+    });
+    famWrap.addEventListener('click', (e) => {
+      if (e.target.closest('.ncl-fam-remove')) e.target.closest('.ncl-fam-row').remove();
+    });
+    const injurySel = document.getElementById('ncl-injury');
+    injurySel.addEventListener('change', () => {
+      document.getElementById('ncl-injury-wrap').style.display = injurySel.value === 'true' ? '' : 'none';
+    });
+
     document.getElementById('new-client-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const fd = new FormData(e.target);
+      const submitBtn = document.getElementById('ncl-submit');
+      const o = Object.fromEntries(new FormData(e.target));
+      const clientObj = {
+        full_name: o.full_name?.trim(),
+        last_name: o.last_name?.trim() || null,
+        email: o.email?.trim(),
+        phone: o.phone?.trim() || null,
+        birth_date: o.birth_date || null,
+        address: o.address?.trim() || null,
+        city: o.city?.trim() || null,
+        postal_code: o.postal_code?.trim() || null,
+        level: o.level || null,
+        wetsuit_size: o.wetsuit_size || null,
+        can_swim: o.can_swim === 'true' ? true : o.can_swim === 'false' ? false : null,
+        has_injury: o.has_injury === 'true',
+        injury_detail: o.injury_detail?.trim() || null,
+      };
+      const familyRows = [...famWrap.querySelectorAll('.ncl-fam-row')].map(r => ({
+        full_name: r.querySelector('.ncl-fam-name').value.trim(),
+        last_name: r.querySelector('.ncl-fam-last').value.trim() || null,
+        birth_date: r.querySelector('.ncl-fam-birth').value || null,
+        level: r.querySelector('.ncl-fam-level').value || null,
+      })).filter(f => f.full_name);
+
+      submitBtn.disabled = true; submitBtn.textContent = 'Creando…';
       try {
-        await createClientFromAdmin(Object.fromEntries(fd));
+        const created = await createClientFromAdmin(clientObj);
+        let famCount = 0;
+        for (const f of familyRows) {
+          try { await createFamilyMemberAdmin(created.id, f); famCount++; } catch (err) { console.warn('familiar:', err.message); }
+        }
         closeModal();
-        showToast('Cliente creado', 'success');
+        showToast(famCount > 0 ? `Cliente creado · ${famCount} familiar(es) añadido(s)` : 'Cliente creado', 'success');
         renderList();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
+        submitBtn.disabled = false; submitBtn.textContent = 'Crear cliente';
       }
     });
   }
