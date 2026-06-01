@@ -5,7 +5,7 @@
 import {
   fetchPaymentsFiltered,
   enrichPaymentsWithClient,
-  fetchPendingBookings, fetchPendingRentals, fetchPendingOrders, fetchPendingBonos,
+  fetchPendingBookings, fetchPendingRentals, fetchPendingOrders, fetchPendingBonos, fetchPendingEnrollments,
   deletePayment, deleteReservationFully,
 } from '../modules/api.js';
 import { formatCurrency, showToast } from '../modules/ui.js';
@@ -28,6 +28,7 @@ const ENTITY_LABELS = {
   rental: 'Alquileres material',
   order: 'Pedidos tienda',
   bono: 'Bonos / clases',
+  enrollment: 'Clases sueltas (manual)',
 };
 
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -390,6 +391,7 @@ export async function renderEstadisticas(container) {
           { v: 'rental', l: 'Alquileres' },
           { v: 'order', l: 'Pedidos tienda' },
           { v: 'bono', l: 'Bonos sin cobrar' },
+          { v: 'enrollment', l: 'Clases sueltas (manual)' },
         ])}
       </div>
       <div id="estad-pendiente-body"><div class="estad-loading">Cargando…</div></div>
@@ -411,6 +413,7 @@ export async function renderEstadisticas(container) {
       if (need === 'all' || need === 'rental')  tasks.push(fetchPendingRentals().then(arr  => ({ key: 'rental',  arr })));
       if (need === 'all' || need === 'order')   tasks.push(fetchPendingOrders().then(arr   => ({ key: 'order',   arr })));
       if (need === 'all' || need === 'bono')    tasks.push(fetchPendingBonos().then(arr    => ({ key: 'bono',    arr })));
+      if (need === 'all' || need === 'enrollment') tasks.push(fetchPendingEnrollments().then(arr => ({ key: 'enrollment', arr })));
 
       const results = await Promise.all(tasks);
       const sections = results.filter(r => r.arr.length > 0);
@@ -478,7 +481,7 @@ export async function renderEstadisticas(container) {
         btn.addEventListener('click', async () => {
           const id = btn.dataset.delReservation;
           const entity = btn.dataset.entity;
-          const labelByEntity = { booking: 'reserva de surf camp', rental: 'alquiler', order: 'pedido', bono: 'bono' };
+          const labelByEntity = { booking: 'reserva de surf camp', rental: 'alquiler', order: 'pedido', bono: 'bono', enrollment: 'inscripción de clase' };
           if (!confirm(`¿Eliminar ${labelByEntity[entity] || 'reserva'} y todos sus pagos asociados? No se puede deshacer.`)) return;
           try {
             await deleteReservationFully(entity, id);

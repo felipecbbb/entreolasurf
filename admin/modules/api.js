@@ -177,12 +177,14 @@ const ENTITY_TABLE = {
   rental: 'equipment_reservations',
   order: 'orders',
   bono: 'bonos',
+  enrollment: 'class_enrollments',
 };
 const ENTITY_PAYMENT_TYPE = {
   booking: 'booking',
   rental: 'rental',
   order: 'order',
   bono: ['bono', 'enrollment'], // pagos del bono pueden estar como 'enrollment'
+  enrollment: 'enrollment',
 };
 
 export async function deleteReservationFully(entity, id) {
@@ -435,6 +437,40 @@ export async function fetchPendingBonos() {
       entity: 'bono',
     };
   }).filter(b => b.pending > 0);
+}
+
+// Inscripciones de clase SUELTAS (sin bono) pendientes de pago: reservas
+// manuales del admin y las clases "rojas" de Ampliar que exceden los créditos.
+// Las inscripciones ligadas a un bono NO entran aquí (su pendiente está en el bono).
+export async function fetchPendingEnrollments() {
+  const { data } = await supabase.from('class_enrollments')
+    .select('id, user_id, guest_name, family_member_id, status, created_at, surf_classes:class_id(title, type, date)')
+    .is('bono_id', null)
+    .in('status', ['confirmed', 'partial'])
+    .order('created_at', { ascending: false });
+  const list = data || [];
+  const ids = list.map(e => e.id);
+  const userIds = [...new Set(list.map(e => e.user_id).filter(Boolean))];
+  const [profilesMap, paidMap] = await Promise.all([_profilesById(userIds), _paymentsSumBy('enrollment', ids)]);
+  const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
+
+  return list.map(e => {
+    const type = e.surf_classes?.type;
+    const total = expectedBonoPrice(type, 1); // precio de una clase suelta del catálogo
+    const paid = paidMap[e.id] || 0;
+    const pending = Math.max(0, Math.round((total - paid) * 100) / 100);
+    return {
+      id: e.id,
+      client: profilesMap[e.user_id]?.full_name || e.guest_name || 'Sin nombre',
+      email: profilesMap[e.user_id]?.email || null,
+      phone: profilesMap[e.user_id]?.phone || null,
+      total, paid, pending,
+      status: e.status,
+      created_at: e.created_at,
+      meta: e.surf_classes?.title || TYPE_LBL[type] || 'Clase',
+      entity: 'enrollment',
+    };
+  }).filter(e => e.pending > 0);
 }
 
 // ---- Estadísticas (extended dashboard stats with enrollment-class type cross + user names) ----
