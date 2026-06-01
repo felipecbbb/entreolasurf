@@ -379,8 +379,20 @@ export async function renderCalendario(container) {
       if (e.bono && e.bono.status === 'active') {
         bonoLabel = `${e.bono.used_credits}/${e.bono.total_credits}`;
       }
-      const isPaid = e.status === 'paid';
-      const isPartial = e.status === 'partial';
+      // Pago: si la inscripción va con bono, el color sale del estado de pago
+      // del BONO (todas sus clases comparten el mismo pago). Si es suelta, del
+      // status de la inscripción.
+      let isPaid, isPartial;
+      if (e.bono) {
+        const expected = getPackPrice(e.bono.class_type, e.bono.total_credits, 0);
+        const bonoPaid = Number(e.bono.total_paid || 0) || (e.bono.order_id ? (DEPOSIT[e.bono.class_type] || 15) : 0);
+        const fullyPaid = expected > 0 ? bonoPaid >= expected - 0.01 : bonoPaid > 0;
+        isPaid = fullyPaid;
+        isPartial = !fullyPaid && bonoPaid > 0;
+      } else {
+        isPaid = e.status === 'paid';
+        isPartial = e.status === 'partial';
+      }
       const isAttended = e.attendance === true;
       const isNoShow = e.attendance === false;
       const payClass = isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid';

@@ -1004,7 +1004,7 @@ export async function fetchClassEnrollments(classId) {
   if (bonoIds.length) {
     const { data: bonos } = await supabase
       .from('bonos')
-      .select('id, total_credits, used_credits, status')
+      .select('id, total_credits, used_credits, status, total_paid, class_type, order_id')
       .in('id', bonoIds);
     if (bonos) bonos.forEach(b => { bonoMap[b.id] = b; });
   }
