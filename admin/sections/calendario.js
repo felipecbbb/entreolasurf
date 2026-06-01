@@ -1270,7 +1270,7 @@ export async function renderCalendario(container) {
   }
 
   // ======== BOOKING PANEL (MANUAL RESERVATION) ========
-  async function openBookingPanel(cls) {
+  async function openBookingPanel(cls, prefill = null) {
     const color = TYPE_COLORS[cls.type] || '#0f2f39';
     const label = TYPE_LABELS[cls.type] || cls.title;
     const price = Number(cls.price) || 0;
@@ -1287,7 +1287,14 @@ export async function renderCalendario(container) {
     let personIdCounter = 1;
     let sessionQuantities = {}; // classId → quantity
     sessionQuantities[cls.id] = 1;
-    let persons = [{ id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: [cls.id] }];
+    const firstPerson = { id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: [cls.id] };
+    // "Ampliar": pre-carga el cliente y su familiar; loadPersonCredits() cargará su bono
+    if (prefill) Object.assign(firstPerson, {
+      nombre: prefill.nombre || '', apellidos: prefill.apellidos || '',
+      profileId: prefill.profileId || null, profileName: prefill.profileName || null,
+      familyMemberId: prefill.familyMemberId || null, email: prefill.email || '',
+    });
+    let persons = [firstPerson];
 
     function getTotalQuantity() {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
@@ -1893,7 +1900,9 @@ export async function renderCalendario(container) {
               // Default: pick the first bono with enough credits
               const bestBono = allBonos.find(b => (b.total_credits - b.used_credits) >= p.sessions.length) || allBonos[0] || null;
               personCredits[p.id] = {
-                useCredit: totalRemaining >= p.sessions.length,
+                // Usa el bono si quedan créditos; las clases que excedan los
+                // créditos se cobran aparte (rojas) en el confirmar.
+                useCredit: totalRemaining > 0,
                 bono: bestBono,
                 selectedBonoId: bestBono?.id || null,
                 allBonos,
@@ -2481,9 +2490,24 @@ export async function renderCalendario(container) {
             }
 
             // Create enrollments — the DB trigger auto-updates enrolled_count
+            // Créditos disponibles por bono en ESTA tanda: las primeras clases
+            // se cubren con el bono; las que excedan quedan impagas (rojas).
+            const bonoCreditsLeft = {};
             for (const p of persons) {
               const pc = personCredits[p.id];
               const usingCredit = pc?.useCredit && pc.bono;
+              const selectedBono = usingCredit
+                ? (pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono)
+                : null;
+              if (usingCredit && !selectedBono) {
+                showToast(`No hay bono disponible para ${p.profileName || p.nombre || 'persona'}`, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Confirmar';
+                return;
+              }
+              if (selectedBono && bonoCreditsLeft[selectedBono.id] === undefined) {
+                bonoCreditsLeft[selectedBono.id] = Math.max(0, (selectedBono.total_credits || 0) - (selectedBono.used_credits || 0));
+              }
 
               for (const sid of p.sessions) {
                 const enrollData = {
@@ -2491,18 +2515,14 @@ export async function renderCalendario(container) {
                   created_at: new Date().toISOString(),
                 };
 
-                if (usingCredit) {
-                  // Credit from bono — use selected bono
-                  const selectedBono = pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono;
-                  if (!selectedBono) {
-                    showToast(`No hay bono disponible para ${p.profileName || p.nombre || 'persona'}`, 'error');
-                    btn.disabled = false;
-                    btn.textContent = 'Confirmar';
-                    return;
-                  }
+                if (selectedBono && bonoCreditsLeft[selectedBono.id] > 0) {
+                  // Cubierta por el bono → verde (pagado) o naranja (bono con pendiente)
                   enrollData.bono_id = selectedBono.id;
-                  // If bono has pending payment (e.g. only 15€ deposit paid), mark as partial (orange)
                   enrollData.status = selectedBono.isFullyPaid ? 'paid' : 'partial';
+                  bonoCreditsLeft[selectedBono.id]--;
+                } else if (selectedBono) {
+                  // Bono sin créditos restantes → clase impaga (roja); el cliente la debe
+                  enrollData.status = 'confirmed';
                 } else {
                   enrollData.status = (cobrarAnticipo && anticipoAmount >= getTotal()) ? 'paid' : (cobrarAnticipo && anticipoAmount > 0) ? 'partial' : 'confirmed';
                 }
@@ -3360,15 +3380,28 @@ export async function renderCalendario(container) {
       });
 
       // Ampliar — open booking panel for same activity type
-      overlay.querySelector('#rv-ampliar')?.addEventListener('click', () => {
-        if (res.sessions?.length) {
-          const firstSession = res.sessions[0];
-          const cls = { id: firstSession.id, date: firstSession.date, time_start: firstSession.time_start, time_end: firstSession.time_end, type: firstSession.type || res.activityType, title: firstSession.title || res.activityLabel, price: res.totalFinal, max_students: 8 };
-          overlay.remove();
-          openBookingPanel(cls);
-        } else {
-          showToast('No hay sesión asociada para ampliar', 'error');
-        }
+      overlay.querySelector('#rv-ampliar')?.addEventListener('click', async () => {
+        if (!res.sessions?.length) { showToast('No hay sesión asociada para ampliar', 'error'); return; }
+        const firstSession = res.sessions[0];
+        // Trae la clase real de la BD (precio y aforo configurables, sin hardcodear)
+        const { data: realCls } = await supabase.from('surf_classes').select('*').eq('id', firstSession.id).single();
+        const cls = realCls || {
+          id: firstSession.id, date: firstSession.date, time_start: firstSession.time_start,
+          time_end: firstSession.time_end, type: firstSession.type || res.activityType,
+          title: firstSession.title || res.activityLabel,
+        };
+        // Pre-carga el cliente del bono (no pedir sus datos de nuevo)
+        const person = res.persons?.[0] || {};
+        const prefill = {
+          nombre: person.nombre || res.contact?.nombre || '',
+          apellidos: person.apellidos || res.contact?.apellidos || '',
+          profileId: person.profileId || null,
+          profileName: person.profileName || null,
+          familyMemberId: person.familyMemberId || null,
+          email: res.profile?.email || res.contact?.email || '',
+        };
+        overlay.remove();
+        openBookingPanel(cls, prefill);
       });
 
       // Load client history for Histórico tab
