@@ -203,25 +203,18 @@ Deno.serve(async (req) => {
               }
               // kind === 'self' → familyMemberId queda null
 
-              // Revalida plaza (el hold pudo caducar si tardó >10 min en pagar)
-              const { data: sc } = await supabase
-                .from("surf_classes")
-                .select("max_students, enrolled_count, status, published")
-                .eq("id", bk.classId).single();
-              if (!sc || sc.published !== true || sc.status !== "scheduled" ||
-                  sc.enrolled_count >= sc.max_students) {
-                continue; // sin plaza → queda como crédito libre en el bono
-              }
-
-              const { error: enrErr } = await supabase.from("class_enrollments").insert({
-                class_id: bk.classId,
-                user_id: userId,
-                family_member_id: familyMemberId,
-                bono_id: bono.id,
-                status: "confirmed",
+              // Inscripción atómica: la RPC bloquea la clase (FOR UPDATE) y
+              // revalida aforo dentro de la transacción → sin overbooking aunque
+              // dos pagos coincidan. Si no hay plaza, devuelve false y el crédito
+              // queda libre en el bono.
+              const { data: enrolled, error: enrErr } = await supabase.rpc("enroll_from_webhook", {
+                p_class_id: bk.classId,
+                p_user_id: userId,
+                p_family_member_id: familyMemberId,
+                p_bono_id: bono.id,
               });
-              if (!enrErr) bookedCount++;
-              else console.error("Enrollment insert error:", enrErr.message);
+              if (enrErr) { console.error("enroll_from_webhook error:", enrErr.message); continue; }
+              if (enrolled) bookedCount++;
             } catch (e: any) {
               console.error("Hold→enrollment error:", e?.message);
             }

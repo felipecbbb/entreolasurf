@@ -11,22 +11,19 @@ export async function renderEnrollments(panel) {
 
     const now = new Date();
 
-    // Upcoming: confirmed future + cancelled future
+    // Próximas: cualquier inscripción de una clase futura (confirmada, pagada,
+    // anticipo o cancelada). El estado de pago no la saca de "próximas".
     const upcoming = enrollments.filter(e => {
       const cls = e.surf_classes;
       if (!cls) return false;
-      const classTime = new Date(cls.date + 'T' + cls.time_start);
-      if (classTime <= now) return false;
-      return e.status === 'confirmed' || e.status === 'cancelled';
+      return new Date(cls.date + 'T' + cls.time_start) > now;
     });
 
-    // Past: everything else (past confirmed, past cancelled, completed, no_show, etc.)
+    // Pasadas: clases ya celebradas (o sin fecha conocida)
     const past = enrollments.filter(e => {
       const cls = e.surf_classes;
       if (!cls) return true;
-      const classTime = new Date(cls.date + 'T' + cls.time_start);
-      if (classTime > now && (e.status === 'confirmed' || e.status === 'cancelled')) return false;
-      return true;
+      return new Date(cls.date + 'T' + cls.time_start) <= now;
     });
 
     let html = '';
