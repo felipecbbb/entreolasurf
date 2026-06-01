@@ -34,11 +34,10 @@ function renderCard(product) {
   const sizeStock = Array.isArray(product.sizes_stock) ? product.sizes_stock : [];
   const hasSizes = sizeStock.length > 0;
   const totalSizeStock = sizeStock.reduce((a, s) => a + (Number(s.stock) || 0), 0);
-  const isOutOfStock = hasSizes
-    ? totalSizeStock <= 0
-    : (product.stock !== null && product.stock <= 0);
-  const remaining = hasSizes ? totalSizeStock : product.stock;
-  const isLowStock = !isOutOfStock && remaining !== null && remaining > 0 && remaining <= 3;
+  // stock null se trata como 0 (agotado), coherente con la ficha de producto
+  const remaining = hasSizes ? totalSizeStock : (product.stock ?? 0);
+  const isOutOfStock = remaining <= 0;
+  const isLowStock = !isOutOfStock && remaining > 0 && remaining <= 3;
 
   const hasImage = !!product.image_url;
   const href = `/producto/?slug=${encodeURIComponent(product.slug || '')}` + (product.slug ? '' : `&id=${product.id}`);

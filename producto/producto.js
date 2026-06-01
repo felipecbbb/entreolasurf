@@ -140,7 +140,14 @@ function render(product) {
     });
   });
 
-  // ---- Color ---- (al cambiar de color, refresca el stock por talla)
+  // Deshabilita Añadir/Comprar si el color elegido está agotado
+  function updateActionsForColor(color) {
+    if (!hasColorVariants) return;
+    const soldOut = colorStock(color) <= 0;
+    root.querySelectorAll('.pdp-add, .pdp-buy').forEach(b => { b.disabled = soldOut; });
+  }
+
+  // ---- Color ---- (al cambiar de color, refresca stock por talla y acciones)
   root.querySelectorAll('.pdp-color').forEach(btn => {
     btn.addEventListener('click', () => {
       if (btn.disabled) return;
@@ -148,8 +155,10 @@ function render(product) {
       btn.classList.add('active');
       const sel = root.querySelector('.pdp-size');
       if (sel) sel.innerHTML = sizeOptionsHtml(btn.dataset.color);
+      updateActionsForColor(btn.dataset.color);
     });
   });
+  if (colors.length) updateActionsForColor(firstColor);
 
   // ---- Añadir / Comprar ----
   function buildItem() {

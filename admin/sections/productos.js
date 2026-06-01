@@ -363,8 +363,8 @@ export async function renderProductos(container) {
       }
     }
     function generateCombos() {
-      const colors = csv(genColors.value);
-      const sizes = csv(genSizes.value);
+      const colors = uniq(csv(genColors.value));   // dedupe para no generar duplicados
+      const sizes = uniq(csv(genSizes.value));
       const existing = readRows();
       const stockOf = (color, size) => {
         const m = existing.find(v => v.color === color && v.size === size);
@@ -375,6 +375,15 @@ export async function renderProductos(container) {
       else if (colors.length) combos = colors.map(c => [c, '']);
       else if (sizes.length) combos = sizes.map(s => ['', s]);
       else { showToast('Escribe al menos un color o una talla', 'error'); return; }
+
+      // Aviso si al regenerar se perdería stock ya introducido (combinaciones
+      // que dejan de existir, p. ej. al añadir una dimensión nueva).
+      const existingTotal = existing.reduce((a, v) => a + v.stock, 0);
+      const preserved = combos.reduce((a, [c, s]) => a + stockOf(c, s), 0);
+      if (existingTotal > 0 && preserved < existingTotal &&
+          !confirm('Al regenerar, el stock de las variantes que ya no existan se pondrá a 0. ¿Continuar?')) {
+        return;
+      }
 
       variantsWrap.innerHTML = '';
       combos.forEach(([c, s]) => variantsWrap.appendChild(variantRow(c, s, stockOf(c, s))));
