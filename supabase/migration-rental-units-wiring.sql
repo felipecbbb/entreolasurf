@@ -48,3 +48,48 @@ language sql stable security definer set search_path to 'public' as $$
   group by 1, 2;
 $$;
 grant execute on function public.get_rental_stock() to anon, authenticated;
+
+-- 5) Auto-asignación de unidad física al reservar por web.
+--    Elige al azar una unidad 'disponible' de la talla pedida, sin solape de
+--    fechas con otra reserva activa. Devuelve la unidad asignada (o null).
+--    El admin puede reasignarla luego desde el calendario.
+create or replace function public.assign_rental_unit(p_reservation_id uuid)
+returns uuid
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_eq uuid; v_size text; v_ds date; v_de date; v_assigned uuid; v_unit uuid;
+begin
+  select equipment_id, size, date_start, date_end, assigned_unit_id
+    into v_eq, v_size, v_ds, v_de, v_assigned
+  from public.equipment_reservations where id = p_reservation_id;
+  if not found or v_eq is null then return null; end if;
+  if v_assigned is not null then return v_assigned; end if;
+
+  select u.id into v_unit
+  from public.inventory_units u
+  where u.equipment_id = v_eq
+    and u.estado = 'disponible'
+    and ( v_size is null
+          or coalesce(
+               case when u.category = 'tabla' and u.pies is not null
+                    then trunc(u.pies)::int::text || '''' || round((u.pies - trunc(u.pies))*10)::int::text
+                    else u.talla end, '') = coalesce(v_size, '') )
+    and not exists (
+      select 1 from public.equipment_reservations r2
+      where r2.assigned_unit_id = u.id
+        and r2.id <> p_reservation_id
+        and r2.status in ('pending','confirmed','active')
+        and r2.date_start <= v_de and r2.date_end >= v_ds )
+  order by random()
+  limit 1
+  for update of u skip locked;
+
+  if v_unit is null then return null; end if;
+  update public.equipment_reservations
+    set assigned_unit_id = v_unit, updated_at = now()
+    where id = p_reservation_id;
+  return v_unit;
+end;
+$$;
+revoke execute on function public.assign_rental_unit(uuid) from anon, public;
+grant execute on function public.assign_rental_unit(uuid) to authenticated, service_role;

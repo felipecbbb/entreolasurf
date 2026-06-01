@@ -323,6 +323,10 @@ Deno.serve(async (req) => {
           }).select("id").single();
           if (rentalErr) console.error("rental reservation insert error:", rentalErr.message);
           if (rentalRow?.id) {
+            // Asigna automáticamente una unidad libre al azar dentro de la talla
+            // (sin solape de fechas). Si no hay, queda sin asignar y el admin la pone a mano.
+            try { await supabase.rpc("assign_rental_unit", { p_reservation_id: rentalRow.id }); }
+            catch (e: any) { console.error("assign_rental_unit error:", e?.message); }
             paymentRows.push({
               ...paymentsBase,
               amount: depositPaid,
