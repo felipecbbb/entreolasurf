@@ -405,6 +405,38 @@ function expectedBonoPrice(classType, credits) {
   return tiers[maxTier] + (credits - maxTier) * perSession;
 }
 
+// Precios reales desde la BD (activity_packs), cacheados 60s. Si no hay tarifa
+// definida para ese tipo, cae al espejo PACK_PRICING_LOCAL.
+let _packPricing = null, _packPricingTs = 0;
+async function getPackPricing() {
+  if (_packPricing && (Date.now() - _packPricingTs) < 60000) return _packPricing;
+  const [actsRes, packsRes] = await Promise.all([
+    supabase.from('activities').select('id, type_key, extra_class_price'),
+    supabase.from('activity_packs').select('activity_id, sessions, price'),
+  ]);
+  const byId = {}; (actsRes.data || []).forEach(a => { byId[a.id] = a; });
+  const map = {};
+  (actsRes.data || []).forEach(a => { map[a.type_key] = { byN: {}, extra: Number(a.extra_class_price) || 0, maxN: 0, maxPrice: 0 }; });
+  (packsRes.data || []).forEach(p => {
+    const a = byId[p.activity_id]; if (!a) return;
+    const m = map[a.type_key]; if (!m) return;
+    m.byN[p.sessions] = Number(p.price);
+    if (p.sessions > m.maxN) { m.maxN = p.sessions; m.maxPrice = Number(p.price); }
+  });
+  _packPricing = map; _packPricingTs = Date.now();
+  return map;
+}
+function expectedBonoPriceDB(pricing, classType, credits) {
+  if (!credits || credits <= 0) return 0;
+  const m = pricing?.[classType];
+  if (m && m.maxN > 0) {
+    if (m.byN[credits] != null) return m.byN[credits];
+    if (credits > m.maxN) return Math.round((m.maxPrice + (credits - m.maxN) * m.extra) * 100) / 100;
+    return Math.round((m.maxPrice / m.maxN) * credits * 100) / 100; // aproxima si falta el tier exacto
+  }
+  return expectedBonoPrice(classType, credits); // fallback al espejo hardcodeado
+}
+
 // Bonos activos cuyo total_paid < precio esperado del catálogo.
 // Si total_paid es 0 pero hay order_id (compra web), asumimos que al menos se cobró el deposit.
 export async function fetchPendingBonos() {
@@ -414,12 +446,12 @@ export async function fetchPendingBonos() {
     .order('created_at', { ascending: false });
   const list = data || [];
   const userIds = [...new Set(list.map(b => b.user_id).filter(Boolean))];
-  const profilesMap = await _profilesById(userIds);
+  const [profilesMap, pricing] = await Promise.all([_profilesById(userIds), getPackPricing()]);
 
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
 
   return list.map(b => {
-    const expected = expectedBonoPrice(b.class_type, b.total_credits);
+    const expected = expectedBonoPriceDB(pricing, b.class_type, b.total_credits);
     const paidRaw  = Number(b.total_paid || 0);
     const paid     = paidRaw > 0 ? paidRaw : (b.order_id ? DEPOSIT_DEFAULT : 0);
     const pending  = Math.max(0, Math.round((expected - paid) * 100) / 100);
@@ -451,12 +483,12 @@ export async function fetchPendingEnrollments() {
   const list = data || [];
   const ids = list.map(e => e.id);
   const userIds = [...new Set(list.map(e => e.user_id).filter(Boolean))];
-  const [profilesMap, paidMap] = await Promise.all([_profilesById(userIds), _paymentsSumBy('enrollment', ids)]);
+  const [profilesMap, paidMap, pricing] = await Promise.all([_profilesById(userIds), _paymentsSumBy('enrollment', ids), getPackPricing()]);
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
 
   return list.map(e => {
     const type = e.surf_classes?.type;
-    const total = expectedBonoPrice(type, 1); // precio de una clase suelta del catálogo
+    const total = expectedBonoPriceDB(pricing, type, 1); // precio de una clase suelta del catálogo
     const paid = paidMap[e.id] || 0;
     const pending = Math.max(0, Math.round((total - paid) * 100) / 100);
     return {
@@ -484,7 +516,7 @@ export async function fetchClientsPending() {
   ]);
   const bonos = bonosRes.data || [];
   const enr = enrRes.data || [];
-  const paidMap = await _paymentsSumBy('enrollment', enr.map(e => e.id));
+  const [paidMap, pricing] = await Promise.all([_paymentsSumBy('enrollment', enr.map(e => e.id)), getPackPricing()]);
 
   const map = {};
   const add = (uid, concept, pending) => {
@@ -495,12 +527,12 @@ export async function fetchClientsPending() {
   };
   for (const b of bonos) {
     if (!b.user_id) continue;
-    const expected = expectedBonoPrice(b.class_type, b.total_credits);
+    const expected = expectedBonoPriceDB(pricing, b.class_type, b.total_credits);
     const paid = Number(b.total_paid || 0) || (b.order_id ? DEPOSIT_DEFAULT : 0);
     add(b.user_id, `Bono ${TYPE_LBL[b.class_type] || b.class_type} · ${b.total_credits} clases`, Math.max(0, Math.round((expected - paid) * 100) / 100));
   }
   for (const e of enr) {
-    const total = expectedBonoPrice(e.surf_classes?.type, 1);
+    const total = expectedBonoPriceDB(pricing, e.surf_classes?.type, 1);
     const paid = paidMap[e.id] || 0;
     add(e.user_id, `Clase ${e.surf_classes?.title || TYPE_LBL[e.surf_classes?.type] || ''}`.trim(), Math.max(0, Math.round((total - paid) * 100) / 100));
   }

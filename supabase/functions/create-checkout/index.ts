@@ -93,6 +93,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Alquiler: la tarifa real es rental_equipment.pricing[duration]
+    const rentalItems = items.filter((i: any) => i.type === "rental" && i.metadata?.equipmentId);
+    if (rentalItems.length) {
+      const ids = [...new Set(rentalItems.map((i: any) => i.metadata.equipmentId))];
+      const { data: eqs } = await supabase.from("rental_equipment").select("id, pricing")
+        .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+      const eqById: Record<string, any> = {};
+      (eqs || []).forEach((e: any) => { eqById[e.id] = e; });
+      for (const it of rentalItems) {
+        const eq = eqById[it.metadata.equipmentId];
+        const real = eq?.pricing?.[it.metadata.duration];
+        if (real == null || Number.isNaN(Number(real))) {
+          return new Response(JSON.stringify({ error: `Alquiler no disponible: ${it.name}` }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        it.price = Number(real); // tarifa real por duración
+      }
+    }
+
     // Sanidad general: precio no negativo y cantidad razonable
     for (const it of items) {
       if (!(Number(it.price) >= 0)) {
