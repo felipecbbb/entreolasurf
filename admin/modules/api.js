@@ -24,7 +24,7 @@ export function invalidateCache(prefix) {
 // ---- Stats ----
 export async function fetchStats() {
   const [bookings, camps, classes, orders] = await Promise.all([
-    supabase.from('bookings').select('id, total_amount, status'),
+    supabase.from('bookings').select('id, total_amount, deposit_amount, status'),
     supabase.from('surf_camps').select('id, status, date_start').gte('date_start', new Date().toISOString().slice(0, 10)),
     supabase.from('surf_classes').select('id, status').eq('status', 'scheduled'),
     supabase.from('orders').select('id, total, status')
@@ -34,9 +34,10 @@ export async function fetchStats() {
   const upcomingCamps = camps.data?.length || 0;
   const scheduledClasses = classes.data?.length || 0;
 
+  // Solo cuenta lo realmente cobrado: total si está pagado entero, señal si solo hay señal
   const revenue = (bookings.data || [])
     .filter(b => ['deposit_paid', 'fully_paid'].includes(b.status))
-    .reduce((sum, b) => sum + Number(b.total_amount || 0), 0);
+    .reduce((sum, b) => sum + Number((b.status === 'fully_paid' ? b.total_amount : b.deposit_amount) || 0), 0);
 
   const orderRevenue = (orders.data || [])
     .filter(o => ['paid', 'shipped', 'delivered'].includes(o.status))
