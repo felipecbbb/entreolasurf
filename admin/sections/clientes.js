@@ -1277,7 +1277,7 @@ export async function renderClientes(container) {
 
         if (amount > 0) {
           await createPayment({
-            reservation_type: 'enrollment',
+            reservation_type: 'bono',
             reference_id: bono.id,
             amount,
             payment_method: method,
@@ -1385,7 +1385,7 @@ export async function renderClientes(container) {
 
         if (amount > 0 && bonoCreated?.id) {
           await createPayment({
-            reservation_type: 'enrollment',
+            reservation_type: 'bono',
             reference_id: bonoCreated.id,
             amount,
             payment_method: method,
@@ -2198,17 +2198,14 @@ export async function renderClientes(container) {
             .eq('id', bonoId);
           if (error) throw error;
 
-          // Also create payment record linked to first enrollment using this bono (if any)
-          const linkedEnrollment = enrollments.find(en => en.bono_id === bonoId);
-          if (linkedEnrollment) {
-            await createPayment({
-              reservation_type: 'enrollment',
-              reference_id: linkedEnrollment.id,
-              amount,
-              payment_method: method,
-              concept: `Pago bono ${TYPE_LABELS[bono?.class_type] || ''} (${bono?.total_credits} clases)`,
-            });
-          }
+          // Pago del bono: referenciado al bono (no a un enrollment), tipo 'bono'
+          await createPayment({
+            reservation_type: 'bono',
+            reference_id: bonoId,
+            amount,
+            payment_method: method,
+            concept: `Pago bono ${TYPE_LABELS[bono?.class_type] || ''} (${bono?.total_credits} clases)`,
+          });
 
           // If fully paid now, update enrollment statuses
           if (newTotalPaid >= (bono?.expectedPrice || 0)) {

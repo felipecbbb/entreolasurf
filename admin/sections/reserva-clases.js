@@ -124,11 +124,16 @@ export async function renderReservaClases(container) {
       (data || []).forEach(e => { refName[e.id] = e.family_members?.full_name || e.profiles?.full_name || '—'; });
     }
 
-    const totalBonoRevenue = bonos.reduce((s, b) => s + Number(b.total_paid || 0), 0);
+    // KPIs disjuntos desde la tabla payments (única verdad): los ingresos de
+    // bono (tipo 'bono') y los pagos de clase sueltos (tipo 'enrollment') no
+    // se solapan, así el mismo cobro no cuenta en dos tarjetas.
+    const bonoPayments = payments.filter(p => p.reservation_type === 'bono');
+    const enrollmentPayments = payments.filter(p => p.reservation_type === 'enrollment');
+    const totalBonoRevenue = bonoPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
     const activeBonos = bonos.filter(b => b.status === 'active').length;
     const totalCredits = bonos.reduce((s, b) => s + (b.total_credits || 0), 0);
     const usedCredits = bonos.reduce((s, b) => s + (b.used_credits || 0), 0);
-    const classPaymentTotal = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const classPaymentTotal = enrollmentPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
 
     const bonoFilterOptions = Object.entries(BONO_STATUSES).map(([val, label]) =>
       `<option value="${val}" ${bonoFilter === val ? 'selected' : ''}>${label}</option>`
@@ -154,7 +159,7 @@ export async function renderReservaClases(container) {
         <div class="admin-stat-card">
           <p class="admin-stat-label">Pagos clases</p>
           <p class="admin-stat-value">${formatCurrency(classPaymentTotal)}</p>
-          <p class="admin-stat-sub">${payments.length} pagos</p>
+          <p class="admin-stat-sub">${enrollmentPayments.length} pagos</p>
         </div>
       </div>
 

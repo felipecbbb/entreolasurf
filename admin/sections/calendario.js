@@ -3701,7 +3701,7 @@ export async function renderCalendario(container) {
 
           // Create payment record
           await createPayment({
-            reservation_type: 'enrollment',
+            reservation_type: 'bono',
             reference_id: bonoId,
             amount,
             payment_method: method,
@@ -3839,7 +3839,7 @@ export async function renderCalendario(container) {
 
           if (amount > 0) {
             await createPayment({
-              reservation_type: 'enrollment',
+              reservation_type: 'bono',
               reference_id: bonoId,
               amount,
               payment_method: method,
