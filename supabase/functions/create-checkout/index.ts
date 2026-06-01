@@ -55,6 +55,44 @@ Deno.serve(async (req) => {
         it.price = Number(p.price); // precio real
       }
     }
+
+    // Packs de clase: el importe cobrado es el ANTICIPO (activities.deposit por tipo)
+    const classItems = items.filter((i: any) => i.type === "class_reservation");
+    if (classItems.length) {
+      const { data: acts } = await supabase.from("activities").select("type_key, deposit");
+      const depByType: Record<string, number> = {};
+      (acts || []).forEach((a: any) => { depByType[a.type_key] = Number(a.deposit); });
+      for (const it of classItems) {
+        const dep = depByType[it.metadata?.classType];
+        if (dep == null || Number.isNaN(dep)) {
+          return new Response(JSON.stringify({ error: `Actividad no disponible: ${it.name}` }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        it.price = dep; // anticipo real, ignora el del cliente
+      }
+    }
+
+    // Surf camps: el importe cobrado es la señal (surf_camps.deposit)
+    const campItems = items.filter((i: any) => i.type === "camp_reservation");
+    if (campItems.length) {
+      const campId = (i: any) => i.metadata?.campId || (i.id || "").replace("camp-", "");
+      const ids = [...new Set(campItems.map(campId).filter(Boolean))];
+      const { data: camps } = await supabase.from("surf_camps").select("id, deposit")
+        .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+      const depById: Record<string, number> = {};
+      (camps || []).forEach((c: any) => { depById[c.id] = Number(c.deposit); });
+      for (const it of campItems) {
+        const dep = depById[campId(it)];
+        if (dep == null || Number.isNaN(dep)) {
+          return new Response(JSON.stringify({ error: `Surf camp no disponible: ${it.name}` }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        it.price = dep; // señal real
+      }
+    }
+
     // Sanidad general: precio no negativo y cantidad razonable
     for (const it of items) {
       if (!(Number(it.price) >= 0)) {
