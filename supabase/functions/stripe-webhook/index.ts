@@ -305,16 +305,21 @@ Deno.serve(async (req) => {
       for (const rental of rentals) {
         if (rental.metadata) {
           const rentalTotal = rental.price * (rental.quantity || 1);
-          const { data: rentalRow } = await supabase.from("equipment_reservations").insert({
+          const today = new Date().toISOString().slice(0, 10);
+          const { data: rentalRow, error: rentalErr } = await supabase.from("equipment_reservations").insert({
             user_id: userId,
-            equipment_type: rental.metadata.equipmentType || rental.name,
-            date_start: rental.metadata.dateStart || new Date().toISOString().slice(0, 10),
-            date_end: rental.metadata.dateEnd || new Date().toISOString().slice(0, 10),
+            equipment_id: rental.metadata.equipmentId || null,
+            size: rental.metadata.size || null,
+            duration_key: rental.metadata.duration || null,
+            quantity: rental.quantity || 1,
+            date_start: rental.metadata.dateStart || today,
+            date_end: rental.metadata.dateEnd || today,
             total_amount: rentalTotal,
             deposit_paid: rentalTotal,
             status: "confirmed",
             notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}`,
           }).select("id").single();
+          if (rentalErr) console.error("rental reservation insert error:", rentalErr.message);
           if (rentalRow?.id) {
             paymentRows.push({
               ...paymentsBase,

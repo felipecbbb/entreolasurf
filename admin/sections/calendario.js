@@ -5619,6 +5619,49 @@ export async function renderCalendario(container) {
     const createdAt = r.created_at ? new Date(r.created_at).toLocaleString('es-ES') : '—';
     let rdActiveTab = 'resumen';
     let payments = null; // lazy loaded
+    let unitChoices = null; // unidades candidatas para asignar (lazy)
+
+    function unitRentalSize(u) {
+      if (u.category === 'tabla' && u.pies != null) {
+        const t = Math.trunc(u.pies);
+        return `${t}'${Math.round((u.pies - t) * 10)}`;
+      }
+      return u.talla || null;
+    }
+
+    async function loadUnits() {
+      try {
+        if (!r.equipment_id) { unitChoices = []; renderRdPanel(); return; }
+        const { data } = await supabase.from('inventory_units')
+          .select('id,number,talla,pies,category,descripcion,marca,estado,equipment_id')
+          .eq('equipment_id', r.equipment_id);
+        unitChoices = (data || []).filter(u =>
+          (u.estado === 'disponible' || u.id === r.assigned_unit_id) &&
+          (!r.size || unitRentalSize(u) === r.size || u.id === r.assigned_unit_id)
+        );
+        renderRdPanel();
+      } catch (err) { console.warn('loadUnits:', err); unitChoices = []; }
+    }
+
+    function renderUnitAssign() {
+      if (!r.equipment_id) {
+        return `<p style="margin:0;font-size:.85rem;color:var(--color-muted)">Esta reserva no está vinculada a un material del catálogo, no se puede asignar unidad.</p>`;
+      }
+      if (unitChoices === null) {
+        loadUnits();
+        return `<p style="margin:0;font-size:.85rem;color:var(--color-muted)">Cargando unidades…</p>`;
+      }
+      const opts = [`<option value="">— Sin asignar —</option>`].concat(
+        unitChoices.map(u => {
+          const sz = unitRentalSize(u);
+          const desc = [u.number ? `Nº ${u.number}` : null, sz, u.marca, u.descripcion].filter(Boolean).join(' · ');
+          const tag = u.estado !== 'disponible' ? ` [${u.estado}]` : '';
+          return `<option value="${u.id}" ${r.assigned_unit_id === u.id ? 'selected' : ''}>${escapeHtml(desc)}${tag}</option>`;
+        })
+      ).join('');
+      const none = unitChoices.length === 0 ? `<p style="margin:6px 0 0;font-size:.8rem;color:#b45309">No hay unidades disponibles${r.size ? ` de la talla ${escapeHtml(r.size)}` : ''}.</p>` : '';
+      return `<select id="rd-unit-assign" class="rv-info-input" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:.9rem;font-family:inherit;cursor:pointer">${opts}</select>${none}`;
+    }
 
     // Remove any existing rental detail overlay
     document.getElementById('rental-detail-overlay')?.remove();
@@ -5693,6 +5736,10 @@ export async function renderCalendario(container) {
                 </div>
               </div>
             </div>
+          </div>
+          <div class="rv-info-card" style="padding:16px;margin-top:12px">
+            <div style="font-size:.72rem;text-transform:uppercase;color:var(--color-muted);font-weight:600;letter-spacing:.5px;margin-bottom:8px">Unidad física asignada</div>
+            ${renderUnitAssign()}
           </div>
           <div class="rv-person-card">
             <div class="rv-person-header">
@@ -6018,6 +6065,18 @@ export async function renderCalendario(container) {
             renderRdPanel();
           } catch (err) { showToast('Error: ' + err.message, 'error'); }
         });
+      });
+
+      // Asignar unidad física
+      overlay.querySelector('#rd-unit-assign')?.addEventListener('change', async (e) => {
+        const newUnit = e.target.value || null;
+        try {
+          await updateEquipmentReservation(r.id, { assigned_unit_id: newUnit });
+          r.assigned_unit_id = newUnit;
+          unitChoices = null; // recargar candidatas
+          showToast(newUnit ? 'Unidad asignada' : 'Unidad liberada', 'success');
+          renderRdPanel();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }
       });
 
       // Date change handlers

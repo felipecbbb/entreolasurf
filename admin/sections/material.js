@@ -136,6 +136,7 @@ export async function renderMaterial(container) {
   let invFilter = 'todos';       // filtro por estado
   let invSearch = '';            // búsqueda libre
   const invCache = {};           // unidades por categoría (evita refetch en búsqueda)
+  let catalogList = null;        // ítems de rental_equipment (para asignar unidad ↔ catálogo)
 
   function viewSwitcher(active) {
     return `
@@ -253,6 +254,7 @@ export async function renderMaterial(container) {
     selectedItem = null;
     let units;
     try {
+      if (!catalogList) catalogList = await fetchEquipment();
       if (!invCache[invCategory]) invCache[invCategory] = await fetchUnits(invCategory);
       units = invCache[invCategory];
     } catch (err) {
@@ -279,10 +281,13 @@ export async function renderMaterial(container) {
       `<button class="mat-estado-chip" data-estado="${e}" style="border:1px solid ${invFilter === e ? INV_ESTADOS[e].color : '#e2e8f0'};background:${invFilter === e ? INV_ESTADOS[e].bg : '#fff'};color:${INV_ESTADOS[e].color};border-radius:999px;padding:4px 12px;font-size:.8rem;font-weight:600;cursor:pointer">${INV_ESTADOS[e].label} ${counts[e]}</button>`
     ).join('');
 
-    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('');
+    const catName = {};
+    (catalogList || []).forEach(c => { catName[c.id] = c.name; });
+    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('') + '<th>Catálogo</th>';
     const rows = filtered.map(u => {
       const tds = cfg.cols.map(c => `<td>${c === 'number' ? `<strong>${esc(u[c])}</strong>` : esc(u[c]) || '—'}</td>`).join('');
-      return `<tr class="mat-unit-row" data-id="${u.id}" style="cursor:pointer">${tds}<td>${invEstadoBadge(u.estado)}</td></tr>`;
+      const cat = u.equipment_id ? esc(catName[u.equipment_id] || '—') : '<span style="color:#cbd5e1">sin asignar</span>';
+      return `<tr class="mat-unit-row" data-id="${u.id}" style="cursor:pointer">${tds}<td>${cat}</td><td>${invEstadoBadge(u.estado)}</td></tr>`;
     }).join('');
 
     container.innerHTML = `
@@ -317,7 +322,7 @@ export async function renderMaterial(container) {
           <div class="table-wrap">
             <table>
               <thead><tr>${headCells}<th>Estado</th></tr></thead>
-              <tbody>${rows || `<tr><td colspan="${cfg.cols.length + 1}" style="padding:30px;text-align:center;color:var(--color-muted,#888)">Sin resultados</td></tr>`}</tbody>
+              <tbody>${rows || `<tr><td colspan="${cfg.cols.length + 2}" style="padding:30px;text-align:center;color:var(--color-muted,#888)">Sin resultados</td></tr>`}</tbody>
             </table>
           </div>
         </div>
@@ -375,9 +380,20 @@ export async function renderMaterial(container) {
       return `<div class="act-form-field"><label class="act-form-label">${meta.label.toUpperCase()}</label>${input}</div>`;
     }).join('');
 
+    // Selector de catálogo (a qué ítem de alquiler web pertenece la unidad)
+    const catOptions = `<option value="">— Sin catálogo (no alquilable online) —</option>` +
+      (catalogList || []).map(c => `<option value="${c.id}" ${u.equipment_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+    const catalogField = `
+      <div class="act-form-field">
+        <label class="act-form-label">CATÁLOGO (ALQUILER WEB)</label>
+        <select class="act-form-input" id="inv-f-equipment_id" style="cursor:pointer">${catOptions}</select>
+        <small class="act-form-hint">Determina en qué producto de la web cuenta esta unidad para la disponibilidad.</small>
+      </div>`;
+
     openModal(isNew ? `Nueva unidad — ${cfg.label}` : `Unidad ${u.number || ''} — ${cfg.label}`, `
       <div class="act-form-card" style="box-shadow:none;padding:0">
         ${fieldsHTML}
+        ${catalogField}
       </div>
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;align-items:center">
         ${!isNew ? `<button class="btn line" id="inv-del" style="margin-right:auto;color:#b91c1c;border-color:#b91c1c">Eliminar</button>` : ''}
@@ -397,6 +413,8 @@ export async function renderMaterial(container) {
         if (f === 'pies') v = v === '' ? null : parseFloat(v);
         obj[f] = v === '' ? null : v;
       });
+      const eqEl = document.getElementById('inv-f-equipment_id');
+      obj.equipment_id = eqEl && eqEl.value ? eqEl.value : null;
       if (!obj.number) { showToast('El número es obligatorio', 'error'); return; }
       if (!obj.estado) obj.estado = 'disponible';
       if (u.id) obj.id = u.id;
