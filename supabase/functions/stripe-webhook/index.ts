@@ -261,17 +261,28 @@ Deno.serve(async (req) => {
             variant,
           });
           productsTotal += Number(prod.price || 0) * (prod.quantity || 1);
-          // Descontar stock (por talla si el producto las gestiona)
+          // Descontar stock de la variante comprada (color × talla).
           const qty = prod.quantity || 1;
           const sz = prod.metadata?.size || "";
+          const col = prod.metadata?.color || "";
           const { data: product } = await supabase
             .from("products").select("stock, sizes_stock").eq("id", productId).single();
           if (product) {
             let ss = Array.isArray(product.sizes_stock) ? product.sizes_stock : [];
-            if (sz && ss.length) {
-              ss = ss.map((s: any) => s.size === sz
-                ? { ...s, stock: Math.max((Number(s.stock) || 0) - qty, 0) }
-                : s);
+            if (ss.length) {
+              // Solo se consideran las dimensiones que el producto gestiona
+              const hasColor = ss.some((s: any) => s.color);
+              const hasSize = ss.some((s: any) => s.size);
+              let done = false;
+              ss = ss.map((s: any) => {
+                const sameColor = !hasColor || (s.color || "") === col;
+                const sameSize = !hasSize || (s.size || "") === sz;
+                if (!done && sameColor && sameSize) {
+                  done = true;
+                  return { ...s, stock: Math.max((Number(s.stock) || 0) - qty, 0) };
+                }
+                return s;
+              });
               const total = ss.reduce((a: number, s: any) => a + (Number(s.stock) || 0), 0);
               await supabase.from("products").update({ sizes_stock: ss, stock: total }).eq("id", productId);
             } else if (product.stock !== null) {

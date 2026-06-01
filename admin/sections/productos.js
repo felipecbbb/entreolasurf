@@ -1,7 +1,7 @@
 /* ============================================================
    Productos Section — CRUD de productos de la tienda
-   Editor a página completa: subida de fotos, variantes con
-   stock independiente, colores y galería.
+   Editor a página completa: subida de fotos (con compresión),
+   variantes color×talla con stock independiente, galería.
    ============================================================ */
 import { fetchProducts, upsertProduct, deleteProduct, uploadProductImage } from '../modules/api.js';
 import { renderTable, statusBadge, formatCurrency, showToast } from '../modules/ui.js';
@@ -14,9 +14,32 @@ const STATUSES = [
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const csv = (s) => String(s || '').split(',').map(x => x.trim()).filter(Boolean);
+const uniq = (arr) => [...new Set(arr.filter(Boolean))];
 const slugify = (s) => String(s || '').toLowerCase().trim()
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+// Redimensiona/comprime una imagen en el cliente antes de subirla.
+// Las fotos de móvil pesan varios MB y hacen que la subida parezca colgada.
+async function resizeImage(file, maxDim = 1600, quality = 0.85) {
+  if (!file.type?.startsWith('image/') || file.type === 'image/gif') return file;
+  let bitmap;
+  try { bitmap = await createImageBitmap(file); } catch { return file; }
+  let { width, height } = bitmap;
+  const max = Math.max(width, height);
+  if (max > maxDim) {
+    const scale = maxDim / max;
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+  const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+  if (!blob) return file;
+  return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+}
 
 export async function renderProductos(container) {
 
@@ -86,14 +109,19 @@ export async function renderProductos(container) {
   function renderEditor(product = null) {
     const isEdit = !!product;
 
+    const rawVariants = (Array.isArray(product?.sizes_stock) ? product.sizes_stock : [])
+      .map(s => ({ color: s.color || '', size: s.size || '', stock: Number(s.stock) || 0 }));
+
     // Estado en memoria de los campos compuestos
     const state = {
       image_url: product?.image_url || '',
       gallery: csv(product?.gallery),
-      colors: csv(product?.colors),
-      variants: (Array.isArray(product?.sizes_stock) ? product.sizes_stock : [])
-        .map(s => ({ size: s.size || '', stock: Number(s.stock) || 0 })),
+      variants: rawVariants,
     };
+
+    // Paleta de colores/tallas para el generador (de las variantes o de los CSV legacy)
+    const genColorsInit = uniq([...rawVariants.map(v => v.color), ...csv(product?.colors)]);
+    const genSizesInit = uniq([...rawVariants.map(v => v.size), ...csv(product?.sizes)]);
 
     const statusOptions = STATUSES.map(s =>
       `<option value="${s.v}" ${product?.status === s.v ? 'selected' : ''}>${s.l}</option>`
@@ -127,6 +155,7 @@ export async function renderProductos(container) {
               <h3 class="prod-card-title">Galería</h3>
               <div class="prod-gallery-grid" id="gallery-grid"></div>
               <button type="button" class="btn ghost prod-add-gallery" id="add-gallery-btn">+ Añadir fotos</button>
+              <div class="prod-drop-loading prod-gallery-loading" id="gallery-loading" hidden><span class="prod-spinner"></span></div>
               <input type="file" accept="image/*" id="gallery-file" multiple hidden>
             </section>
           </div>
@@ -166,22 +195,29 @@ export async function renderProductos(container) {
             </section>
 
             <section class="prod-card">
-              <h3 class="prod-card-title">Colores</h3>
-              <div class="prod-chips" id="colors-chips"></div>
-              <input type="text" class="prod-chip-input" id="color-input" placeholder="Escribe un color y pulsa Enter">
-            </section>
-
-            <section class="prod-card">
               <div class="prod-card-title-row">
                 <h3 class="prod-card-title">Variantes y stock</h3>
                 <span class="prod-stock-total" id="stock-total"></span>
               </div>
-              <p class="prod-hint">Cada talla/tipo lleva su stock independiente. Si no añades variantes, se usa el stock general de abajo.</p>
-              <div class="prod-var-head">
-                <span>Talla / tipo</span><span>Stock</span><span></span>
+              <p class="prod-hint">Indica colores y/o tallas y pulsa <strong>Generar</strong>: se crea cada combinación con su propio stock (p. ej. 5 negras y 4 blancas). Si no añades variantes, se usa el stock general.</p>
+
+              <div class="prod-var-gen">
+                <div class="prod-field">
+                  <label>Colores (separados por comas)</label>
+                  <input type="text" id="gen-colors" value="${esc(genColorsInit.join(', '))}" placeholder="Negro, Blanco">
+                </div>
+                <div class="prod-field">
+                  <label>Tallas / tipos (separados por comas)</label>
+                  <input type="text" id="gen-sizes" value="${esc(genSizesInit.join(', '))}" placeholder="S, M, L  ·  4 años, 6 años">
+                </div>
+                <button type="button" class="btn line" id="gen-btn">Generar combinaciones</button>
+              </div>
+
+              <div class="prod-var-head" id="var-head" hidden>
+                <span>Color</span><span>Talla / tipo</span><span>Stock</span><span></span>
               </div>
               <div id="variants-wrap"></div>
-              <button type="button" class="btn ghost prod-add-var" id="add-variant-btn">+ Añadir variante</button>
+              <button type="button" class="btn ghost prod-add-var" id="add-variant-btn">+ Añadir variante manual</button>
 
               <div class="prod-field prod-simple-stock" id="simple-stock-field">
                 <label>Stock general (sin variantes)</label>
@@ -208,11 +244,16 @@ export async function renderProductos(container) {
     slugInput.addEventListener('input', () => { slugTouched = true; });
     nameInput.addEventListener('input', () => { if (!slugTouched) slugInput.value = slugify(nameInput.value); });
 
-    // ---- Subida de imagen (helper) ----
+    // ---- Subida de imagen (comprime → sube, con timeout) ----
     async function uploadFile(file, loadingEl) {
       if (loadingEl) loadingEl.hidden = false;
       try {
-        return await uploadProductImage(file, currentSlug());
+        const resized = await resizeImage(file);
+        const url = await Promise.race([
+          uploadProductImage(resized, currentSlug()),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('La subida tardó demasiado. Revisa tu conexión e inténtalo de nuevo.')), 60000)),
+        ]);
+        return url;
       } catch (err) {
         showToast('Error al subir la imagen: ' + err.message, 'error');
         return null;
@@ -237,22 +278,24 @@ export async function renderProductos(container) {
       mainPlaceholder.hidden = has;
       mainRemove.hidden = !has;
     }
-    mainDrop.addEventListener('click', (e) => { if (!e.target.closest('#main-remove')) mainFile.click(); });
-    mainFile.addEventListener('change', async () => {
-      const file = mainFile.files[0]; mainFile.value = '';
+    async function handleMainFile(file) {
       if (!file) return;
+      // Preview instantáneo mientras sube
+      const localUrl = URL.createObjectURL(file);
+      state.image_url = localUrl; paintMain();
       const url = await uploadFile(file, mainLoading);
-      if (url) { state.image_url = url; paintMain(); }
-    });
+      URL.revokeObjectURL(localUrl);
+      state.image_url = url || ''; paintMain();
+    }
+    mainDrop.addEventListener('click', (e) => { if (!e.target.closest('#main-remove')) mainFile.click(); });
+    mainFile.addEventListener('change', () => { const f = mainFile.files[0]; mainFile.value = ''; handleMainFile(f); });
     mainRemove.addEventListener('click', () => { state.image_url = ''; paintMain(); });
-    setupDnd(mainDrop, async (files) => {
-      const url = await uploadFile(files[0], mainLoading);
-      if (url) { state.image_url = url; paintMain(); }
-    });
+    setupDnd(mainDrop, (files) => handleMainFile(files[0]));
 
     // ---- Galería ----
     const galleryGrid = container.querySelector('#gallery-grid');
     const galleryFile = container.querySelector('#gallery-file');
+    const galleryLoading = container.querySelector('#gallery-loading');
 
     function paintGallery() {
       galleryGrid.innerHTML = state.gallery.map((src, i) => `
@@ -267,78 +310,83 @@ export async function renderProductos(container) {
         });
       });
     }
+    async function handleGalleryFiles(files) {
+      for (const file of files) {
+        const url = await uploadFile(file, galleryLoading);
+        if (url) { state.gallery.push(url); paintGallery(); }
+      }
+    }
     container.querySelector('#add-gallery-btn').addEventListener('click', () => galleryFile.click());
-    galleryFile.addEventListener('change', async () => {
-      const files = [...galleryFile.files]; galleryFile.value = '';
-      for (const file of files) {
-        const url = await uploadFile(file);
-        if (url) { state.gallery.push(url); paintGallery(); }
-      }
-    });
-    setupDnd(galleryGrid.closest('.prod-card'), async (files) => {
-      for (const file of files) {
-        const url = await uploadFile(file);
-        if (url) { state.gallery.push(url); paintGallery(); }
-      }
-    });
+    galleryFile.addEventListener('change', () => { const fs = [...galleryFile.files]; galleryFile.value = ''; handleGalleryFiles(fs); });
+    setupDnd(galleryGrid.closest('.prod-card'), (files) => handleGalleryFiles(files));
     paintGallery();
     paintMain();
 
-    // ---- Colores (chips) ----
-    const colorsChips = container.querySelector('#colors-chips');
-    const colorInput = container.querySelector('#color-input');
-    function paintColors() {
-      colorsChips.innerHTML = state.colors.map((c, i) =>
-        `<span class="prod-chip">${esc(c)}<button type="button" data-ci="${i}">✕</button></span>`).join('');
-      colorsChips.querySelectorAll('[data-ci]').forEach(btn => {
-        btn.addEventListener('click', () => { state.colors.splice(Number(btn.dataset.ci), 1); paintColors(); });
-      });
-    }
-    function addColor() {
-      const v = colorInput.value.trim().replace(/,$/, '');
-      if (v && !state.colors.includes(v)) { state.colors.push(v); paintColors(); }
-      colorInput.value = '';
-    }
-    colorInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addColor(); }
-    });
-    colorInput.addEventListener('blur', addColor);
-    paintColors();
-
-    // ---- Variantes (talla + stock independiente) ----
+    // ---- Variantes (color × talla, stock independiente) ----
     const variantsWrap = container.querySelector('#variants-wrap');
+    const varHead = container.querySelector('#var-head');
     const stockTotalEl = container.querySelector('#stock-total');
     const simpleStockField = container.querySelector('#simple-stock-field');
+    const genColors = container.querySelector('#gen-colors');
+    const genSizes = container.querySelector('#gen-sizes');
 
-    function variantRow(size = '', stock = 0) {
+    function variantRow(color = '', size = '', stock = 0) {
       const row = document.createElement('div');
       row.className = 'prod-var-row';
       row.innerHTML = `
-        <input type="text" class="var-size" placeholder="ej: M, 8 años, Talla única" value="${esc(size)}">
+        <input type="text" class="var-color" placeholder="(sin color)" value="${esc(color)}">
+        <input type="text" class="var-size" placeholder="(sin talla)" value="${esc(size)}">
         <input type="number" class="var-stock" min="0" value="${esc(stock)}">
         <button type="button" class="prod-var-remove" title="Quitar">✕</button>`;
       row.querySelector('.prod-var-remove').addEventListener('click', () => { row.remove(); refreshVariantUI(); });
-      row.querySelector('.var-stock').addEventListener('input', refreshVariantUI);
-      row.querySelector('.var-size').addEventListener('input', refreshVariantUI);
+      row.querySelectorAll('input').forEach(inp => inp.addEventListener('input', refreshVariantUI));
       return row;
     }
+    function readRows() {
+      return [...variantsWrap.querySelectorAll('.prod-var-row')].map(r => ({
+        color: r.querySelector('.var-color').value.trim(),
+        size: r.querySelector('.var-size').value.trim(),
+        stock: Math.max(parseInt(r.querySelector('.var-stock').value, 10) || 0, 0),
+      }));
+    }
     function refreshVariantUI() {
-      const rows = [...variantsWrap.querySelectorAll('.prod-var-row')];
-      const hasVariants = rows.length > 0;
-      simpleStockField.style.display = hasVariants ? 'none' : '';
-      if (hasVariants) {
-        const total = rows.reduce((a, r) => a + (parseInt(r.querySelector('.var-stock').value, 10) || 0), 0);
+      const rows = variantsWrap.querySelectorAll('.prod-var-row');
+      const has = rows.length > 0;
+      simpleStockField.style.display = has ? 'none' : '';
+      varHead.hidden = !has;
+      if (has) {
+        const list = readRows();
+        const total = list.reduce((a, v) => a + v.stock, 0);
         stockTotalEl.textContent = `Total: ${total} uds · ${rows.length} variantes`;
       } else {
         stockTotalEl.textContent = '';
       }
     }
+    function generateCombos() {
+      const colors = csv(genColors.value);
+      const sizes = csv(genSizes.value);
+      const existing = readRows();
+      const stockOf = (color, size) => {
+        const m = existing.find(v => v.color === color && v.size === size);
+        return m ? m.stock : 0;
+      };
+      let combos = [];
+      if (colors.length && sizes.length) combos = colors.flatMap(c => sizes.map(s => [c, s]));
+      else if (colors.length) combos = colors.map(c => [c, '']);
+      else if (sizes.length) combos = sizes.map(s => ['', s]);
+      else { showToast('Escribe al menos un color o una talla', 'error'); return; }
+
+      variantsWrap.innerHTML = '';
+      combos.forEach(([c, s]) => variantsWrap.appendChild(variantRow(c, s, stockOf(c, s))));
+      refreshVariantUI();
+    }
+    container.querySelector('#gen-btn').addEventListener('click', generateCombos);
     container.querySelector('#add-variant-btn').addEventListener('click', () => {
       variantsWrap.appendChild(variantRow());
       refreshVariantUI();
-      variantsWrap.lastChild.querySelector('.var-size').focus();
+      variantsWrap.lastChild.querySelector('.var-color').focus();
     });
-    state.variants.forEach(v => variantsWrap.appendChild(variantRow(v.size, v.stock)));
+    state.variants.forEach(v => variantsWrap.appendChild(variantRow(v.color, v.size, v.stock)));
     refreshVariantUI();
 
     // ---- Navegación ----
@@ -352,20 +400,16 @@ export async function renderProductos(container) {
       const fd = new FormData(form);
       const obj = Object.fromEntries(fd);
 
-      // Variantes desde el DOM
-      const rows = [...variantsWrap.querySelectorAll('.prod-var-row')];
-      const sizesStock = rows
-        .map(r => ({
-          size: r.querySelector('.var-size').value.trim(),
-          stock: Math.max(parseInt(r.querySelector('.var-stock').value, 10) || 0, 0),
-        }))
-        .filter(s => s.size);
+      // Variantes desde el DOM: al menos color o talla
+      const variants = readRows().filter(v => v.color || v.size);
 
-      obj.sizes_stock = sizesStock;
-      if (sizesStock.length) {
-        obj.sizes = sizesStock.map(s => s.size).join(', ');
-        obj.stock = sizesStock.reduce((a, s) => a + s.stock, 0);
+      obj.sizes_stock = variants.map(v => ({ color: v.color, size: v.size, stock: v.stock }));
+      if (variants.length) {
+        obj.colors = uniq(variants.map(v => v.color)).join(', ') || null;
+        obj.sizes = uniq(variants.map(v => v.size)).join(', ') || null;
+        obj.stock = variants.reduce((a, v) => a + v.stock, 0);
       } else {
+        obj.colors = null;
         obj.sizes = null;
         obj.stock = Math.max(parseInt(obj.stock, 10) || 0, 0);
       }
@@ -374,7 +418,6 @@ export async function renderProductos(container) {
       obj.price = Number(obj.price) || 0;
       obj.image_url = state.image_url || null;
       obj.gallery = state.gallery.length ? state.gallery.join(', ') : null;
-      obj.colors = state.colors.length ? state.colors.join(', ') : null;
       if (!obj.description) obj.description = null;
       if (!obj.category) obj.category = null;
       if (isEdit) obj.id = product.id;

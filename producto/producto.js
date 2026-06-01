@@ -6,6 +6,7 @@ import { addItem, updateCartPill } from '/lib/cart.js';
 import { openCartDrawer } from '/lib/cart-drawer.js';
 
 function csv(s) { return (s || '').split(',').map(x => x.trim()).filter(Boolean); }
+function uniq(arr) { return [...new Set(arr.filter(Boolean))]; }
 
 function showToast(msg) {
   let toast = document.querySelector('.cart-toast');
@@ -39,17 +40,42 @@ async function loadProduct(slug, id) {
 function render(product) {
   const root = document.getElementById('pdp-root');
 
-  const sizeStock = Array.isArray(product.sizes_stock) ? product.sizes_stock : [];
-  const hasSizes = sizeStock.length > 0;
-  const totalSizeStock = sizeStock.reduce((a, s) => a + (Number(s.stock) || 0), 0);
-  const isOutOfStock = hasSizes ? totalSizeStock <= 0 : (product.stock !== null && product.stock <= 0);
+  // Variantes: cada una con color y/o talla y su propio stock
+  const variants = (Array.isArray(product.sizes_stock) ? product.sizes_stock : [])
+    .map(v => ({ color: (v.color || '').trim(), size: (v.size || '').trim(), stock: Number(v.stock) || 0 }));
+  const hasVariants = variants.length > 0;
+  const hasColorVariants = variants.some(v => v.color);
+  const hasSizeVariants = variants.some(v => v.size);
+
+  // Colores: del nuevo modelo (con stock) o del CSV legacy (sin stock por color)
+  const colors = hasColorVariants ? uniq(variants.map(v => v.color)) : csv(product.colors);
+  const sizes = hasSizeVariants ? uniq(variants.map(v => v.size)) : [];
+  const hasSizes = sizes.length > 0;
+
+  const colorStock = (color) => variants.filter(v => v.color === color).reduce((a, v) => a + v.stock, 0);
+  function stockFor(color, size) {
+    if (!hasVariants) return product.stock ?? 0;
+    let list = variants;
+    if (hasColorVariants) list = list.filter(v => v.color === color);
+    if (hasSizeVariants) list = list.filter(v => v.size === size);
+    return list.reduce((a, v) => a + v.stock, 0);
+  }
+  function sizeOptionsHtml(color) {
+    return `<option value="">Elige tu talla</option>` + sizes.map(s => {
+      const left = stockFor(color, s);
+      const out = left <= 0;
+      return `<option value="${s}" data-stock="${left}"${out ? ' disabled' : ''}>${s}${out ? ' — agotado' : ''}</option>`;
+    }).join('');
+  }
+
+  const totalStock = hasVariants ? variants.reduce((a, v) => a + v.stock, 0) : (product.stock ?? 0);
+  const isOutOfStock = totalStock <= 0;
 
   const gallery = csv(product.gallery);
   const images = product.image_url
     ? [product.image_url, ...gallery.filter(g => g !== product.image_url)]
     : gallery;
   const mainImg = images[0] || '';
-  const colors = csv(product.colors);
 
   document.title = `${product.name} | Entre Olas`;
 
@@ -58,18 +84,19 @@ function render(product) {
         `<button type="button" class="pdp-thumb${i === 0 ? ' active' : ''}" data-src="${src}"><img src="${src}" alt="" loading="lazy"></button>`).join('')}</div>`
     : '';
 
+  const firstColor = colors[0] || '';
   const colorHtml = colors.length
     ? `<div class="pdp-variant"><span class="pdp-variant-label">Color</span>
-        <div class="pdp-colors">${colors.map((c, i) => `<button type="button" class="pdp-color${i === 0 ? ' active' : ''}" data-color="${c}">${c}</button>`).join('')}</div>
+        <div class="pdp-colors">${colors.map((c, i) => {
+          const out = hasColorVariants && colorStock(c) <= 0;
+          return `<button type="button" class="pdp-color${i === 0 ? ' active' : ''}" data-color="${c}"${out ? ' disabled' : ''}>${c}${out ? ' · agotado' : ''}</button>`;
+        }).join('')}</div>
       </div>`
     : '';
 
   const sizeHtml = hasSizes
     ? `<div class="pdp-variant"><span class="pdp-variant-label">Talla</span>
-        <select class="pdp-size"><option value="">Elige tu talla</option>${sizeStock.map(s => {
-          const out = (Number(s.stock) || 0) <= 0;
-          return `<option value="${s.size}" data-stock="${Number(s.stock) || 0}"${out ? ' disabled' : ''}>${s.size}${out ? ' — agotado' : ''}</option>`;
-        }).join('')}</select>
+        <select class="pdp-size">${sizeOptionsHtml(firstColor)}</select>
       </div>`
     : '';
 
@@ -113,16 +140,23 @@ function render(product) {
     });
   });
 
-  // ---- Color ----
+  // ---- Color ---- (al cambiar de color, refresca el stock por talla)
   root.querySelectorAll('.pdp-color').forEach(btn => {
     btn.addEventListener('click', () => {
+      if (btn.disabled) return;
       root.querySelectorAll('.pdp-color').forEach(c => c.classList.remove('active'));
       btn.classList.add('active');
+      const sel = root.querySelector('.pdp-size');
+      if (sel) sel.innerHTML = sizeOptionsHtml(btn.dataset.color);
     });
   });
 
   // ---- Añadir / Comprar ----
   function buildItem() {
+    const color = colors.length ? (root.querySelector('.pdp-color.active')?.dataset.color || colors[0]) : '';
+    if (colors.length && !color) { showToast('Elige un color'); return null; }
+    if (hasColorVariants && colorStock(color) <= 0) { showToast('Ese color está agotado'); return null; }
+
     const sizeSel = root.querySelector('.pdp-size');
     const size = hasSizes ? (sizeSel?.value || '') : '';
     if (hasSizes && !size) {
@@ -130,11 +164,8 @@ function render(product) {
       if (sizeSel) { sizeSel.classList.add('pdp-size--error'); sizeSel.focus(); setTimeout(() => sizeSel.classList.remove('pdp-size--error'), 1500); }
       return null;
     }
-    if (hasSizes) {
-      const left = Number(sizeSel?.selectedOptions?.[0]?.dataset.stock || 0);
-      if (left <= 0) { showToast('Esa talla está agotada'); return null; }
-    }
-    const color = colors.length ? (root.querySelector('.pdp-color.active')?.dataset.color || colors[0]) : '';
+    if (hasVariants && stockFor(color, size) <= 0) { showToast('Esa combinación está agotada'); return null; }
+
     const variantParts = [color, size && `Talla ${size}`].filter(Boolean);
     const displayName = variantParts.length ? `${product.name} · ${variantParts.join(' · ')}` : product.name;
     const variantId = [product.slug || product.id, color, size].filter(Boolean).join('-').toLowerCase().replace(/\s+/g, '-');
