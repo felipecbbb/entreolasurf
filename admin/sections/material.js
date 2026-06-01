@@ -81,6 +81,29 @@ async function deleteUnit(id) {
   if (error) throw error;
 }
 
+function unitRentalSize(u) {
+  if (u.category === 'tabla' && u.pies != null) {
+    const t = Math.trunc(u.pies);
+    return `${t}'${Math.round((u.pies - t) * 10)}`;
+  }
+  return u.talla || '—';
+}
+
+// Stock real de un ítem de catálogo a partir de sus unidades de inventario.
+// { sizes: {talla:{disponible,total}}, totalDisp, totalOwned, count }
+async function fetchUnitStockFor(equipmentId) {
+  const { data } = await supabase.from('inventory_units')
+    .select('estado, talla, pies, category').eq('equipment_id', equipmentId);
+  const sizes = {}; let totalDisp = 0, totalOwned = 0;
+  (data || []).forEach(u => {
+    const sz = unitRentalSize(u);
+    if (!sizes[sz]) sizes[sz] = { disponible: 0, total: 0 };
+    if (u.estado !== 'baja') { sizes[sz].total++; totalOwned++; }
+    if (u.estado === 'disponible') { sizes[sz].disponible++; totalDisp++; }
+  });
+  return { sizes, totalDisp, totalOwned, count: (data || []).length };
+}
+
 const INV_CATEGORIES = {
   neopreno: { label: 'Neoprenos', cols: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion'], fields: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion', 'estado', 'notes'] },
   licra:    { label: 'Licras',    cols: ['number', 'talla', 'genero', 'descripcion'],                  fields: ['number', 'talla', 'genero', 'descripcion', 'estado', 'notes'] },
@@ -460,10 +483,17 @@ export async function renderMaterial(container) {
       ]},
     ];
 
+    // Stock real desde el inventario por unidad (cacheado en el item)
+    if (item.id && item._unitStock === undefined) {
+      try { item._unitStock = await fetchUnitStockFor(item.id); }
+      catch { item._unitStock = null; }
+    }
+    const hasUnits = !!(item._unitStock && item._unitStock.count > 0);
+
     let tabContent = '';
-    if (activeTab === 'descripcion') tabContent = renderDescripcionTab(item);
-    else if (activeTab === 'precios') tabContent = renderPreciosTab(item);
-    else if (activeTab === 'tallas') tabContent = renderTallasTab(item);
+    if (activeTab === 'descripcion') tabContent = renderDescripcionTab(item, hasUnits);
+    else if (activeTab === 'precios') tabContent = renderPreciosTab(item, hasUnits);
+    else if (activeTab === 'tallas') tabContent = renderTallasTab(item, hasUnits);
     else if (activeTab === 'reservas') tabContent = '<div class="act-form-card"><p style="color:var(--color-muted)">Cargando reservas…</p></div>';
 
     container.innerHTML = `
@@ -514,8 +544,9 @@ export async function renderMaterial(container) {
             ${!isNew ? `<div style="margin-top:16px">
               <div class="act-nav-group-label">STOCK</div>
               <p class="cli-detail-note" style="font-size:.95rem;font-weight:600;color:var(--color-navy)">
-                ${item.stock} unidades
+                ${hasUnits ? `${item._unitStock.totalDisp} disponibles / ${item._unitStock.totalOwned}` : `${item.stock || 0} unidades`}
               </p>
+              ${hasUnits ? `<small style="color:var(--color-muted,#888)">Desde Inventario</small>` : ''}
             </div>` : ''}
           </aside>
         </div>
@@ -557,6 +588,14 @@ export async function renderMaterial(container) {
       }
     });
 
+    // Ir al inventario filtrado por la categoría de este material
+    container.querySelector('#mat-go-inventory')?.addEventListener('click', () => {
+      const slug = item.slug || '';
+      invCategory = slug === 'neopreno' ? 'neopreno' : slug === 'licra' ? 'licra' : 'tabla';
+      invFilter = 'todos'; invSearch = ''; view = 'inventario';
+      renderInventory();
+    });
+
     // Load async tabs
     if (activeTab === 'reservas' && item.id) loadReservasTab(item);
   }
@@ -595,7 +634,7 @@ export async function renderMaterial(container) {
       </div>`;
   }
 
-  function renderPreciosTab(item) {
+  function renderPreciosTab(item, hasUnits) {
     const pricing = item.pricing || {};
     // Standard durations (shown by default even if price is 0)
     const STANDARD = { '1h': '1 hora', '2h': '2 horas', '4h': '4 horas', '1d': '1 día', '1w': '1 semana', '2w': '2 semanas', '1m': '1 mes' };
@@ -603,6 +642,19 @@ export async function renderMaterial(container) {
     const allKeys = [...new Set([...Object.keys(STANDARD), ...Object.keys(pricing)])];
     // Only show keys that are in STANDARD or have a price > 0
     const activeKeys = allKeys.filter(k => k in STANDARD || (pricing[k] && pricing[k] > 0));
+
+    // Bloque de stock: real (desde inventario) o manual (ítems sin unidades)
+    const stockBlock = hasUnits
+      ? `<div class="act-form-field" style="flex:1">
+            <label class="act-form-label">STOCK</label>
+            <div style="font-size:1.1rem;font-weight:700;color:var(--color-navy,#0f172a)">${item._unitStock.totalDisp} disponibles <span style="font-weight:400;color:var(--color-muted,#888)">/ ${item._unitStock.totalOwned} en total</span></div>
+            <small class="act-form-hint">Se calcula automáticamente desde el Inventario por unidad. Gestiona las unidades en la pestaña «Tallas / Unidades».</small>
+          </div>`
+      : `<div class="act-form-field">
+            <label class="act-form-label">STOCK (unidades)</label>
+            <input type="number" class="act-form-input" id="mat-stock" value="${item.stock || 1}" min="0" />
+            <small class="act-form-hint">Este material no tiene inventario por unidad; el stock se gestiona aquí.</small>
+          </div>`;
 
     return `
       <h3 class="act-detail-section-title">Precios y stock</h3>
@@ -627,19 +679,44 @@ export async function renderMaterial(container) {
       <div class="act-form-card" style="margin-top:16px">
         <div class="cli-form-row">
           <div class="act-form-field">
-            <label class="act-form-label">DEPÓSITO ONLINE (€)</label>
+            <label class="act-form-label">DEPÓSITO / SEÑAL ONLINE (€)</label>
             <input type="number" class="act-form-input" id="mat-deposit" value="${item.deposit ?? 5}" step="0.01" min="0" />
-            <small class="act-form-hint">Se cobra online al reservar. El resto se paga al recoger el material.</small>
+            <small class="act-form-hint">Se cobra online al reservar. El resto se paga al recoger o desde la cuenta del cliente.</small>
           </div>
-          <div class="act-form-field">
-            <label class="act-form-label">STOCK (unidades)</label>
-            <input type="number" class="act-form-input" id="mat-stock" value="${item.stock || 1}" min="0" />
-          </div>
+          ${stockBlock}
         </div>
       </div>`;
   }
 
-  function renderTallasTab(item) {
+  function renderTallasTab(item, hasUnits) {
+    // Ítems con inventario por unidad: las tallas salen del inventario (no se editan a mano aquí)
+    if (hasUnits) {
+      const sizes = item._unitStock.sizes;
+      const keys = Object.keys(sizes).sort((a, b) => {
+        const na = parseFloat(a), nb = parseFloat(b);
+        if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+        return String(a).localeCompare(String(b), 'es');
+      });
+      return `
+        <h3 class="act-detail-section-title">Tallas / Unidades</h3>
+        <div class="act-form-card">
+          <small class="act-form-hint" style="margin-bottom:16px;display:block">Las tallas y el stock se calculan automáticamente desde las unidades del Inventario. El cliente verá solo las tallas con unidades disponibles.</small>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Talla</th><th>Disponibles</th><th>En total</th></tr></thead>
+              <tbody>
+                ${keys.map(k => `<tr>
+                  <td><strong>${esc(k)}</strong></td>
+                  <td>${sizes[k].disponible}</td>
+                  <td>${sizes[k].total}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          <button class="tar-add-tier-btn" id="mat-go-inventory" style="margin-top:14px">Gestionar unidades en Inventario →</button>
+        </div>`;
+    }
+
     const sizes = item.sizes || [];
     const isSized = item.type === 'con_talla';
 
@@ -649,7 +726,7 @@ export async function renderMaterial(container) {
         <div class="act-form-card">
           <div class="admin-empty" style="padding:30px">
             <p>Este material es de tipo <strong>Básico</strong> y no tiene variantes de talla.</p>
-            <p style="font-size:.85rem;margin-top:8px">Cambia el tipo a "Con talla" en la pestaña Descripción para gestionar tallas.</p>
+            <p style="font-size:.85rem;margin-top:8px">Cambia el tipo a "Con talla" en la pestaña Descripción, o asigna unidades de inventario a este material.</p>
           </div>
         </div>`;
     }
@@ -657,7 +734,7 @@ export async function renderMaterial(container) {
     return `
       <h3 class="act-detail-section-title">Tallas / Variantes</h3>
       <div class="act-form-card">
-        <small class="act-form-hint" style="margin-bottom:16px;display:block">Define las tallas o medidas disponibles para este material. El cliente elegirá una al reservar.</small>
+        <small class="act-form-hint" style="margin-bottom:16px;display:block">Este material no tiene inventario por unidad. Define las tallas manualmente; el cliente elegirá una al reservar.</small>
         <div id="mat-sizes-list" class="mat-sizes-list">
           ${sizes.map((s, i) => `
             <div class="mat-size-row" data-index="${i}">
@@ -751,10 +828,12 @@ export async function renderMaterial(container) {
       });
     }
 
-    // Sizes
+    // Sizes — solo si el ítem NO usa inventario por unidad (si lo usa, las tallas
+    // salen del inventario y no deben sobreescribirse desde aquí).
+    const usesUnits = !!(item._unitStock && item._unitStock.count > 0);
     const sizeInputs = container.querySelectorAll('.mat-size-input');
     let sizes = item.sizes || [];
-    if (sizeInputs.length || activeTab === 'tallas') {
+    if (!usesUnits && (sizeInputs.length || activeTab === 'tallas')) {
       sizes = Array.from(sizeInputs).map(i => i.value.trim()).filter(Boolean);
     }
 
