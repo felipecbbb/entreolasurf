@@ -34,3 +34,11 @@ DROP TRIGGER IF EXISTS trg_protect_profile_privileges ON public.profiles;
 CREATE TRIGGER trg_protect_profile_privileges
   BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.protect_profile_privileges();
+
+-- Hardening: las funciones que son SOLO triggers no deben llamarse vía /rpc
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM anon, authenticated, public;
+REVOKE EXECUTE ON FUNCTION public.update_bono_credits() FROM anon, authenticated, public;
+REVOKE EXECUTE ON FUNCTION public.update_enrolled_count() FROM anon, authenticated, public;
+REVOKE EXECUTE ON FUNCTION public.update_spots_on_booking() FROM anon, authenticated, public;
+REVOKE EXECUTE ON FUNCTION public.protect_profile_privileges() FROM anon, authenticated, public;
+REVOKE EXECUTE ON FUNCTION public.increment_coupon_usage(uuid) FROM anon, authenticated, public;
