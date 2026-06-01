@@ -105,9 +105,10 @@ async function fetchUnitStockFor(equipmentId) {
 }
 
 const INV_CATEGORIES = {
-  neopreno: { label: 'Neoprenos', cols: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion'], fields: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion', 'estado', 'notes'] },
-  licra:    { label: 'Licras',    cols: ['number', 'talla', 'genero', 'descripcion'],                  fields: ['number', 'talla', 'genero', 'descripcion', 'estado', 'notes'] },
-  tabla:    { label: 'Tablas',    cols: ['number', 'marca', 'pies', 'descripcion'],                    fields: ['number', 'marca', 'pies', 'descripcion', 'estado', 'notes'] },
+  neopreno:  { label: 'Neoprenos',  cols: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion'], fields: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion', 'estado', 'notes'] },
+  licra:     { label: 'Licras',     cols: ['number', 'talla', 'genero', 'descripcion'],                  fields: ['number', 'talla', 'genero', 'descripcion', 'estado', 'notes'] },
+  tabla:     { label: 'Tablas',     cols: ['number', 'marca', 'pies', 'descripcion'],                    fields: ['number', 'marca', 'pies', 'descripcion', 'estado', 'notes'] },
+  accesorio: { label: 'Accesorios', cols: ['number', 'marca', 'pies', 'descripcion'],                    fields: ['number', 'marca', 'pies', 'descripcion', 'estado', 'notes'], internal: true },
 };
 
 const INV_FIELDS = {
@@ -306,12 +307,16 @@ export async function renderMaterial(container) {
 
     const catName = {};
     (catalogList || []).forEach(c => { catName[c.id] = c.name; });
-    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('') + '<th>Catálogo</th>';
+    const showCat = !cfg.internal;   // accesorios: internos, sin catálogo web
+    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('') + (showCat ? '<th>Catálogo</th>' : '');
     const rows = filtered.map(u => {
       const tds = cfg.cols.map(c => `<td>${c === 'number' ? `<strong>${esc(u[c])}</strong>` : esc(u[c]) || '—'}</td>`).join('');
-      const cat = u.equipment_id ? esc(catName[u.equipment_id] || '—') : '<span style="color:#cbd5e1">sin asignar</span>';
-      return `<tr class="mat-unit-row" data-id="${u.id}" style="cursor:pointer">${tds}<td>${cat}</td><td>${invEstadoBadge(u.estado)}</td></tr>`;
+      const catCell = showCat
+        ? `<td>${u.equipment_id ? esc(catName[u.equipment_id] || '—') : '<span style="color:#cbd5e1">sin asignar</span>'}</td>`
+        : '';
+      return `<tr class="mat-unit-row" data-id="${u.id}" style="cursor:pointer">${tds}${catCell}<td>${invEstadoBadge(u.estado)}</td></tr>`;
     }).join('');
+    const colCount = cfg.cols.length + 1 + (showCat ? 1 : 0);
 
     container.innerHTML = `
       <div class="act-list-page">
@@ -345,7 +350,7 @@ export async function renderMaterial(container) {
           <div class="table-wrap">
             <table>
               <thead><tr>${headCells}<th>Estado</th></tr></thead>
-              <tbody>${rows || `<tr><td colspan="${cfg.cols.length + 2}" style="padding:30px;text-align:center;color:var(--color-muted,#888)">Sin resultados</td></tr>`}</tbody>
+              <tbody>${rows || `<tr><td colspan="${colCount}" style="padding:30px;text-align:center;color:var(--color-muted,#888)">Sin resultados</td></tr>`}</tbody>
             </table>
           </div>
         </div>
@@ -403,10 +408,11 @@ export async function renderMaterial(container) {
       return `<div class="act-form-field"><label class="act-form-label">${meta.label.toUpperCase()}</label>${input}</div>`;
     }).join('');
 
-    // Selector de catálogo (a qué ítem de alquiler web pertenece la unidad)
+    // Selector de catálogo (a qué ítem de alquiler web pertenece la unidad).
+    // Las categorías internas (accesorios) no se alquilan online → sin selector.
     const catOptions = `<option value="">— Sin catálogo (no alquilable online) —</option>` +
       (catalogList || []).map(c => `<option value="${c.id}" ${u.equipment_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
-    const catalogField = `
+    const catalogField = cfg.internal ? '' : `
       <div class="act-form-field">
         <label class="act-form-label">CATÁLOGO (ALQUILER WEB)</label>
         <select class="act-form-input" id="inv-f-equipment_id" style="cursor:pointer">${catOptions}</select>
