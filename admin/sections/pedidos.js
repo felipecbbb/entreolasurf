@@ -127,10 +127,28 @@ export async function renderPedidos(container) {
         </table>`
       : '<p style="color:var(--color-muted);margin-top:12px">No hay items en este pedido</p>';
 
+    const email = order.profiles?.email || order.guest_email || '—';
+    const phone = order.profiles?.phone || order.guest_phone || '—';
+    const customerNotes = (order.notes || '').split('|')[0].trim();
+
+    const invoiceHTML = order.wants_invoice
+      ? `<div class="ped-invoice-box">
+          <span class="ped-invoice-tag">🧾 Factura solicitada</span>
+          <div class="ped-invoice-row"><strong>Nombre / Razón social:</strong> ${order.invoice_name || '—'}</div>
+          <div class="ped-invoice-row"><strong>NIF / CIF:</strong> ${order.invoice_tax_id || '—'}</div>
+          <div class="ped-invoice-row"><strong>Dirección fiscal:</strong> ${order.invoice_address || order.shipping_address || '—'}</div>
+        </div>`
+      : '<p style="color:var(--color-muted);font-size:.85rem;margin:4px 0 0">El cliente no ha pedido factura.</p>';
+
     openModal('Detalle del Pedido', `
       <div class="trip-form">
         <label>Cliente</label>
-        <input type="text" value="${order.profiles?.full_name || '—'}" disabled />
+        <input type="text" value="${order.profiles?.full_name || order.guest_name || '—'}" disabled />
+
+        <div class="row-2" style="display:flex;gap:10px">
+          <div style="flex:1"><label>Email</label><input type="text" value="${email}" disabled /></div>
+          <div style="flex:1"><label>Teléfono</label><input type="text" value="${phone}" disabled /></div>
+        </div>
 
         <label>Estado</label>
         <div style="margin-bottom:8px">${statusBadge(order.status)}</div>
@@ -141,7 +159,10 @@ export async function renderPedidos(container) {
         <label>Dirección de envío</label>
         <input type="text" value="${order.shipping_address || '—'}" disabled />
 
-        ${order.notes ? `<label>Notas</label><textarea disabled>${order.notes}</textarea>` : ''}
+        <label>Factura</label>
+        ${invoiceHTML}
+
+        ${customerNotes ? `<label style="margin-top:12px">Notas del cliente</label><textarea disabled>${customerNotes}</textarea>` : ''}
       </div>
 
       <h3 style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;color:var(--color-navy);margin-top:20px">Items del pedido</h3>
@@ -173,27 +194,27 @@ export async function renderPedidos(container) {
       const newStatus = document.getElementById('modal-order-status').value;
       try {
         await updateOrderStatus(order.id, newStatus);
-        // Fire-and-forget email notification
-        if (newStatus === 'cancelled' || newStatus === 'shipped') {
-          const emailTo = order.profiles?.email;
-          if (emailTo) {
-            try {
-              supabase.functions.invoke('send-email', {
-                body: {
-                  to: emailTo,
-                  type: newStatus === 'cancelled' ? 'order_cancelled' : 'order_shipped',
-                  data: {
-                    customerName: order.profiles?.full_name,
-                    orderId: order.id,
-                    total: order.total,
-                  },
+        // Notificación al cliente por email según el nuevo estado
+        const EMAIL_TYPE = { cancelled: 'order_cancelled', shipped: 'order_shipped', delivered: 'order_delivered' };
+        const emailType = EMAIL_TYPE[newStatus];
+        const emailTo = order.profiles?.email || order.guest_email;
+        if (emailType && emailTo) {
+          try {
+            supabase.functions.invoke('send-email', {
+              body: {
+                to: emailTo,
+                type: emailType,
+                data: {
+                  customerName: order.profiles?.full_name || order.guest_name,
+                  orderId: order.id,
+                  total: order.total,
                 },
-              });
-            } catch {}
-          }
+              },
+            });
+          } catch {}
         }
         closeModal();
-        showToast('Estado actualizado', 'success');
+        showToast(emailType ? 'Estado actualizado · cliente avisado por email' : 'Estado actualizado', 'success');
         render();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');

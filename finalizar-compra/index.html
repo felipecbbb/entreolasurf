@@ -17,13 +17,26 @@
           <form id="co-form" class="checkout-form">
             <label>Nombre completo <input type="text" name="nombre" required></label>
             <label>Email <input type="email" name="email" required></label>
-            <label>Teléfono <input type="tel" name="telefono"></label>
-            <label>Dirección <input type="text" name="direccion"></label>
+            <label>Teléfono <input type="tel" name="telefono" required></label>
+
+            <p class="co-section-title">Dirección de envío</p>
+            <label>Dirección <input type="text" name="direccion" required></label>
             <div class="row-2">
-              <label>Ciudad <input type="text" name="ciudad"></label>
-              <label>Código postal <input type="text" name="cp"></label>
+              <label>Ciudad <input type="text" name="ciudad" required></label>
+              <label>Código postal <input type="text" name="cp" required></label>
             </div>
             <label>Notas del pedido <textarea name="notas" placeholder="Indicaciones especiales, tallas, etc."></textarea></label>
+
+            <label class="co-invoice-toggle">
+              <input type="checkbox" name="quiere_factura" id="co-invoice-check">
+              <span>Quiero factura</span>
+            </label>
+            <div id="co-invoice-fields" class="co-invoice-fields" hidden>
+              <label>Nombre o razón social <input type="text" name="factura_nombre"></label>
+              <label>NIF / CIF <input type="text" name="factura_nif"></label>
+              <label>Dirección fiscal <input type="text" name="factura_direccion" placeholder="Si es distinta a la de envío"></label>
+            </div>
+
             <button type="submit" class="btn red" style="width:100%;margin-top:8px">Pagar con tarjeta</button>
             <p style="text-align:center;font-size:.78rem;color:var(--color-muted);margin-top:8px">
               <svg style="vertical-align:middle;margin-right:4px" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>

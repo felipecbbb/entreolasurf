@@ -42,6 +42,10 @@ Deno.serve(async (req) => {
       total: 0,
       shipping_address: [customer?.address, customer?.city, customer?.postalCode].filter(Boolean).join(", ") || null,
       notes: customer?.notes || null,
+      wants_invoice: !!customer?.wantsInvoice,
+      invoice_name: customer?.invoiceName || null,
+      invoice_tax_id: customer?.invoiceTaxId || null,
+      invoice_address: customer?.invoiceAddress || null,
     };
     const { data: order, error: orderErr } = await supabase
       .from("orders")

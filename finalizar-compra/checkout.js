@@ -185,6 +185,20 @@ async function init() {
 
   renderSummary();
 
+  // Factura: mostrar/ocultar datos fiscales y exigirlos si se marca
+  const invoiceCheck = document.getElementById('co-invoice-check');
+  const invoiceFields = document.getElementById('co-invoice-fields');
+  if (invoiceCheck && invoiceFields) {
+    invoiceCheck.addEventListener('change', () => {
+      const on = invoiceCheck.checked;
+      invoiceFields.hidden = !on;
+      const fNombre = invoiceFields.querySelector('[name="factura_nombre"]');
+      const fNif = invoiceFields.querySelector('[name="factura_nif"]');
+      if (fNombre) fNombre.required = on;
+      if (fNif) fNif.required = on;
+    });
+  }
+
   // Pre-fill form
   if (profile) {
     const f = document.getElementById('co-form');
@@ -231,6 +245,10 @@ async function init() {
             city: f.ciudad?.value,
             postalCode: f.cp?.value,
             notes: f.notas?.value,
+            wantsInvoice: !!f.quiere_factura?.checked,
+            invoiceName: f.factura_nombre?.value || null,
+            invoiceTaxId: f.factura_nif?.value || null,
+            invoiceAddress: f.factura_direccion?.value || null,
           },
           couponCode: appliedCoupon?.code || null,
         },

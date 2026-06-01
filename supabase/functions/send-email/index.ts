@@ -223,6 +223,16 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
       ].join(""), false),
     };
 
+    case "order_delivered": return {
+      subject: `Pedido entregado #${ref}`,
+      html: emailWrap(logoDefault(), [
+        heading(`Tu pedido ha llegado!`),
+        sub(`${name ? name + ", tu" : "Tu"} pedido ya ha sido entregado. Esperamos que lo disfrutes!`),
+        refTag(d.orderId),
+        sandBox("¿Algún problema con tu pedido? Escríbenos a entreolasurf@gmail.com y te ayudamos."),
+      ].join(""), false),
+    };
+
     case "camp_cancelled": return {
       subject: `Reserva Surf Camp cancelada #${ref}`,
       html: emailWrap(logoCamp(), [
