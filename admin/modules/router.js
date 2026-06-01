@@ -8,7 +8,7 @@ const routes = {};
 let contentEl = null;
 let titleEl = null;
 
-const sectionTitles = {
+export const sectionTitles = {
   dashboard: 'Dashboard',
   estadisticas: 'Estadísticas',
   reservas: 'Reservas Camps',
@@ -24,19 +24,32 @@ const sectionTitles = {
   equipo: 'Equipo',
 };
 
-// Secciones restringidas: solo role='admin' puede acceder
+// Secciones restringidas: solo role='admin' puede acceder (nunca un encargado)
 const ADMIN_ONLY_SECTIONS = new Set(['estadisticas', 'cupones', 'equipo']);
+
+// Secciones que se le pueden conceder a un encargado (todas menos las admin-only)
+export const GRANTABLE_SECTIONS = Object.keys(sectionTitles).filter(s => !ADMIN_ONLY_SECTIONS.has(s));
 
 function currentRole() {
   return getProfile()?.role || null;
 }
 
-// Oculta del sidebar los items cuyo data-roles no incluye el rol actual
+// ¿Puede el usuario actual ver esta sección?
+function isSectionAllowed(hash) {
+  if (currentRole() === 'admin') return true;
+  // encargado: nunca las admin-only
+  if (ADMIN_ONLY_SECTIONS.has(hash)) return false;
+  if (hash === 'dashboard') return true; // siempre tiene su landing
+  const allowed = getProfile()?.allowed_sections;
+  // null/sin definir = todas las operativas (comportamiento por defecto)
+  if (!Array.isArray(allowed)) return true;
+  return allowed.includes(hash);
+}
+
+// Muestra/oculta los items del sidebar según el acceso del usuario
 export function applyRolePermissions() {
-  const role = currentRole();
-  document.querySelectorAll('a.admin-nav-item[data-roles]').forEach(a => {
-    const allowed = a.dataset.roles.split(',').map(s => s.trim());
-    a.style.display = allowed.includes(role) ? '' : 'none';
+  document.querySelectorAll('a.admin-nav-item[data-section]').forEach(a => {
+    a.style.display = isSectionAllowed(a.dataset.section) ? '' : 'none';
   });
 }
 
@@ -60,8 +73,8 @@ export async function navigate() {
 
   let hash = (location.hash || '#dashboard').replace('#', '');
 
-  // Bloqueo por rol: encargado intentando entrar a sección admin-only
-  if (ADMIN_ONLY_SECTIONS.has(hash) && currentRole() !== 'admin') {
+  // Bloqueo de acceso: sección admin-only o no concedida al encargado
+  if (!isSectionAllowed(hash)) {
     showToast('Sin permisos para esa sección', 'error');
     location.hash = '#dashboard';
     return; // hashchange disparará navigate() de nuevo con #dashboard

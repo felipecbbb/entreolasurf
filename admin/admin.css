@@ -8477,3 +8477,26 @@ a.admin-nav-item-external .nav-icon svg {
   .ncl-fam-row { grid-template-columns: 1fr 1fr; }
   .ncl-fam-remove { grid-column: 2; justify-self: end; }
 }
+
+/* ---- Equipo: modal de encargado + permisos ---- */
+.admin-modal-dialog:has(#eq-form), .admin-modal-dialog:has(#eq-perms-form) { max-width: 640px; }
+.eq-form { display: flex; flex-direction: column; gap: 16px; }
+.eq-card { background: var(--color-bg); border: 1px solid var(--color-line); border-radius: 14px; padding: 16px 18px; }
+.eq-card .ns-field { margin-bottom: 12px; }
+.eq-card-title {
+  font-family: 'Space Grotesk', sans-serif; font-size: .78rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--color-navy); margin: 0 0 12px;
+}
+.eq-card-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.eq-card-title-row .eq-card-title { margin: 0; }
+.eq-card-hint { font-size: .72rem; color: var(--color-muted); margin: 0 0 12px; line-height: 1.5; }
+.eq-perm-actions { font-size: .75rem; white-space: nowrap; }
+.eq-perm-actions a { color: var(--color-navy); text-decoration: underline; cursor: pointer; }
+.eq-perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+.eq-perm {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--color-line);
+  border-radius: 9px; font-size: .88rem; color: var(--color-navy); cursor: pointer; transition: border-color .15s, background .15s;
+}
+.eq-perm:has(input:checked) { border-color: var(--color-navy); background: var(--color-sand); }
+.eq-perm input { width: auto; margin: 0; accent-color: var(--color-navy); }
+@media (max-width: 520px) { .eq-perm-grid { grid-template-columns: 1fr; } }
