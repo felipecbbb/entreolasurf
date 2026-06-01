@@ -2755,9 +2755,13 @@ export async function renderCalendario(container) {
     const now = res.createdAt;
     const dateStr = `${DAY_NAMES_FULL[now.getDay()].toLowerCase()}, ${now.getDate()} de ${MONTH_NAMES[now.getMonth()].toLowerCase().replace('.', '')} de ${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const shortId = res.id.slice(0, 24);
-    let statusLabel = res.status === 'paid' ? 'Pagado' : res.status === 'partial' ? 'Pago parcial' : res.pending > 0 ? 'Pendiente' : 'Confirmado';
-    let statusColor = res.status === 'paid' ? '#166534' : res.status === 'partial' ? '#d97706' : res.pending > 0 ? '#b91c1c' : '#0ea5e9';
-    const pendingColor = res.pending > 0 ? '#b91c1c' : '#166534';
+    let statusLabel, statusColor, pendingColor;
+    function recomputeStatusVars() {
+      statusLabel = res.status === 'paid' ? 'Pagado' : res.status === 'partial' ? 'Pago parcial' : res.pending > 0 ? 'Pendiente' : 'Confirmado';
+      statusColor = res.status === 'paid' ? '#166534' : res.status === 'partial' ? '#d97706' : res.pending > 0 ? '#b91c1c' : '#0ea5e9';
+      pendingColor = res.pending > 0 ? '#b91c1c' : '#166534';
+    }
+    recomputeStatusVars();
     let activeTab = 'resumen';
 
     // Async loaded data
@@ -2780,6 +2784,7 @@ export async function renderCalendario(container) {
     }
 
     function renderDetail() {
+      recomputeStatusVars(); // refresca badge/colores tras cambios de pago
       // Build persons + sessions table
       let personsHtml = '';
       res.persons.forEach(p => {
@@ -3362,10 +3367,17 @@ export async function renderCalendario(container) {
             await deletePayment(paymentId);
             await syncBonoPaid();          // si era pago de bono, recalcula su total_paid
             await reloadResPayments();     // refresca histórico + pendiente + estado
-            if (!res.linkedBonoId) await updateEnrollmentStatus(res.id, res.status).catch(() => {});
+            if (res.linkedBonoId) {
+              // Coherencia: las inscripciones del bono siguen el estado de pago del bono
+              await supabase.from('class_enrollments').update({ status: res.status })
+                .eq('bono_id', res.linkedBonoId).neq('status', 'cancelled');
+            } else {
+              await updateEnrollmentStatus(res.id, res.status).catch(() => {});
+            }
 
             showToast('Pago eliminado', 'success');
             renderDetail();
+            render(); // refresca el color del grid del calendario
           } catch (err) {
             showToast('Error al eliminar: ' + err.message, 'error');
             btn.disabled = false;
@@ -3727,26 +3739,40 @@ export async function renderCalendario(container) {
 
         const effectiveMethod = creditUsed >= amount ? 'saldo' : (method || 'saldo');
 
-        // Persist payment to DB
+        // Si la inscripción va con bono, el pago se registra en el BONO (no en
+        // la inscripción) para no duplicar el ingreso ni dejar el bono sin saldar.
+        const isBono = !!res.linkedBonoId;
         const savedPayment = await createPayment({
-          reservation_type: 'enrollment',
-          reference_id: res.id,
+          reservation_type: isBono ? 'bono' : 'enrollment',
+          reference_id: isBono ? res.linkedBonoId : res.id,
           amount,
           payment_method: effectiveMethod,
-          concept: `Pago reserva ${res.activityLabel || ''}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}`,
+          concept: `Pago ${isBono ? 'bono' : 'reserva'} ${res.activityLabel || ''}${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ saldo)` : ''}`.trim(),
         });
 
-        res.pending = Math.max(0, res.pending - amount);
+        res.pending = Math.max(0, Math.round((res.pending - amount) * 100) / 100);
         res.payments.push({ ...savedPayment, method: effectiveMethod, creditUsed, date: savedPayment.payment_date || new Date().toISOString() });
 
-        // Update enrollment status based on payment state
-        const newStatus = res.pending <= 0 ? 'paid' : 'partial';
-        res.status = newStatus;
-        await updateEnrollmentStatus(res.id, newStatus).catch(() => {});
+        if (isBono) {
+          // total_paid del bono = suma de sus pagos; si queda saldado, sus
+          // inscripciones pasan a 'paid' (el color del calendario sale del bono)
+          const bp = await fetchPayments('bono', res.linkedBonoId);
+          const sum = bp.reduce((s, p) => s + Number(p.amount || 0), 0);
+          await supabase.from('bonos').update({ total_paid: sum, updated_at: new Date().toISOString() }).eq('id', res.linkedBonoId);
+          if (res.pending <= 0) {
+            await supabase.from('class_enrollments').update({ status: 'paid' })
+              .eq('bono_id', res.linkedBonoId).in('status', ['confirmed', 'partial']);
+          }
+        } else {
+          const newStatus = res.pending <= 0 ? 'paid' : 'partial';
+          res.status = newStatus;
+          await updateEnrollmentStatus(res.id, newStatus).catch(() => {});
+        }
 
         modal.remove();
         showToast(`Pago de ${amount.toFixed(2)}€ registrado${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ de saldo)` : ` (${effectiveMethod})`}`, 'success');
-        renderDetail(); // renderDetail() already calls bindDetailEvents()
+        renderDetail();
+        render(); // refresca el grid del calendario (color de pago)
       });
     }
 
