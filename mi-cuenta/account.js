@@ -65,8 +65,12 @@ function renderAuth() {
             <!-- Step 1: Personal data -->
             <form id="register-step1" class="auth-form">
               <div class="auth-field">
-                <label for="reg-name">Nombre completo *</label>
-                <input type="text" id="reg-name" name="fullname" placeholder="Tu nombre completo" required>
+                <label for="reg-name">Nombre *</label>
+                <input type="text" id="reg-name" name="fullname" placeholder="Tu nombre" required>
+              </div>
+              <div class="auth-field">
+                <label for="reg-lastname">Apellidos</label>
+                <input type="text" id="reg-lastname" name="last_name" placeholder="Tus apellidos">
               </div>
               <div class="auth-field">
                 <label for="reg-phone">Teléfono *</label>
@@ -78,7 +82,11 @@ function renderAuth() {
               </div>
               <div class="auth-field">
                 <label for="reg-address">Dirección</label>
-                <input type="text" id="reg-address" name="address" placeholder="Calle, número, ciudad">
+                <input type="text" id="reg-address" name="address" placeholder="Calle, número">
+              </div>
+              <div class="auth-field">
+                <label for="reg-city">Ciudad</label>
+                <input type="text" id="reg-city" name="city" placeholder="Conil de la Frontera">
               </div>
               <div class="auth-field">
                 <label for="reg-postal">Código postal</label>
@@ -233,9 +241,11 @@ function renderAuth() {
 
     regStep1Data = {
       fullname: e.target.fullname.value.trim(),
+      last_name: e.target.last_name?.value?.trim() || null,
       phone: e.target.phone.value.trim(),
       birth_date: e.target.birth_date.value || null,
       address: e.target.address?.value?.trim() || null,
+      city: e.target.city?.value?.trim() || null,
       postal_code: e.target.postal_code?.value?.trim() || null,
       level: e.target.level.value,
       wetsuit_size: e.target.wetsuit_size.value || null,
@@ -271,23 +281,23 @@ function renderAuth() {
 
     btn.disabled = true; btn.textContent = 'Creando cuenta…';
     try {
-      const result = await signUp(email, pass, regStep1Data.fullname);
+      // Todos los datos viajan en el metadata → el trigger handle_new_user
+      // los guarda en el perfil al crear la cuenta (no depende de la sesión).
+      const result = await signUp(email, pass, regStep1Data.fullname, {
+        last_name: regStep1Data.last_name,
+        phone: regStep1Data.phone,
+        birth_date: regStep1Data.birth_date,
+        address: regStep1Data.address,
+        city: regStep1Data.city,
+        postal_code: regStep1Data.postal_code,
+        level: regStep1Data.level,
+        wetsuit_size: regStep1Data.wetsuit_size,
+        can_swim: regStep1Data.can_swim,
+        has_injury: regStep1Data.has_injury,
+        injury_detail: regStep1Data.injury_detail,
+        terms_accepted: true,
+      });
       if (result?.session || result?.user) {
-        // Save profile data from step 1
-        const now = new Date().toISOString();
-        await updateProfile({
-          phone: regStep1Data.phone,
-          birth_date: regStep1Data.birth_date || null,
-          address: regStep1Data.address,
-          postal_code: regStep1Data.postal_code,
-          level: regStep1Data.level,
-          wetsuit_size: regStep1Data.wetsuit_size,
-          can_swim: regStep1Data.can_swim,
-          has_injury: regStep1Data.has_injury,
-          injury_detail: regStep1Data.injury_detail,
-          terms_accepted_at: now,
-          waiver_accepted_at: now,
-        });
         renderDashboard();
       } else {
         errEl.style.color = '#1b5e20';
@@ -592,8 +602,16 @@ function renderDatos(session, profile) {
             <input type="text" id="pf-address" name="address" value="${esc(profile?.address || '')}" placeholder="Calle, número, ciudad" />
           </div>
           <div class="account-field">
+            <label for="pf-city">Ciudad</label>
+            <input type="text" id="pf-city" name="city" value="${esc(profile?.city || '')}" placeholder="Conil de la Frontera" />
+          </div>
+          <div class="account-field">
             <label for="pf-postal">Código postal</label>
             <input type="text" id="pf-postal" name="postal_code" value="${esc(profile?.postal_code || '')}" placeholder="11149" />
+          </div>
+          <div class="account-field">
+            <label for="pf-birthdate">Fecha de nacimiento</label>
+            <input type="date" id="pf-birthdate" name="birth_date" value="${esc(profile?.birth_date || '')}" />
           </div>
         </div>
       </div>
@@ -654,7 +672,9 @@ function renderDatos(session, profile) {
         last_name: e.target.last_name.value,
         phone: e.target.phone.value,
         address: e.target.address?.value || null,
+        city: e.target.city?.value || null,
         postal_code: e.target.postal_code?.value || null,
+        birth_date: e.target.birth_date?.value || null,
         level: e.target.level?.value || null,
         can_swim: e.target.can_swim.value === 'true' ? true : e.target.can_swim.value === 'false' ? false : null,
         has_injury: e.target.has_injury.value === 'true',
