@@ -2897,6 +2897,44 @@ export async function renderCalendario(container) {
           }
         }
 
+        // Bloque visible "Beneficiario + Titular" cuando la reserva es de un familiar (niño)
+        let beneficiarioHtml = '';
+        const _fmR = res.familyMember;
+        const _profR = res.profile;
+        if (_fmR) {
+          const _ageOf = (bd) => { if (!bd) return null; const t = new Date(), b = new Date(bd); let a = t.getFullYear() - b.getFullYear(); const m = t.getMonth() - b.getMonth(); if (m < 0 || (m === 0 && t.getDate() < b.getDate())) a--; return a; };
+          const _swim = (v) => v === true ? 'Sí' : v === false ? 'No' : 'Sin definir';
+          const age = _ageOf(_fmR.birth_date);
+          beneficiarioHtml = `
+            <div class="rv-info-card rv-who-card" style="margin-top:16px">
+              <h3>Quién asiste · Titular de la cuenta</h3>
+              <div class="rv-who-grid">
+                <div>
+                  <div class="rv-who-tag rv-who-tag-child">Beneficiario (familiar)</div>
+                  <div class="rv-who-name">${escapeHtml((_fmR.full_name || '') + ' ' + (_fmR.last_name || ''))}</div>
+                  <div class="rv-who-meta">
+                    ${age != null ? `<span>${age} años</span>` : ''}
+                    ${_fmR.birth_date ? `<span>${escapeHtml(_fmR.birth_date)}</span>` : ''}
+                    ${_fmR.level ? `<span>Nivel: ${escapeHtml(_fmR.level)}</span>` : ''}
+                    <span>Sabe nadar: ${_swim(_fmR.can_swim)}</span>
+                    <span>Lesión: ${_fmR.has_injury ? ('Sí' + (_fmR.injury_detail ? ' — ' + escapeHtml(_fmR.injury_detail) : '')) : 'No'}</span>
+                    ${_fmR.wetsuit_size ? `<span>Neopreno: ${escapeHtml(_fmR.wetsuit_size)}</span>` : ''}
+                  </div>
+                </div>
+                <div>
+                  <div class="rv-who-tag rv-who-tag-holder">Titular de la cuenta</div>
+                  <div class="rv-who-name">${escapeHtml(((_profR?.full_name) || res.contact.nombre || '') + ' ' + ((_profR?.last_name) || ''))}</div>
+                  <div class="rv-who-meta">
+                    ${(_profR?.email || res.contact.email) ? `<span>${escapeHtml(_profR?.email || res.contact.email)}</span>` : ''}
+                    ${(_profR?.phone || res.contact.telefono) ? `<span>${escapeHtml(_profR?.phone || res.contact.telefono)}</span>` : ''}
+                    ${_profR?.city ? `<span>${escapeHtml(_profR.city)}</span>` : ''}
+                  </div>
+                  <div class="rv-who-more">Pestaña <strong>Datos del comprador</strong> para todos los datos</div>
+                </div>
+              </div>
+            </div>`;
+        }
+
         tabContent = `
           <div class="rv-summary-header">
             <h2 class="rv-title">Resumen de la reserva <span class="rv-status-badge" style="background:${statusColor}15;color:${statusColor}">${statusLabel}</span></h2>
@@ -2947,6 +2985,7 @@ export async function renderCalendario(container) {
               </div>
             </div>
           </div>
+          ${beneficiarioHtml}
           ${bonosHtml}
           ${personsHtml}`;
       } else if (activeTab === 'datos_comprador') {

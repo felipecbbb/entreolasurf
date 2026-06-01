@@ -8491,3 +8491,17 @@ a.admin-nav-item-external .nav-icon svg {
 .eq-perm:has(input:checked) { border-color: var(--color-navy); background: var(--color-sand); }
 .eq-perm input { width: auto; margin: 0; accent-color: var(--color-navy); }
 @media (max-width: 520px) { .eq-perm-grid { grid-template-columns: 1fr; } }
+
+/* ---- Detalle reserva: Beneficiario + Titular en el resumen ---- */
+.rv-who-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 0 24px 18px; }
+.rv-who-tag {
+  font-family: 'Space Grotesk', sans-serif; font-size: .64rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; padding: 3px 8px; border-radius: 6px;
+  display: inline-block; margin-bottom: 6px;
+}
+.rv-who-tag-child { background: #e0f2fe; color: #0369a1; }
+.rv-who-tag-holder { background: var(--color-sand); color: var(--color-navy); }
+.rv-who-name { font-weight: 700; color: var(--color-navy); font-size: .95rem; margin-bottom: 4px; }
+.rv-who-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .82rem; color: var(--color-muted); }
+.rv-who-more { margin-top: 8px; font-size: .74rem; color: var(--color-muted); }
+@media (max-width: 640px) { .rv-who-grid { grid-template-columns: 1fr; } }
