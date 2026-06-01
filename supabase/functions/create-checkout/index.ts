@@ -93,11 +93,12 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Alquiler: la tarifa real es rental_equipment.pricing[duration]
+    // Alquiler: online se cobra la SEÑAL (rental_equipment.deposit); el resto se
+    // paga en la recogida o desde la cuenta del cliente. El total real es pricing[duration].
     const rentalItems = items.filter((i: any) => i.type === "rental" && i.metadata?.equipmentId);
     if (rentalItems.length) {
       const ids = [...new Set(rentalItems.map((i: any) => i.metadata.equipmentId))];
-      const { data: eqs } = await supabase.from("rental_equipment").select("id, pricing")
+      const { data: eqs } = await supabase.from("rental_equipment").select("id, pricing, deposit")
         .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
       const eqById: Record<string, any> = {};
       (eqs || []).forEach((e: any) => { eqById[e.id] = e; });
@@ -109,7 +110,32 @@ Deno.serve(async (req) => {
             status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        it.price = Number(real); // tarifa real por duración
+        const total = Number(real);
+        const deposit = Number(eq.deposit ?? 5);
+        it.metadata.totalAmount = total;             // total real (para el saldo pendiente)
+        it.price = Math.min(deposit, total);         // señal cobrada online
+      }
+    }
+
+    // Saldo pendiente de alquiler: el importe real es (total_amount - deposit_paid)
+    // de la reserva. Se revalida en servidor para que no se pueda manipular.
+    const rentalBalances = items.filter((i: any) => i.type === "rental_balance" && i.metadata?.reservationId);
+    if (rentalBalances.length) {
+      const ids = [...new Set(rentalBalances.map((i: any) => i.metadata.reservationId))];
+      const { data: rsv } = await supabase.from("equipment_reservations")
+        .select("id, total_amount, deposit_paid, status")
+        .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+      const byId: Record<string, any> = {};
+      (rsv || []).forEach((r: any) => { byId[r.id] = r; });
+      for (const it of rentalBalances) {
+        const r = byId[it.metadata.reservationId];
+        const pending = r ? Number(r.total_amount || 0) - Number(r.deposit_paid || 0) : 0;
+        if (!r || r.status === "cancelled" || pending <= 0) {
+          return new Response(JSON.stringify({ error: `Sin saldo pendiente: ${it.name}` }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        it.price = pending; // saldo real, ignora el del cliente
       }
     }
 
@@ -201,6 +227,7 @@ Deno.serve(async (req) => {
       let name = item.name;
       if (item.type === "class_reservation") name = `${item.name} (anticipo)`;
       else if (item.type === "camp_reservation") name = `${item.name} (señal)`;
+      else if (item.type === "rental" && Number(item.price) < Number(item.metadata?.totalAmount || item.price)) name = `${item.name} (señal)`;
 
       return {
         price_data: {

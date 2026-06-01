@@ -7,12 +7,16 @@ export async function renderPayments(panel) {
 
   panel.innerHTML = '<p style="color:var(--color-muted)">Cargando pagos…</p>';
 
-  const [paymentsRes, ordersRes, bookingsRes, profileRes, bonosRes] = await Promise.all([
+  const [paymentsRes, ordersRes, bookingsRes, profileRes, bonosRes, rentalsRes] = await Promise.all([
     supabase.rpc('get_user_payments', { p_user_id: user.id }),
     supabase.from('orders').select('*, order_items(id)').eq('user_id', user.id).order('created_at', { ascending: false }),
     supabase.from('bookings').select('*, surf_camps:camp_id(title)').eq('user_id', user.id).order('created_at', { ascending: false }),
     supabase.from('profiles').select('credit_balance').eq('id', user.id).single(),
     supabase.from('bonos').select('*, payments:payments(amount)').eq('user_id', user.id).eq('status', 'active'),
+    supabase.from('equipment_reservations')
+      .select('id, size, total_amount, deposit_paid, status, date_start, date_end, rental_equipment:equipment_id(name)')
+      .eq('user_id', user.id).not('status', 'in', '(cancelled,returned)')
+      .order('date_start', { ascending: false }),
   ]);
 
   const payments = paymentsRes.data || [];
@@ -20,6 +24,10 @@ export async function renderPayments(panel) {
   const bookings = bookingsRes.data || [];
   const creditBalance = Number(profileRes.data?.credit_balance || 0);
   const activeBonos = bonosRes.data || [];
+  // Alquileres con saldo pendiente (total - señal pagada)
+  const pendingRentals = (rentalsRes.data || [])
+    .map(r => ({ ...r, pending: Number(r.total_amount || 0) - Number(r.deposit_paid || 0) }))
+    .filter(r => r.pending > 0.01);
 
   // Identify which orders are pure product orders (not linked to bonos)
   const bonoOrderIds = new Set();
@@ -137,6 +145,23 @@ export async function renderPayments(panel) {
       </div>
     </div>`;
 
+  // Saldo pendiente de alquileres (pagable online de forma opcional)
+  if (pendingRentals.length) {
+    html += `
+      <div class="account-form-card" style="border:1px solid #ddd6fe;background:#faf5ff">
+        <h3 style="margin:0 0 4px;font-size:1rem;color:#6d28d9">Alquileres con saldo pendiente</h3>
+        <p style="margin:0 0 14px;font-size:.85rem;color:#7c3aed">Puedes pagar el resto aquí o en la escuela al recoger el material.</p>
+        ${pendingRentals.map(r => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid #ede9fe">
+            <div>
+              <strong style="font-size:.92rem">${r.rental_equipment?.name || 'Alquiler'}${r.size ? ` · Talla ${r.size}` : ''}</strong>
+              <div style="font-size:.8rem;color:var(--color-muted)">${formatDate(r.date_start)} → ${formatDate(r.date_end)} · Pagado ${formatPrice(r.deposit_paid)} de ${formatPrice(r.total_amount)}</div>
+            </div>
+            <button class="btn red rental-pay-balance" data-rid="${r.id}" data-amount="${r.pending}" data-label="${(r.rental_equipment?.name || 'Alquiler').replace(/"/g, '&quot;')}" style="white-space:nowrap">Pagar resto · ${formatPrice(r.pending)}</button>
+          </div>`).join('')}
+      </div>`;
+  }
+
   if (!timeline.length) {
     html += `<div class="account-form-card"><p style="color:var(--color-muted);margin:0">No tienes pagos registrados todavia.</p></div>`;
   } else {
@@ -171,4 +196,40 @@ export async function renderPayments(panel) {
   }
 
   panel.innerHTML = html;
+
+  // Pagar saldo pendiente de un alquiler (Stripe). El webhook suma a deposit_paid.
+  panel.querySelectorAll('.rental-pay-balance').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rid = btn.dataset.rid;
+      const amount = Number(btn.dataset.amount);
+      if (!rid || !(amount > 0)) return;
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = 'Redirigiendo…';
+      try {
+        const origin = window.location.origin;
+        const resp = await supabase.functions.invoke('create-checkout', {
+          body: {
+            items: [{
+              id: `rental-balance-${rid}`,
+              type: 'rental_balance',
+              name: `Saldo alquiler · ${btn.dataset.label || ''}`.trim(),
+              price: amount,
+              quantity: 1,
+              metadata: { reservationId: rid },
+            }],
+            customer: { email: user.email || '' },
+            successUrl: `${origin}/mi-cuenta/?pago=ok`,
+            cancelUrl: `${origin}/mi-cuenta/`,
+          },
+        });
+        if (resp.error || !resp.data?.url) throw new Error(resp.error?.message || 'No se pudo iniciar el pago');
+        window.location.href = resp.data.url;
+      } catch (err) {
+        alert('Error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+  });
 }

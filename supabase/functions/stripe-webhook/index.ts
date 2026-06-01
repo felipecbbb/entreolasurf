@@ -304,18 +304,20 @@ Deno.serve(async (req) => {
       const rentals = cart.filter((i: any) => i.type === "rental");
       for (const rental of rentals) {
         if (rental.metadata) {
-          const rentalTotal = rental.price * (rental.quantity || 1);
+          const qty = rental.quantity || 1;
+          const depositPaid = rental.price * qty;                                   // señal cobrada online
+          const totalAmount = Number(rental.metadata.totalAmount ?? rental.price) * qty; // total real del alquiler
           const today = new Date().toISOString().slice(0, 10);
           const { data: rentalRow, error: rentalErr } = await supabase.from("equipment_reservations").insert({
             user_id: userId,
             equipment_id: rental.metadata.equipmentId || null,
             size: rental.metadata.size || null,
             duration_key: rental.metadata.duration || null,
-            quantity: rental.quantity || 1,
+            quantity: qty,
             date_start: rental.metadata.dateStart || today,
             date_end: rental.metadata.dateEnd || today,
-            total_amount: rentalTotal,
-            deposit_paid: rentalTotal,
+            total_amount: totalAmount,
+            deposit_paid: depositPaid,
             status: "confirmed",
             notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}`,
           }).select("id").single();
@@ -323,12 +325,35 @@ Deno.serve(async (req) => {
           if (rentalRow?.id) {
             paymentRows.push({
               ...paymentsBase,
-              amount: rentalTotal,
+              amount: depositPaid,
               reservation_type: "rental",
               reference_id: rentalRow.id,
-              concept: `Alquiler ${rental.name || rental.metadata.equipmentType}`,
+              concept: `Alquiler ${rental.name || rental.metadata.item || ''}`.trim(),
             });
           }
+        }
+      }
+
+      // ---- Process RENTAL BALANCE payments (saldo pendiente pagado online) ----
+      const rentalBalances = cart.filter((i: any) => i.type === "rental_balance");
+      for (const rb of rentalBalances) {
+        const reservationId = rb.metadata?.reservationId;
+        const amt = Number(rb.price || 0) * (rb.quantity || 1);
+        if (!reservationId || amt <= 0) continue;
+        const { data: rsv } = await supabase.from("equipment_reservations")
+          .select("total_amount, deposit_paid").eq("id", reservationId).single();
+        if (rsv) {
+          const newPaid = Math.min(Number(rsv.total_amount || 0), Number(rsv.deposit_paid || 0) + amt);
+          await supabase.from("equipment_reservations")
+            .update({ deposit_paid: newPaid, updated_at: new Date().toISOString() })
+            .eq("id", reservationId);
+          paymentRows.push({
+            ...paymentsBase,
+            amount: amt,
+            reservation_type: "rental",
+            reference_id: reservationId,
+            concept: `Saldo alquiler`,
+          });
         }
       }
 
