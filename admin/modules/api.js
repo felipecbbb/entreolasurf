@@ -885,57 +885,22 @@ export async function updateOrderStatus(id, status) {
 }
 
 // ---- Profiles ----
-// Create a new client: signs them up via Auth (sends invite email), then updates profile
+// Crea un cliente vía la Edge Function create-client (service role): crea el
+// usuario, el perfil completo y sus familiares SIN tocar la sesión del admin
+// (antes usaba signUp y deslogueaba al admin al persistir la nueva sesión).
+// `fields` admite además un array `family` de familiares.
 export async function createClientFromAdmin(fields) {
-  const {
-    full_name, email, phone, last_name, birth_date, address, city, postal_code,
-    level, wetsuit_size, can_swim, has_injury, injury_detail,
-  } = fields || {};
-  if (!email) throw new Error('Email es obligatorio para crear un cliente');
-
-  // Generate a random secure password (user will reset via email)
-  const tempPassword = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
-
-  // Create auth user via signUp — todos los datos van en el metadata para que
-  // el trigger handle_new_user los persista en el perfil al crear la cuenta.
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password: tempPassword,
-    options: {
-      data: { full_name, last_name, phone, birth_date, address, city, postal_code, level, wetsuit_size, can_swim, has_injury, injury_detail },
-      emailRedirectTo: window.location.origin + '/mi-cuenta/',
-    }
-  });
-
-  if (authError) throw authError;
-  const userId = authData.user?.id;
-  if (!userId) throw new Error('No se pudo crear el usuario');
-
-  // Refuerzo: upsert del perfil con todos los datos (el admin tiene policy is_admin)
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .upsert({
-      id: userId,
-      full_name,
-      last_name: last_name || null,
-      phone: phone || null,
-      birth_date: birth_date || null,
-      address: address || null,
-      city: city || null,
-      postal_code: postal_code || null,
-      level: level || null,
-      wetsuit_size: wetsuit_size || null,
-      can_swim: typeof can_swim === 'boolean' ? can_swim : null,
-      has_injury: !!has_injury,
-      injury_detail: injury_detail || null,
-      role: 'client',
-      updated_at: new Date().toISOString(),
-    });
-
-  if (profileError) console.warn('Profile upsert warning:', profileError.message);
-
+  const f = fields || {};
+  if (!f.email) throw new Error('Email es obligatorio para crear un cliente');
+  const { data, error } = await supabase.functions.invoke('create-client', { body: f });
+  if (error) {
+    let serverMsg = null;
+    try { const b = await error.context?.json?.(); if (b?.error) serverMsg = b.error; } catch (_) { /* no JSON */ }
+    throw new Error(serverMsg || error.message || 'No se pudo crear el cliente');
+  }
+  if (data?.error) throw new Error(data.error);
   invalidateCache('profiles');
-  return { id: userId, full_name, email, phone };
+  return { id: data.user_id, full_name: f.full_name, email: f.email, family_created: data.family_created || 0 };
 }
 
 export const fetchProfiles = cached('profiles', 30000, async (search) => {

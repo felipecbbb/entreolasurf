@@ -579,11 +579,8 @@ export async function renderClientes(container) {
 
       submitBtn.disabled = true; submitBtn.textContent = 'Creando…';
       try {
-        const created = await createClientFromAdmin(clientObj);
-        let famCount = 0;
-        for (const f of familyRows) {
-          try { await createFamilyMemberAdmin(created.id, f); famCount++; } catch (err) { console.warn('familiar:', err.message); }
-        }
+        const created = await createClientFromAdmin({ ...clientObj, family: familyRows });
+        const famCount = created.family_created || 0;
         closeModal();
         showToast(famCount > 0 ? `Cliente creado · ${famCount} familiar(es) añadido(s)` : 'Cliente creado', 'success');
         renderList();
