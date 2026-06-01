@@ -473,6 +473,40 @@ export async function fetchPendingEnrollments() {
   }).filter(e => e.pending > 0);
 }
 
+// Pendiente de pago AGRUPADO POR CLIENTE: bonos sin saldar + clases sueltas
+// sin pagar. Devuelve { userId: { total, items: [{concept, pending}] } }.
+export async function fetchClientsPending() {
+  const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
+  const [bonosRes, enrRes] = await Promise.all([
+    supabase.from('bonos').select('id, user_id, class_type, total_credits, order_id, total_paid, status').eq('status', 'active'),
+    supabase.from('class_enrollments').select('id, user_id, status, surf_classes:class_id(title, type)')
+      .is('bono_id', null).in('status', ['confirmed', 'partial']),
+  ]);
+  const bonos = bonosRes.data || [];
+  const enr = enrRes.data || [];
+  const paidMap = await _paymentsSumBy('enrollment', enr.map(e => e.id));
+
+  const map = {};
+  const add = (uid, concept, pending) => {
+    if (!uid || pending <= 0) return;
+    (map[uid] || (map[uid] = { total: 0, items: [] }));
+    map[uid].items.push({ concept, pending });
+    map[uid].total = Math.round((map[uid].total + pending) * 100) / 100;
+  };
+  for (const b of bonos) {
+    if (!b.user_id) continue;
+    const expected = expectedBonoPrice(b.class_type, b.total_credits);
+    const paid = Number(b.total_paid || 0) || (b.order_id ? DEPOSIT_DEFAULT : 0);
+    add(b.user_id, `Bono ${TYPE_LBL[b.class_type] || b.class_type} · ${b.total_credits} clases`, Math.max(0, Math.round((expected - paid) * 100) / 100));
+  }
+  for (const e of enr) {
+    const total = expectedBonoPrice(e.surf_classes?.type, 1);
+    const paid = paidMap[e.id] || 0;
+    add(e.user_id, `Clase ${e.surf_classes?.title || TYPE_LBL[e.surf_classes?.type] || ''}`.trim(), Math.max(0, Math.round((total - paid) * 100) / 100));
+  }
+  return map;
+}
+
 // ---- Estadísticas (extended dashboard stats with enrollment-class type cross + user names) ----
 export async function fetchEstadisticas(dateFrom, dateTo) {
   const base = await fetchDashboardStats(dateFrom, dateTo);

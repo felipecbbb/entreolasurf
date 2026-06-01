@@ -1,7 +1,7 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus } from '../modules/api.js';
+import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, fetchClientsPending } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { PACK_PRICING, DEPOSIT } from '../modules/constants.js';
@@ -277,10 +277,17 @@ export async function renderClientes(container) {
       p._enrollments = allEnrollments.filter(e => e.user_id === p.id);
     }
 
+    // Para el filtro de pago pendiente, calcula cuánto y qué debe cada cliente
+    if (activeFilter === 'pending_pay') {
+      let pendingMap = {};
+      try { pendingMap = await fetchClientsPending(); } catch (err) { console.warn('pending map:', err.message); }
+      for (const p of profiles) p._pending = pendingMap[p.id] || null;
+    }
+
     // Apply filter
     let filtered = profiles;
     if (activeFilter === 'pending_pay') {
-      filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'confirmed' || e.status === 'pending'));
+      filtered = profiles.filter(p => p._pending && p._pending.total > 0);
     } else if (activeFilter === 'pending_assign') {
       filtered = profiles.filter(p => p._enrollments.some(e => !e.class_id));
     } else if (activeFilter === 'paid') {
@@ -340,6 +347,11 @@ export async function renderClientes(container) {
               </div>
             </div>
           </div>
+          ${activeFilter === 'pending_pay' && r._pending ? `
+            <div class="cli-pending-box">
+              <div class="cli-pending-head"><span>Pendiente de pago</span><strong>${formatCurrency(r._pending.total)}</strong></div>
+              ${r._pending.items.map(it => `<div class="cli-pending-item"><span>${esc(it.concept)}</span><span>${formatCurrency(it.pending)}</span></div>`).join('')}
+            </div>` : ''}
           ${familyHtml ? `<div class="cli-list-family">${familyHtml}</div>` : ''}
         </div>`;
       }).join('')}</div>`;

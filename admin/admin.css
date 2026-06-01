@@ -8410,3 +8410,23 @@ a.admin-nav-item-external .nav-icon svg {
 }
 .ped-invoice-row { font-size: .85rem; color: var(--color-navy); margin: 3px 0; }
 .ped-invoice-row strong { color: var(--color-muted); font-weight: 600; }
+
+/* ---- Clientes: desglose de pago pendiente en la tarjeta ---- */
+.cli-pending-box {
+  margin: 0 16px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.cli-pending-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: 'Space Grotesk', sans-serif; font-size: .7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; color: #b91c1c; margin-bottom: 6px;
+}
+.cli-pending-head strong { font-size: 1rem; }
+.cli-pending-item {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: .82rem; color: var(--color-navy); padding: 3px 0; border-top: 1px solid #fde2e2;
+}
+.cli-pending-item span:last-child { font-weight: 700; color: #b91c1c; white-space: nowrap; }
