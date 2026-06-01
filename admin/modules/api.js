@@ -848,6 +848,7 @@ export async function createClientFromAdmin({ full_name, email, phone }) {
 
   if (profileError) console.warn('Profile upsert warning:', profileError.message);
 
+  invalidateCache('profiles');
   return { id: userId, full_name, email, phone };
 }
 
@@ -1265,12 +1266,17 @@ export async function createPayment(payment) {
     .select()
     .single();
   if (error) throw error;
+  // Un pago afecta a estados/importes mostrados en reservas y pedidos
+  invalidateCache('bookings');
+  invalidateCache('orders');
   return data;
 }
 
 export async function deletePayment(id) {
   const { error } = await supabase.from('payments').delete().eq('id', id);
   if (error) throw error;
+  invalidateCache('bookings');
+  invalidateCache('orders');
 }
 
 // Edita solo método de pago y fecha (importe/canal/tipo no se tocan
