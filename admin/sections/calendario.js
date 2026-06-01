@@ -6034,6 +6034,21 @@ export async function renderCalendario(container) {
                 <span>Publicada (visible para clientes)</span>
               </label>
             </section>
+            <section class="ns-section">
+              <h3>Aplicar cambios a</h3>
+              <div class="ns-field">
+                <select name="apply_scope" id="es-apply-scope">
+                  <option value="this">Solo esta clase</option>
+                  <option value="type">Todas las clases programadas de este tipo</option>
+                  <option value="select">Elegir clases…</option>
+                </select>
+              </div>
+              <div class="ns-field" id="es-apply-list-wrap" style="display:none">
+                <label>Clases del mismo tipo</label>
+                <div id="es-apply-list" class="es-apply-list"><p style="font-size:.8rem;color:#94a3b8">Cargando…</p></div>
+                <p style="font-size:.72rem;color:#94a3b8;margin-top:6px">Se aplican los detalles (hora, instructor, capacidad, precio, público, publicada). La fecha de cada clase se mantiene.</p>
+              </div>
+            </section>
           </form>
         </div>
         <footer class="ns-footer">
@@ -6060,6 +6075,31 @@ export async function renderCalendario(container) {
     overlay.querySelector('#es-type').addEventListener('change', recomputeEnd);
     overlay.querySelector('#es-start').addEventListener('input', recomputeEnd);
 
+    // "Aplicar a": otras clases programadas (futuras) del mismo tipo
+    let applyCandidates = [];
+    let applyLoaded = false;
+    const applyScopeSel = overlay.querySelector('#es-apply-scope');
+    const applyListWrap = overlay.querySelector('#es-apply-list-wrap');
+    const applyListEl = overlay.querySelector('#es-apply-list');
+    async function loadApplyCandidates() {
+      if (applyLoaded) return;
+      applyLoaded = true;
+      const today = getDateStr(new Date());
+      const { data } = await supabase.from('surf_classes')
+        .select('id, date, time_start, type')
+        .eq('type', cls.type).eq('status', 'scheduled').gte('date', today).neq('id', cls.id)
+        .order('date', { ascending: true }).order('time_start', { ascending: true });
+      applyCandidates = data || [];
+      applyListEl.innerHTML = applyCandidates.length
+        ? applyCandidates.map(c => `<label class="es-apply-item"><input type="checkbox" class="es-apply-cb" value="${c.id}"><span>${formatDate(c.date)} · ${(c.time_start || '').slice(0, 5)}</span></label>`).join('')
+        : '<p style="font-size:.8rem;color:#94a3b8">No hay otras clases programadas de este tipo</p>';
+    }
+    applyScopeSel.addEventListener('change', async () => {
+      const v = applyScopeSel.value;
+      applyListWrap.style.display = v === 'select' ? '' : 'none';
+      if (v === 'select' || v === 'type') await loadApplyCandidates();
+    });
+
     overlay.querySelector('#edit-session-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
@@ -6074,6 +6114,10 @@ export async function renderCalendario(container) {
       if (!obj.instructor) obj.instructor = null;
       if (!obj.audience) obj.audience = null;
 
+      // Alcance del cambio (no es columna de la tabla → fuera del obj)
+      const applyScope = obj.apply_scope || 'this';
+      delete obj.apply_scope;
+
       // Detectar si cambia el horario o la fecha → notificar a inscritos
       const oldDate = cls.date;
       const oldTimeStart = cls.time_start?.slice(0, 5) || '';
@@ -6086,8 +6130,29 @@ export async function renderCalendario(container) {
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Guardando…'; }
       try {
         await upsertClass(obj);
+
+        // Propagar los detalles a otras clases del mismo tipo (la fecha de cada
+        // una se respeta; solo se aplican los campos de detalle).
+        let propagated = 0;
+        if (applyScope !== 'this') {
+          await loadApplyCandidates();
+          const targetIds = applyScope === 'type'
+            ? applyCandidates.map(c => c.id)
+            : [...overlay.querySelectorAll('.es-apply-cb:checked')].map(cb => cb.value);
+          const propagate = {
+            type: obj.type, time_start: obj.time_start, time_end: obj.time_end,
+            title: obj.title, max_students: Number(obj.max_students) || cls.max_students || 8,
+            price: Number(obj.price) || 0, audience: obj.audience, instructor: obj.instructor,
+            published: obj.published, updated_at: new Date().toISOString(),
+          };
+          for (const id of targetIds) {
+            const { error } = await supabase.from('surf_classes').update(propagate).eq('id', id);
+            if (!error) propagated++;
+          }
+        }
+
         closeEs();
-        let toastMsg = 'Sesión actualizada';
+        let toastMsg = propagated > 0 ? `Sesión actualizada · ${propagated} clases más aplicadas` : 'Sesión actualizada';
         if (scheduleChanged && (cls.enrolled_count || 0) > 0) {
           const r = await notifyEnrolledClients(cls.id, 'rescheduled', {
             className: TYPE_LABELS[obj.type] || obj.title || 'Clase',
