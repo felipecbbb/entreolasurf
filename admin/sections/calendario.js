@@ -12,7 +12,7 @@ import {
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
-import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING, DEPOSIT } from '../modules/constants.js';
+import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js';
 import { supabase } from '/lib/supabase.js';
 import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml } from '/lib/shared-constants.js';
 
@@ -386,7 +386,8 @@ export async function renderCalendario(container) {
       let isPaid, isPartial;
       if (e.bono) {
         const expected = getPackPrice(e.bono.class_type, e.bono.total_credits, 0);
-        const bonoPaid = Number(e.bono.total_paid || 0) || (e.bono.order_id ? (DEPOSIT[e.bono.class_type] || 15) : 0);
+        // total_paid se mantiene sincronizado con la suma de payments en todos los flujos
+        const bonoPaid = Number(e.bono.total_paid || 0);
         const fullyPaid = expected > 0 ? bonoPaid >= expected - 0.01 : bonoPaid > 0;
         isPaid = fullyPaid;
         isPartial = !fullyPaid && bonoPaid > 0;
@@ -1908,9 +1909,8 @@ export async function renderCalendario(container) {
               // Find bonos with available credits, enrich with expected price
               const allBonos = (bonos || []).filter(b => b.used_credits < b.total_credits).map(b => {
                 const expectedPrice = getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
-                // If total_paid is 0 but bono was bought online (has order_id), at least the deposit was paid
-                const deposit = DEPOSIT[b.class_type] || 15;
-                const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
+                // total_paid se mantiene sincronizado con la suma de payments (sin suponer importes)
+                const paid = Number(b.total_paid || 0);
                 const bPending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
                 return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: bPending, isFullyPaid: bPending <= 0 };
               });

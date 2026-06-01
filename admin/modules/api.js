@@ -393,7 +393,6 @@ const PACK_PRICING_LOCAL = {
   paddle:     [0, 49, 95, 135, 170, 205, 240],
   surfskate:  [0, 30, 55, 78, 95, 115, 130],
 };
-const DEPOSIT_DEFAULT = 15;
 
 function expectedBonoPrice(classType, credits) {
   if (!credits || credits <= 0) return 0;
@@ -446,14 +445,16 @@ export async function fetchPendingBonos() {
     .order('created_at', { ascending: false });
   const list = data || [];
   const userIds = [...new Set(list.map(b => b.user_id).filter(Boolean))];
-  const [profilesMap, pricing] = await Promise.all([_profilesById(userIds), getPackPricing()]);
+  const ids = list.map(b => b.id);
+  // Fuente de verdad del cobro: SUM(payments) del bono; total_paid solo como
+  // respaldo para bonos antiguos sin filas en payments. (Sin suponer importes.)
+  const [profilesMap, pricing, paidMap] = await Promise.all([_profilesById(userIds), getPackPricing(), _paymentsSumBy('bono', ids)]);
 
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
 
   return list.map(b => {
     const expected = expectedBonoPriceDB(pricing, b.class_type, b.total_credits);
-    const paidRaw  = Number(b.total_paid || 0);
-    const paid     = paidRaw > 0 ? paidRaw : (b.order_id ? DEPOSIT_DEFAULT : 0);
+    const paid     = Math.max(Number(paidMap[b.id] || 0), Number(b.total_paid || 0));
     const pending  = Math.max(0, Math.round((expected - paid) * 100) / 100);
     return {
       id: b.id,
@@ -509,14 +510,22 @@ export async function fetchPendingEnrollments() {
 // sin pagar. Devuelve { userId: { total, items: [{concept, pending}] } }.
 export async function fetchClientsPending() {
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
-  const [bonosRes, enrRes] = await Promise.all([
+  const [bonosRes, enrRes, rentRes] = await Promise.all([
     supabase.from('bonos').select('id, user_id, class_type, total_credits, order_id, total_paid, status').eq('status', 'active'),
     supabase.from('class_enrollments').select('id, user_id, status, surf_classes:class_id(title, type)')
       .is('bono_id', null).in('status', ['confirmed', 'partial']),
+    supabase.from('equipment_reservations')
+      .select('id, user_id, total_amount, deposit_paid, status, rental_equipment(name)')
+      .in('status', ['pending', 'confirmed', 'active']),
   ]);
   const bonos = bonosRes.data || [];
   const enr = enrRes.data || [];
-  const [paidMap, pricing] = await Promise.all([_paymentsSumBy('enrollment', enr.map(e => e.id)), getPackPricing()]);
+  const rentals = rentRes.data || [];
+  const [paidMap, bonoPaidMap, pricing] = await Promise.all([
+    _paymentsSumBy('enrollment', enr.map(e => e.id)),
+    _paymentsSumBy('bono', bonos.map(b => b.id)),
+    getPackPricing(),
+  ]);
 
   const map = {};
   const add = (uid, concept, pending) => {
@@ -528,13 +537,18 @@ export async function fetchClientsPending() {
   for (const b of bonos) {
     if (!b.user_id) continue;
     const expected = expectedBonoPriceDB(pricing, b.class_type, b.total_credits);
-    const paid = Number(b.total_paid || 0) || (b.order_id ? DEPOSIT_DEFAULT : 0);
+    const paid = Math.max(Number(bonoPaidMap[b.id] || 0), Number(b.total_paid || 0));
     add(b.user_id, `Bono ${TYPE_LBL[b.class_type] || b.class_type} · ${b.total_credits} clases`, Math.max(0, Math.round((expected - paid) * 100) / 100));
   }
   for (const e of enr) {
     const total = expectedBonoPriceDB(pricing, e.surf_classes?.type, 1);
     const paid = paidMap[e.id] || 0;
     add(e.user_id, `Clase ${e.surf_classes?.title || TYPE_LBL[e.surf_classes?.type] || ''}`.trim(), Math.max(0, Math.round((total - paid) * 100) / 100));
+  }
+  for (const r of rentals) {
+    if (!r.user_id) continue;
+    const pending = Math.max(0, Math.round((Number(r.total_amount || 0) - Number(r.deposit_paid || 0)) * 100) / 100);
+    add(r.user_id, `Alquiler ${r.rental_equipment?.name || 'material'}`, pending);
   }
   return map;
 }
