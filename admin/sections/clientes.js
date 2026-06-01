@@ -8,6 +8,36 @@ import { PACK_PRICING, DEPOSIT } from '../modules/constants.js';
 import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 
+// Recalcula el estado/importe pagado de una entidad desde la suma real de sus
+// pagos (payments = única verdad). Se usa tras crear/borrar un pago.
+async function recalcPaymentState(type, refId) {
+  if (!refId) return;
+  const sumPays = async () => {
+    const { data } = await supabase.from('payments').select('amount')
+      .eq('reservation_type', type).eq('reference_id', refId);
+    return (data || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+  };
+  if (type === 'bono') {
+    await supabase.from('bonos').update({ total_paid: await sumPays(), updated_at: new Date().toISOString() }).eq('id', refId);
+  } else if (type === 'rental') {
+    await supabase.from('equipment_reservations').update({ deposit_paid: await sumPays(), updated_at: new Date().toISOString() }).eq('id', refId);
+  } else if (type === 'booking') {
+    const sum = await sumPays();
+    const { data: bk } = await supabase.from('bookings').select('total_amount').eq('id', refId).single();
+    const total = Number(bk?.total_amount || 0);
+    const status = sum <= 0 ? 'pending' : (total > 0 && sum >= total ? 'fully_paid' : 'deposit_paid');
+    await supabase.from('bookings').update({ deposit_amount: sum, status, updated_at: new Date().toISOString() }).eq('id', refId);
+  } else if (type === 'enrollment') {
+    const sum = await sumPays();
+    const { data: enr } = await supabase.from('class_enrollments').select('status, surf_classes:class_id(price)').eq('id', refId).single();
+    if (enr && enr.status !== 'cancelled') {
+      const price = Number(enr.surf_classes?.price || 0);
+      const status = sum <= 0 ? 'confirmed' : (price > 0 && sum >= price ? 'paid' : 'partial');
+      await supabase.from('class_enrollments').update({ status, updated_at: new Date().toISOString() }).eq('id', refId);
+    }
+  }
+}
+
 function getPackPrice(type, sessionCount, fallbackPrice = 0) {
   if (sessionCount <= 0) return 0;
   const tiers = PACK_PRICING[type];
@@ -1459,7 +1489,8 @@ export async function renderClientes(container) {
         if (!confirm(`¿Eliminar este pago de ${formatCurrency(p.amount)}?`)) return;
         try {
           await deletePayment(p.id);
-          showToast('Pago eliminado', 'success');
+          await recalcPaymentState(p.reservation_type, p.reference_id);
+          showToast('Pago eliminado · estado recalculado', 'success');
           reloadFn();
         } catch (err) { showToast('Error: ' + err.message, 'error'); }
       });

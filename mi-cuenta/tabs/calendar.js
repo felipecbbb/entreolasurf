@@ -38,19 +38,15 @@ function formatDayLabel(dateStr) {
 
 // Fetch all available classes for a date
 async function fetchClassesForDate(date, level) {
-  let query = supabase
-    .from('surf_classes')
-    .select('*')
-    .eq('date', date)
-    .order('time_start', { ascending: true });
-
-  if (level && level !== 'todos') {
-    query = query.or(`level.eq.${level},level.eq.todos`);
-  }
-
-  const { data, error } = await query;
+  // Usa la RPC de disponibilidad: devuelve spots_left ya descontando los holds
+  // activos (plazas apartadas), no solo enrolled_count.
+  const { data, error } = await supabase.rpc('fetch_class_availability', {
+    p_date: date,
+    p_type: null,
+    p_level: level || null,
+  });
   if (error) {
-    console.error('fetchClassesForDate:', error);
+    console.error('fetch_class_availability:', error);
     return [];
   }
   return data || [];
@@ -211,7 +207,10 @@ export async function renderCalendar(panel) {
     if (allClasses.length) {
       html += `<div class="class-slots">`;
       html += allClasses.map(c => {
-        const spotsLeft = c.max_students - (c.enrolled_count || 0);
+        // spots_left viene de la RPC ya descontando holds; fallback por si acaso
+        const spotsLeft = (typeof c.spots_left === 'number')
+          ? c.spots_left
+          : (c.max_students - (c.enrolled_count || 0));
         const full = spotsLeft <= 0;
         const color = TYPE_COLORS[c.type] || '#0ea5e9';
         const bonoForType = activeBonos.find(b => b.class_type === c.type);

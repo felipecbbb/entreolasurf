@@ -740,9 +740,24 @@ export async function renderCalendario(container) {
           try {
             if (rentalIsPaid) {
               await markEquipmentReservationUnpaid(rid);
+              // Borra los pagos de alquiler asociados (coherencia con payments)
+              const pays = await fetchPayments('rental', rid);
+              for (const p of pays) { try { await deletePayment(p.id); } catch {} }
               showToast('Marcado como pendiente', 'success');
             } else {
-              await markEquipmentReservationPaid(rid, Math.max(rTotal, 0.01));
+              await markEquipmentReservationPaid(rid, rTotal > 0 ? rTotal : 0.01);
+              // Registra el pago para que cuente en estadísticas (payments = verdad).
+              // Los alquileres gratis (total 0) no generan ingreso.
+              if (rTotal > 0) {
+                await createPayment({
+                  amount: rTotal,
+                  payment_method: 'efectivo',
+                  channel: 'in_person',
+                  reservation_type: 'rental',
+                  reference_id: rid,
+                  concept: `Alquiler ${reservation?.rental_equipment?.name || reservation?.equipment_type || ''}`.trim(),
+                });
+              }
               showToast('Marcado como pagado', 'success');
             }
             render();
