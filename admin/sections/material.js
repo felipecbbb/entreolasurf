@@ -45,6 +45,74 @@ async function fetchEquipmentReservations(equipmentId) {
   return data || [];
 }
 
+// ---- Inventario por unidad (inventory_units) ----
+async function fetchUnits(category) {
+  const { data, error } = await supabase
+    .from('inventory_units')
+    .select('*')
+    .eq('category', category);
+  if (error) throw error;
+  // Orden natural por número: numérico primero (1,2,3…), texto (Invento, Quillas) al final
+  return (data || []).sort((a, b) => {
+    const na = parseFloat(a.number), nb = parseFloat(b.number);
+    const aNum = !Number.isNaN(na), bNum = !Number.isNaN(nb);
+    if (aNum && bNum) return na - nb || String(a.number).localeCompare(String(b.number));
+    if (aNum) return -1;
+    if (bNum) return 1;
+    return String(a.number || '').localeCompare(String(b.number || ''), 'es');
+  });
+}
+
+async function upsertUnit(unit) {
+  unit.updated_at = new Date().toISOString();
+  if (unit.id) {
+    const id = unit.id; const u = { ...unit }; delete u.id;
+    const { data, error } = await supabase.from('inventory_units').update(u).eq('id', id).select().single();
+    if (error) throw error;
+    return data;
+  }
+  const { data, error } = await supabase.from('inventory_units').insert(unit).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteUnit(id) {
+  const { error } = await supabase.from('inventory_units').delete().eq('id', id);
+  if (error) throw error;
+}
+
+const INV_CATEGORIES = {
+  neopreno: { label: 'Neoprenos', cols: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion'], fields: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion', 'estado', 'notes'] },
+  licra:    { label: 'Licras',    cols: ['number', 'talla', 'genero', 'descripcion'],                  fields: ['number', 'talla', 'genero', 'descripcion', 'estado', 'notes'] },
+  tabla:    { label: 'Tablas',    cols: ['number', 'marca', 'pies', 'descripcion'],                    fields: ['number', 'marca', 'pies', 'descripcion', 'estado', 'notes'] },
+};
+
+const INV_FIELDS = {
+  number:      { label: 'Número', type: 'text', placeholder: 'Ej: 12' },
+  tipo:        { label: 'Tipo', type: 'select', options: ['', 'Corto', 'Largo'] },
+  grosor:      { label: 'Grosor', type: 'text', placeholder: 'Ej: 3.2mm' },
+  talla:       { label: 'Talla', type: 'text', placeholder: 'Ej: M, 10, 150' },
+  genero:      { label: 'Género', type: 'text', placeholder: 'Ej: Niño, Hombre, Mujer' },
+  marca:       { label: 'Marca', type: 'text', placeholder: 'Ej: Billabong' },
+  pies:        { label: 'Pies (largo)', type: 'number', step: '0.1', placeholder: 'Ej: 7.6' },
+  descripcion: { label: 'Descripción', type: 'text', placeholder: 'Ej: AZUL/ESCUELA' },
+  estado:      { label: 'Estado', type: 'select', options: ['disponible', 'en_uso', 'reparacion', 'perdido', 'baja'] },
+  notes:       { label: 'Notas', type: 'textarea', placeholder: 'Anotaciones internas…' },
+};
+
+const INV_ESTADOS = {
+  disponible: { label: 'Disponible', color: '#16a34a', bg: '#dcfce7' },
+  en_uso:     { label: 'En uso',     color: '#0369a1', bg: '#e0f2fe' },
+  reparacion: { label: 'Reparación', color: '#b45309', bg: '#fef3c7' },
+  perdido:    { label: 'Perdido',    color: '#b91c1c', bg: '#fee2e2' },
+  baja:       { label: 'Baja',       color: '#4b5563', bg: '#e5e7eb' },
+};
+
+function invEstadoBadge(estado) {
+  const e = INV_ESTADOS[estado] || { label: estado, color: '#4b5563', bg: '#e5e7eb' };
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:.78rem;font-weight:600;color:${e.color};background:${e.bg}">${e.label}</span>`;
+}
+
 const TYPE_ICONS = {
   con_talla: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>',
   basico: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
@@ -63,6 +131,32 @@ function esc(str) {
 export async function renderMaterial(container) {
   let selectedItem = null;
   let activeTab = 'descripcion';
+  let view = 'inventario';       // 'inventario' | 'catalogo'
+  let invCategory = 'neopreno';  // categoría activa del inventario
+  let invFilter = 'todos';       // filtro por estado
+  let invSearch = '';            // búsqueda libre
+  const invCache = {};           // unidades por categoría (evita refetch en búsqueda)
+
+  function viewSwitcher(active) {
+    return `
+      <div class="mat-viewswitch" style="display:inline-flex;background:#eef2f7;border-radius:10px;padding:3px;gap:2px">
+        <button class="mat-vs-btn ${active === 'inventario' ? 'on' : ''}" data-view="inventario"
+          style="border:none;cursor:pointer;padding:7px 16px;border-radius:8px;font-weight:600;font-size:.88rem;background:${active === 'inventario' ? '#fff' : 'transparent'};color:${active === 'inventario' ? 'var(--color-navy,#0f172a)' : '#64748b'};box-shadow:${active === 'inventario' ? '0 1px 3px rgba(0,0,0,.1)' : 'none'}">Inventario</button>
+        <button class="mat-vs-btn ${active === 'catalogo' ? 'on' : ''}" data-view="catalogo"
+          style="border:none;cursor:pointer;padding:7px 16px;border-radius:8px;font-weight:600;font-size:.88rem;background:${active === 'catalogo' ? '#fff' : 'transparent'};color:${active === 'catalogo' ? 'var(--color-navy,#0f172a)' : '#64748b'};box-shadow:${active === 'catalogo' ? '0 1px 3px rgba(0,0,0,.1)' : 'none'}">Catálogo y precios</button>
+      </div>`;
+  }
+
+  function wireViewSwitcher() {
+    container.querySelectorAll('.mat-vs-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.view;
+        if (v === view) return;
+        view = v;
+        if (v === 'inventario') renderInventory(); else renderList();
+      });
+    });
+  }
 
   // ===================== LIST VIEW =====================
   async function renderList() {
@@ -72,8 +166,9 @@ export async function renderMaterial(container) {
 
     container.innerHTML = `
       <div class="act-list-page">
+        <div style="margin-bottom:18px">${viewSwitcher('catalogo')}</div>
         <div class="act-list-header">
-          <h2 class="act-list-title">Material (${count})</h2>
+          <h2 class="act-list-title">Catálogo y precios (${count})</h2>
           <div class="act-list-actions">
             <button class="act-icon-btn" id="mat-add" title="Añadir material">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -148,6 +243,185 @@ export async function renderMaterial(container) {
       };
       activeTab = 'descripcion';
       renderDetail();
+    });
+
+    wireViewSwitcher();
+  }
+
+  // ===================== INVENTARIO (unidades) =====================
+  async function renderInventory() {
+    selectedItem = null;
+    let units;
+    try {
+      if (!invCache[invCategory]) invCache[invCategory] = await fetchUnits(invCategory);
+      units = invCache[invCategory];
+    } catch (err) {
+      container.innerHTML = `<div class="act-list-page"><div style="margin-bottom:18px">${viewSwitcher('inventario')}</div><div class="admin-empty" style="padding:40px"><p>Error cargando inventario: ${esc(err.message)}</p></div></div>`;
+      wireViewSwitcher();
+      return;
+    }
+
+    const cfg = INV_CATEGORIES[invCategory];
+    // counts por estado (sobre todas las unidades de la categoría, sin filtrar)
+    const counts = {};
+    units.forEach(u => { counts[u.estado] = (counts[u.estado] || 0) + 1; });
+
+    // aplicar filtro de estado + búsqueda
+    const q = invSearch.trim().toLowerCase();
+    const filtered = units.filter(u => {
+      if (invFilter !== 'todos' && u.estado !== invFilter) return false;
+      if (!q) return true;
+      return [u.number, u.tipo, u.grosor, u.talla, u.genero, u.marca, u.descripcion, u.notes]
+        .some(v => v != null && String(v).toLowerCase().includes(q));
+    });
+
+    const estadoChips = Object.keys(INV_ESTADOS).filter(e => counts[e]).map(e =>
+      `<button class="mat-estado-chip" data-estado="${e}" style="border:1px solid ${invFilter === e ? INV_ESTADOS[e].color : '#e2e8f0'};background:${invFilter === e ? INV_ESTADOS[e].bg : '#fff'};color:${INV_ESTADOS[e].color};border-radius:999px;padding:4px 12px;font-size:.8rem;font-weight:600;cursor:pointer">${INV_ESTADOS[e].label} ${counts[e]}</button>`
+    ).join('');
+
+    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('');
+    const rows = filtered.map(u => {
+      const tds = cfg.cols.map(c => `<td>${c === 'number' ? `<strong>${esc(u[c])}</strong>` : esc(u[c]) || '—'}</td>`).join('');
+      return `<tr class="mat-unit-row" data-id="${u.id}" style="cursor:pointer">${tds}<td>${invEstadoBadge(u.estado)}</td></tr>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="act-list-page">
+        <div style="margin-bottom:18px">${viewSwitcher('inventario')}</div>
+        <div class="act-list-header">
+          <h2 class="act-list-title">Inventario — ${cfg.label} (${units.length})</h2>
+          <div class="act-list-actions">
+            <button class="act-icon-btn" id="inv-add" title="Añadir unidad">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="mat-inv-cats" style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">
+          ${Object.keys(INV_CATEGORIES).map(cat => `
+            <button class="mat-cat-tab ${invCategory === cat ? 'on' : ''}" data-cat="${cat}"
+              style="border:none;cursor:pointer;padding:8px 18px;border-radius:8px;font-weight:600;font-size:.9rem;background:${invCategory === cat ? 'var(--color-navy,#0f172a)' : '#f1f5f9'};color:${invCategory === cat ? '#fff' : '#475569'}">${INV_CATEGORIES[cat].label}</button>
+          `).join('')}
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+          <input type="search" id="inv-search" value="${esc(invSearch)}" placeholder="Buscar por número, marca, talla…"
+            style="flex:1;min-width:220px;padding:9px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:.9rem" />
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <button class="mat-estado-chip" data-estado="todos" style="border:1px solid ${invFilter === 'todos' ? 'var(--color-navy,#0f172a)' : '#e2e8f0'};background:${invFilter === 'todos' ? '#0f172a' : '#fff'};color:${invFilter === 'todos' ? '#fff' : '#475569'};border-radius:999px;padding:4px 12px;font-size:.8rem;font-weight:600;cursor:pointer">Todos ${units.length}</button>
+            ${estadoChips}
+          </div>
+        </div>
+
+        <div class="act-form-card" style="padding:0;overflow:hidden">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>${headCells}<th>Estado</th></tr></thead>
+              <tbody>${rows || `<tr><td colspan="${cfg.cols.length + 1}" style="padding:30px;text-align:center;color:var(--color-muted,#888)">Sin resultados</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+        <p style="margin-top:10px;font-size:.82rem;color:var(--color-muted,#888)">${filtered.length} de ${units.length} unidades · Clic en una fila para editar</p>
+      </div>`;
+
+    wireViewSwitcher();
+
+    container.querySelectorAll('.mat-cat-tab').forEach(b => b.addEventListener('click', () => {
+      invCategory = b.dataset.cat; invFilter = 'todos'; invSearch = ''; renderInventory();
+    }));
+    container.querySelectorAll('.mat-estado-chip').forEach(b => b.addEventListener('click', () => {
+      invFilter = b.dataset.estado; renderInventory();
+    }));
+    const searchEl = container.querySelector('#inv-search');
+    searchEl?.addEventListener('input', (e) => {
+      invSearch = e.target.value;
+      // re-render manteniendo el foco
+      renderInventory().then(() => {
+        const s = container.querySelector('#inv-search');
+        if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+      });
+    });
+    container.querySelector('#inv-add')?.addEventListener('click', () => openUnitModal(null));
+    container.querySelectorAll('.mat-unit-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const u = units.find(x => x.id === row.dataset.id);
+        if (u) openUnitModal(u);
+      });
+    });
+  }
+
+  // ---- Modal crear/editar unidad ----
+  function openUnitModal(unit) {
+    const isNew = !unit;
+    const cfg = INV_CATEGORIES[invCategory];
+    const u = unit || { category: invCategory, estado: 'disponible' };
+
+    const fieldsHTML = cfg.fields.map(f => {
+      const meta = INV_FIELDS[f];
+      const val = u[f] == null ? '' : u[f];
+      let input;
+      if (meta.type === 'select') {
+        input = `<select class="act-form-input" id="inv-f-${f}" style="cursor:pointer">
+          ${meta.options.map(o => {
+            const label = f === 'estado' ? (INV_ESTADOS[o]?.label || o) : (o || '—');
+            return `<option value="${esc(o)}" ${String(val) === o ? 'selected' : ''}>${esc(label)}</option>`;
+          }).join('')}
+        </select>`;
+      } else if (meta.type === 'textarea') {
+        input = `<textarea class="act-form-input" id="inv-f-${f}" rows="2" placeholder="${esc(meta.placeholder || '')}" style="resize:vertical">${esc(val)}</textarea>`;
+      } else {
+        input = `<input type="${meta.type}" ${meta.step ? `step="${meta.step}"` : ''} class="act-form-input" id="inv-f-${f}" value="${esc(val)}" placeholder="${esc(meta.placeholder || '')}" />`;
+      }
+      return `<div class="act-form-field"><label class="act-form-label">${meta.label.toUpperCase()}</label>${input}</div>`;
+    }).join('');
+
+    openModal(isNew ? `Nueva unidad — ${cfg.label}` : `Unidad ${u.number || ''} — ${cfg.label}`, `
+      <div class="act-form-card" style="box-shadow:none;padding:0">
+        ${fieldsHTML}
+      </div>
+      <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;align-items:center">
+        ${!isNew ? `<button class="btn line" id="inv-del" style="margin-right:auto;color:#b91c1c;border-color:#b91c1c">Eliminar</button>` : ''}
+        <button class="btn line" id="inv-cancel">Cancelar</button>
+        <button class="btn red" id="inv-save">${isNew ? 'Crear unidad' : 'Guardar'}</button>
+      </div>`);
+
+    document.getElementById('inv-cancel')?.addEventListener('click', closeModal);
+
+    document.getElementById('inv-save')?.addEventListener('click', async () => {
+      const obj = { category: invCategory };
+      cfg.fields.forEach(f => {
+        const el = document.getElementById(`inv-f-${f}`);
+        if (!el) return;
+        let v = el.value;
+        if (typeof v === 'string') v = v.trim();
+        if (f === 'pies') v = v === '' ? null : parseFloat(v);
+        obj[f] = v === '' ? null : v;
+      });
+      if (!obj.number) { showToast('El número es obligatorio', 'error'); return; }
+      if (!obj.estado) obj.estado = 'disponible';
+      if (u.id) obj.id = u.id;
+      try {
+        await upsertUnit(obj);
+        showToast(isNew ? 'Unidad creada' : 'Unidad guardada', 'success');
+        closeModal();
+        invCache[invCategory] = null;
+        renderInventory();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
+    });
+
+    document.getElementById('inv-del')?.addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar la unidad ${u.number || ''}? Esta acción no se puede deshacer.`)) return;
+      try {
+        await deleteUnit(u.id);
+        showToast('Unidad eliminada', 'success');
+        closeModal();
+        invCache[invCategory] = null;
+        renderInventory();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
     });
   }
 
@@ -561,5 +835,6 @@ export async function renderMaterial(container) {
     }
   });
 
-  await renderList();
+  if (view === 'inventario') await renderInventory();
+  else await renderList();
 }
