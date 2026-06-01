@@ -464,12 +464,23 @@ export async function renderClientes(container) {
       <option value="intermedio" ${sel === 'intermedio' ? 'selected' : ''}>Intermedio</option>
       <option value="avanzado" ${sel === 'avanzado' ? 'selected' : ''}>Avanzado</option>`;
     const familyRowHtml = () => `
-      <div class="ncl-fam-row">
-        <input type="text" class="act-form-input ncl-fam-name" placeholder="Nombre*" />
-        <input type="text" class="act-form-input ncl-fam-last" placeholder="Apellidos" />
-        <input type="date" class="act-form-input ncl-fam-birth" />
-        <select class="act-form-input ncl-fam-level">${levelOpts()}</select>
-        <button type="button" class="ncl-fam-remove" title="Quitar">✕</button>
+      <div class="ncl-fam-card">
+        <button type="button" class="ncl-fam-remove" title="Quitar familiar">✕</button>
+        <div class="cli-form-row">
+          <div class="act-form-field"><label class="act-form-label">Nombre*</label><input type="text" class="act-form-input ncl-fam-name" placeholder="Nombre" /></div>
+          <div class="act-form-field"><label class="act-form-label">Apellidos</label><input type="text" class="act-form-input ncl-fam-last" placeholder="Apellidos" /></div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field"><label class="act-form-label">Fecha de nacimiento</label><input type="date" class="act-form-input ncl-fam-birth" /></div>
+          <div class="act-form-field"><label class="act-form-label">Nivel</label><select class="act-form-input ncl-fam-level">${levelOpts()}</select></div>
+        </div>
+        <div class="cli-form-row">
+          <div class="act-form-field"><label class="act-form-label">¿Sabe nadar?</label><select class="act-form-input ncl-fam-swim"><option value="">Sin definir</option><option value="true">Sí</option><option value="false">No</option></select></div>
+          <div class="act-form-field"><label class="act-form-label">¿Lesión?</label><select class="act-form-input ncl-fam-injury"><option value="false">No</option><option value="true">Sí</option></select></div>
+        </div>
+        <div class="cli-form-row ncl-fam-injwrap" style="display:none;grid-template-columns:1fr">
+          <div class="act-form-field"><label class="act-form-label">Detalle de la lesión</label><input type="text" class="act-form-input ncl-fam-injurydetail" placeholder="Describe la lesión…" /></div>
+        </div>
       </div>`;
 
     openModal('Nuevo Cliente', `
@@ -507,7 +518,6 @@ export async function renderClientes(container) {
 
         <div class="ncl-card">
           <div class="ncl-card-title-row"><h3 class="ncl-card-title">Familiares</h3><span class="ncl-card-hint">Se crean y se le asignan al cliente</span></div>
-          <div class="ncl-fam-head"><span>Nombre</span><span>Apellidos</span><span>Fecha nac.</span><span>Nivel</span><span></span></div>
           <div id="ncl-family"></div>
           <button type="button" class="btn ghost ncl-add-fam" id="ncl-add-fam">+ Añadir familiar</button>
         </div>
@@ -521,7 +531,14 @@ export async function renderClientes(container) {
       famWrap.insertAdjacentHTML('beforeend', familyRowHtml());
     });
     famWrap.addEventListener('click', (e) => {
-      if (e.target.closest('.ncl-fam-remove')) e.target.closest('.ncl-fam-row').remove();
+      if (e.target.closest('.ncl-fam-remove')) e.target.closest('.ncl-fam-card').remove();
+    });
+    // Mostrar el detalle de lesión solo si "¿Lesión?" = Sí (por familiar)
+    famWrap.addEventListener('change', (e) => {
+      if (e.target.classList.contains('ncl-fam-injury')) {
+        const card = e.target.closest('.ncl-fam-card');
+        card.querySelector('.ncl-fam-injwrap').style.display = e.target.value === 'true' ? '' : 'none';
+      }
     });
     const injurySel = document.getElementById('ncl-injury');
     injurySel.addEventListener('change', () => {
@@ -547,12 +564,18 @@ export async function renderClientes(container) {
         has_injury: o.has_injury === 'true',
         injury_detail: o.injury_detail?.trim() || null,
       };
-      const familyRows = [...famWrap.querySelectorAll('.ncl-fam-row')].map(r => ({
-        full_name: r.querySelector('.ncl-fam-name').value.trim(),
-        last_name: r.querySelector('.ncl-fam-last').value.trim() || null,
-        birth_date: r.querySelector('.ncl-fam-birth').value || null,
-        level: r.querySelector('.ncl-fam-level').value || null,
-      })).filter(f => f.full_name);
+      const familyRows = [...famWrap.querySelectorAll('.ncl-fam-card')].map(r => {
+        const swim = r.querySelector('.ncl-fam-swim').value;
+        return {
+          full_name: r.querySelector('.ncl-fam-name').value.trim(),
+          last_name: r.querySelector('.ncl-fam-last').value.trim() || null,
+          birth_date: r.querySelector('.ncl-fam-birth').value || null,
+          level: r.querySelector('.ncl-fam-level').value || null,
+          can_swim: swim === 'true' ? true : swim === 'false' ? false : null,
+          has_injury: r.querySelector('.ncl-fam-injury').value === 'true',
+          injury_detail: r.querySelector('.ncl-fam-injurydetail').value.trim() || null,
+        };
+      }).filter(f => f.full_name);
 
       submitBtn.disabled = true; submitBtn.textContent = 'Creando…';
       try {
