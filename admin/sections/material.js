@@ -108,7 +108,9 @@ const INV_CATEGORIES = {
   neopreno:  { label: 'Neoprenos',  cols: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion'], fields: ['number', 'tipo', 'grosor', 'talla', 'marca', 'descripcion', 'estado', 'notes'] },
   licra:     { label: 'Licras',     cols: ['number', 'talla', 'genero', 'descripcion'],                  fields: ['number', 'talla', 'genero', 'descripcion', 'estado', 'notes'] },
   tabla:     { label: 'Tablas',     cols: ['number', 'marca', 'pies', 'descripcion'],                    fields: ['number', 'marca', 'pies', 'descripcion', 'estado', 'notes'] },
+  bodyboard: { label: 'Bodyboards', cols: ['number', 'marca', 'talla', 'descripcion'],                   fields: ['number', 'marca', 'talla', 'descripcion', 'estado', 'notes'] },
   accesorio: { label: 'Accesorios', cols: ['number', 'marca', 'pies', 'descripcion'],                    fields: ['number', 'marca', 'pies', 'descripcion', 'estado', 'notes'], internal: true },
+  gorros:    { label: 'Gorros',     cols: ['number', 'marca', 'descripcion'],                            fields: ['number', 'marca', 'descripcion', 'estado', 'notes'], internal: true },
 };
 
 const INV_FIELDS = {
