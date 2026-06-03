@@ -170,6 +170,7 @@ export async function renderCalendario(container) {
 
   // Enrollments cache: classId → [enrollment, ...]
   let enrollmentsCache = {};
+  let _openMovePicker = null; // picker de "mover de día", expuesto desde bindEvents para reusar en la ficha
 
   // ======== MAIN RENDER ========
   async function render() {
@@ -559,6 +560,36 @@ export async function renderCalendario(container) {
     });
   }
 
+  // Mueve una inscripción detectando si es reserva conjunta (misma cuenta en la
+  // misma clase). Si lo es, pregunta mover todos o seleccionar. Usado por el
+  // arrastre, el icono de la tarjeta y la ficha de reserva.
+  async function moveEnrollmentWithGroup({ fromClassId, srcEid, srcName, toClassId, toEnrolled, toMax, onDone }) {
+    let srcList = enrollmentsCache[fromClassId];
+    if (!srcList) { try { srcList = await fetchClassEnrollments(fromClassId); } catch { srcList = []; } }
+    const dragged = (srcList || []).find(en => en.id === srcEid);
+    const group = (dragged && dragged.user_id)
+      ? srcList.filter(en => en.user_id === dragged.user_id)
+      : (dragged ? [dragged] : []);
+
+    const doMove = async (ids) => {
+      const free = (Number(toMax) || 0) - (Number(toEnrolled) || 0);
+      if (Number(toMax) && ids.length > Math.max(0, free)) {
+        showToast(`La sesión destino solo tiene ${Math.max(0, free)} hueco(s)`, 'error');
+        return;
+      }
+      try {
+        for (const id of ids) await moveEnrollment(id, toClassId);
+        showToast(ids.length > 1 ? `${ids.length} personas movidas` : `${srcName || 'Alumno'} movido correctamente`, 'success');
+        onDone && onDone();
+      } catch (err) {
+        showToast('Error al mover: ' + err.message, 'error');
+      }
+    };
+
+    if (group.length > 1) openMoveGroupModal(group, srcEid, doMove);
+    else doMove([srcEid]);
+  }
+
   function initDragAndDrop(container, classes) {
     const clientRows = container.querySelectorAll('.cal-client-row[draggable]');
     const dropZones = container.querySelectorAll('.cal-clients-list');
@@ -613,34 +644,15 @@ export async function renderCalendario(container) {
           if (!data.enrollmentId || toClassId === data.fromClassId) return;
           const toClass = classes.find(c => c.id === toClassId);
           const toEnrollments = enrollmentsCache[toClassId] || [];
-          const srcList = enrollmentsCache[data.fromClassId] || [];
-          const dragged = srcList.find(en => en.id === data.enrollmentId);
-          // Reserva conjunta = varias personas de la MISMA cuenta en la MISMA clase
-          const group = (dragged && dragged.user_id)
-            ? srcList.filter(en => en.user_id === dragged.user_id)
-            : [dragged].filter(Boolean);
-
-          const doMove = async (ids) => {
-            const free = (toClass?.max_students || 0) - toEnrollments.length;
-            if (toClass && ids.length > Math.max(0, free)) {
-              showToast(`La sesión destino solo tiene ${Math.max(0, free)} hueco(s)`, 'error');
-              return;
-            }
-            try {
-              for (const id of ids) await moveEnrollment(id, toClassId);
-              showToast(ids.length > 1 ? `${ids.length} personas movidas` : `${data.clientName} movido correctamente`, 'success');
-              render();
-            } catch (err) {
-              showToast('Error al mover: ' + err.message, 'error');
-            }
-          };
-
-          if (group.length > 1) {
-            openMoveGroupModal(group, data.enrollmentId, doMove);
-          } else {
-            if (toClass && toEnrollments.length >= toClass.max_students) { showToast('La sesión destino está llena', 'error'); return; }
-            doMove([data.enrollmentId]);
-          }
+          await moveEnrollmentWithGroup({
+            fromClassId: data.fromClassId,
+            srcEid: data.enrollmentId,
+            srcName: data.clientName,
+            toClassId,
+            toEnrolled: toEnrollments.length,
+            toMax: toClass?.max_students || 0,
+            onDone: () => { delete enrollmentsCache[data.fromClassId]; delete enrollmentsCache[toClassId]; render(); },
+          });
         }
         // If dragging a rental into a class drop zone — ignore (can't mix)
       });
@@ -1002,19 +1014,21 @@ export async function renderCalendario(container) {
       });
     });
 
-    // Move enrollment — open calendar picker
+    // Move enrollment — open calendar picker (icono de la tarjeta)
     container.querySelectorAll('.cal-move-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const eid = btn.dataset.eid;
-        const classId = btn.dataset.classId;
-        const cls = classes.find(c => c.id === classId);
-        if (!cls) return;
-
-        // Remove any existing move picker
-        document.getElementById('cal-move-picker')?.remove();
-
         const clientName = btn.closest('.cal-client-row')?.dataset.clientName || 'Alumno';
+        openMovePicker(btn.dataset.eid, btn.dataset.classId, clientName);
+      });
+    });
+
+    // Selector de calendario para mover una inscripción a otra clase del mismo tipo.
+    // clsArg permite abrirlo desde la ficha (donde la clase puede no estar en la vista actual).
+    async function openMovePicker(eid, classId, clientName, clsArg) {
+        const cls = clsArg || classes.find(c => c.id === classId);
+        if (!cls) return;
+        document.getElementById('cal-move-picker')?.remove();
         const classType = cls.type;
         const typeLabel = TYPE_LABELS[classType] || cls.title;
 
@@ -1193,17 +1207,16 @@ export async function renderCalendario(container) {
                     showToast('Esta clase está llena', 'error');
                     return;
                   }
-
-                  try {
-                    await moveEnrollment(eid, targetId);
-                    showToast(`Alumno movido al ${shortDateLabel(ds)} ${targetCls.time_start?.slice(0,5)}`, 'success');
-                    delete enrollmentsCache[classId];
-                    delete enrollmentsCache[targetId];
-                    overlay.remove();
-                    render();
-                  } catch (err) {
-                    showToast('Error al mover: ' + err.message, 'error');
-                  }
+                  overlay.remove();
+                  await moveEnrollmentWithGroup({
+                    fromClassId: classId,
+                    srcEid: eid,
+                    srcName: clientName,
+                    toClassId: targetId,
+                    toEnrolled: enrolled,
+                    toMax: max,
+                    onDone: () => { delete enrollmentsCache[classId]; delete enrollmentsCache[targetId]; render(); },
+                  });
                 });
               });
             });
@@ -1213,8 +1226,9 @@ export async function renderCalendario(container) {
         await loadMonth();
         document.body.appendChild(overlay);
         renderPicker();
-      });
-    });
+    }
+    // Expone el picker para reusarlo desde la ficha de reserva
+    _openMovePicker = openMovePicker;
 
     // Book session (manual reservation)
     container.querySelectorAll('.book-session-btn').forEach(btn => {
@@ -3309,6 +3323,10 @@ export async function renderCalendario(container) {
               <span>Ampliar</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
+            <button class="rv-action-link" id="rv-move">
+              <span>Mover de día</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14l2 2 4-4"/></svg>
+            </button>
             <button class="rv-action-link" id="rv-send-email">
               <span>Enviar Email</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -3528,6 +3546,16 @@ export async function renderCalendario(container) {
       // Send email
       overlay.querySelector('#rv-send-email')?.addEventListener('click', () => {
         showToast('Funcionalidad de email próximamente', 'success');
+      });
+
+      // Mover de día — reutiliza el selector de calendario (con pregunta de grupo conjunto)
+      overlay.querySelector('#rv-move')?.addEventListener('click', () => {
+        const sess = res.sessions?.[0];
+        if (!sess) { showToast('No hay sesión asociada para mover', 'error'); return; }
+        if (typeof _openMovePicker !== 'function') { showToast('Abre el calendario para mover', 'error'); return; }
+        const name = res.persons?.[0]?.profileName || res.contact?.nombre || 'Alumno';
+        document.getElementById('rv-detail-overlay')?.remove();
+        _openMovePicker(res.id, sess.id, name, sess);
       });
 
       // Ampliar — open booking panel for same activity type
