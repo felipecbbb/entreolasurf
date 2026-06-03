@@ -1,6 +1,7 @@
 import { getCart, getCartTotal, clearCart, updateCartPill } from '/lib/cart.js';
 import { getSession, getProfile } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
+import { phonePrefixSelectHtml, wirePhonePrefix } from '/lib/shared-constants.js';
 
 const formWrap = document.getElementById('checkout-form-wrap');
 const summaryWrap = document.getElementById('checkout-summary');
@@ -211,6 +212,20 @@ async function init() {
       if (profile.postal_code && f.cp) f.cp.value = profile.postal_code;
     }
   }
+
+  // Selector de prefijo de país junto al teléfono (P7)
+  (() => {
+    const f = document.getElementById('co-form');
+    const tel = f?.telefono;
+    if (!tel || document.getElementById('co-prefix')) return;
+    const cur = (String(tel.value || '').match(/^\s*(\+\d{1,4})/) || [])[1] || '+34';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:8px;align-items:center';
+    tel.parentNode.insertBefore(wrap, tel);
+    wrap.insertAdjacentHTML('afterbegin', phonePrefixSelectHtml('co-prefix', cur, 'aria-label="Prefijo de país"'));
+    wrap.appendChild(tel);
+    wirePhonePrefix(document.getElementById('co-prefix'), tel);
+  })();
 
   // Handle submit → redirect to Stripe Checkout
   document.getElementById('co-form').addEventListener('submit', async (e) => {

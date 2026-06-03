@@ -14,7 +14,7 @@ import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js';
 import { supabase } from '/lib/supabase.js';
-import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml } from '/lib/shared-constants.js';
+import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry } from '/lib/shared-constants.js';
 
 // Get pack price for a person: uses tiered pricing, extra sessions beyond max tier use the per-session rate of max tier
 // fallbackPrice is used when no pack pricing exists for the type
@@ -2331,7 +2331,13 @@ export async function renderCalendario(container) {
             } catch { /* silent */ }
           }, 500);
         });
-        overlay.querySelector('#bk-co-pais')?.addEventListener('change', (e) => { contactData.pais = e.target.value; });
+        overlay.querySelector('#bk-co-pais')?.addEventListener('change', (e) => {
+          contactData.pais = e.target.value;
+          // Autocompleta el prefijo del móvil según el país
+          const dial = dialForCountry(e.target.value);
+          const prefixEl = overlay.querySelector('#bk-co-prefix');
+          if (dial && prefixEl) prefixEl.value = dial;
+        });
         overlay.querySelector('#bk-co-idioma')?.addEventListener('change', (e) => { contactData.idioma = e.target.value; });
 
         // Use credit checkboxes

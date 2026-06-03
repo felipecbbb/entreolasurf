@@ -2,7 +2,7 @@ import { getSession, getProfile, signIn, signUp, signOut, updateProfile } from '
 import { supabase } from '/lib/supabase.js';
 import { langSelectorHtml, wireLangSelector, initI18n } from '/lib/i18n.js';
 import { esc, formatDate, formatPrice } from '/lib/utils.js';
-import { WETSUIT_SIZES, LEVEL_OPTIONS, wetsuitOptionsHtml, levelOptionsHtml } from '/lib/shared-constants.js';
+import { WETSUIT_SIZES, LEVEL_OPTIONS, wetsuitOptionsHtml, levelOptionsHtml, phonePrefixSelectHtml } from '/lib/shared-constants.js';
 import { TERMS_HTML, WAIVER_HTML, openLegalModal } from '/mi-cuenta/legal-texts.js';
 import { renderFamily } from '/mi-cuenta/tabs/family.js';
 import { renderBonos } from '/mi-cuenta/tabs/bonos.js';
@@ -74,7 +74,10 @@ function renderAuth() {
               </div>
               <div class="auth-field">
                 <label for="reg-phone">Teléfono *</label>
-                <input type="tel" id="reg-phone" name="phone" placeholder="+34 600 000 000" required>
+                <div style="display:flex;gap:8px;align-items:center">
+                  ${phonePrefixSelectHtml('reg-phone-prefix', '+34', 'aria-label="Prefijo de país"')}
+                  <input type="tel" id="reg-phone" name="phone" placeholder="600 000 000" required style="flex:1">
+                </div>
               </div>
               <div class="auth-field">
                 <label for="reg-birthdate">Fecha de nacimiento *</label>
@@ -239,10 +242,15 @@ function renderAuth() {
       return;
     }
 
+    // Combina prefijo de país + número
+    const regPrefix = document.getElementById('reg-phone-prefix')?.value || '';
+    const regNum = e.target.phone.value.trim();
+    const regPhone = regNum.startsWith('+') ? regNum : (regPrefix ? `${regPrefix} ${regNum}`.trim() : regNum);
+
     regStep1Data = {
       fullname: e.target.fullname.value.trim(),
       last_name: e.target.last_name?.value?.trim() || null,
-      phone: e.target.phone.value.trim(),
+      phone: regPhone,
       birth_date: e.target.birth_date.value || null,
       address: e.target.address?.value?.trim() || null,
       city: e.target.city?.value?.trim() || null,
