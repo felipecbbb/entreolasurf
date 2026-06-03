@@ -5547,9 +5547,9 @@ export async function renderCalendario(container) {
       const type = fd.get('type');
       const timeStart = fd.get('time_start');
       const timeEnd = addMinutes(timeStart, durations[type] || 90);
-      let maxStudents = parseInt(fd.get('max_students'));
-      // Auto-correct capacity for individual classes
-      if (type === 'individual') maxStudents = Math.min(maxStudents, defaultCapacities.individual || 1);
+      // Respeta el aforo escrito (la individual también admite grupo privado >1).
+      let maxStudents = parseInt(fd.get('max_students'), 10);
+      if (!maxStudents || maxStudents < 1) maxStudents = defaultCapacities[type] || 1;
       const instructor = fd.get('instructor') || null;
       const audience = fd.get('audience') || null;
       const published = e.target.published.checked;
