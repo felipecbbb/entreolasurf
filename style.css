@@ -500,6 +500,28 @@ body.internal-page.no-hero .dropdown a {
   object-fit: cover;
 }
 
+/* Galería de fotos del camp (12 fotos, retrato en vertical) */
+.camp-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 230px;
+  grid-auto-flow: dense;
+  gap: 16px;
+}
+.camp-gallery .showcase-photo {
+  min-height: 0;
+  height: 100%;
+}
+.camp-gallery .showcase-photo.tall {
+  grid-row: span 2;
+}
+@media (max-width: 900px) {
+  .camp-gallery { grid-template-columns: repeat(2, 1fr); grid-auto-rows: 200px; }
+}
+@media (max-width: 560px) {
+  .camp-gallery { grid-template-columns: 1fr 1fr; grid-auto-rows: 140px; gap: 10px; }
+}
+
 .play-btn {
   position: absolute;
   left: 50%;
