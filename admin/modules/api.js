@@ -477,7 +477,7 @@ export async function fetchPendingBonos() {
 // Las inscripciones ligadas a un bono NO entran aquí (su pendiente está en el bono).
 export async function fetchPendingEnrollments() {
   const { data } = await supabase.from('class_enrollments')
-    .select('id, user_id, guest_name, family_member_id, status, created_at, surf_classes:class_id(title, type, date)')
+    .select('id, user_id, guest_name, family_member_id, status, created_at, surf_classes:class_id(title, type, date, price)')
     .is('bono_id', null)
     .in('status', ['confirmed', 'partial'])
     .order('created_at', { ascending: false });
@@ -489,7 +489,8 @@ export async function fetchPendingEnrollments() {
 
   return list.map(e => {
     const type = e.surf_classes?.type;
-    const total = expectedBonoPriceDB(pricing, type, 1); // precio de una clase suelta del catálogo
+    // Precio de la clase suelta: el propio de la clase si lo tiene, si no el del catálogo
+    const total = Number(e.surf_classes?.price) > 0 ? Number(e.surf_classes.price) : expectedBonoPriceDB(pricing, type, 1);
     const paid = paidMap[e.id] || 0;
     const pending = Math.max(0, Math.round((total - paid) * 100) / 100);
     return {
@@ -512,7 +513,7 @@ export async function fetchClientsPending() {
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
   const [bonosRes, enrRes, rentRes] = await Promise.all([
     supabase.from('bonos').select('id, user_id, class_type, total_credits, order_id, total_paid, status').eq('status', 'active'),
-    supabase.from('class_enrollments').select('id, user_id, status, surf_classes:class_id(title, type)')
+    supabase.from('class_enrollments').select('id, user_id, status, surf_classes:class_id(title, type, price)')
       .is('bono_id', null).in('status', ['confirmed', 'partial']),
     supabase.from('equipment_reservations')
       .select('id, user_id, total_amount, deposit_paid, status, rental_equipment(name)')
@@ -541,7 +542,7 @@ export async function fetchClientsPending() {
     add(b.user_id, `Bono ${TYPE_LBL[b.class_type] || b.class_type} · ${b.total_credits} clases`, Math.max(0, Math.round((expected - paid) * 100) / 100));
   }
   for (const e of enr) {
-    const total = expectedBonoPriceDB(pricing, e.surf_classes?.type, 1);
+    const total = Number(e.surf_classes?.price) > 0 ? Number(e.surf_classes.price) : expectedBonoPriceDB(pricing, e.surf_classes?.type, 1);
     const paid = paidMap[e.id] || 0;
     add(e.user_id, `Clase ${e.surf_classes?.title || TYPE_LBL[e.surf_classes?.type] || ''}`.trim(), Math.max(0, Math.round((total - paid) * 100) / 100));
   }

@@ -956,7 +956,8 @@ export async function renderCalendario(container) {
 
                 // If linked to a bono, the session cost is covered by the bono — pending is bono's pending
                 // If not linked to a bono, pending is based on pack price minus payments
-                const packPrice = getPackPrice(cls.type, 1, Number(cls.price) || 0);
+                // Clase suelta (drop-in): si la clase tiene precio propio, manda sobre el de la actividad
+                const packPrice = Number(cls.price) > 0 ? Number(cls.price) : getPackPrice(cls.type, 1, 0);
                 let totalFinal, pendingAmount;
                 if (linkedBono) {
                   totalFinal = linkedBono.expectedPrice;
@@ -1389,11 +1390,14 @@ export async function renderCalendario(container) {
     // Calculate total using pack pricing: ALL sessions across ALL persons count as one pack
     function getTotalPrice() {
       const totalSessions = persons.reduce((s, p) => s + p.sessions.length, 0);
+      // Drop-in de 1 sola clase: respeta el precio propio de la clase si lo tiene
+      if (totalSessions === 1 && Number(cls.price) > 0) return Number(cls.price);
       return getPackPrice(cls.type, totalSessions, price);
     }
 
     // Get unit price label for display
     function getUnitPriceLabel() {
+      if (Number(cls.price) > 0) return `${Number(cls.price)}€`;
       const tiers = PACK_PRICING[cls.type];
       return tiers ? `${tiers[1]}€` : `${price}€`;
     }
@@ -5290,6 +5294,11 @@ export async function renderCalendario(container) {
                   </div>
                 </div>
                 <div class="ns-field">
+                  <label>Precio clase suelta (€)</label>
+                  <input type="number" name="price" id="ns-price" value="" min="0" step="0.01" />
+                  <small style="color:#94a3b8;font-size:.72rem">Lo que paga quien reserva esta clase suelta. Prerrelleno con el precio de la actividad; bájalo para abaratarla ese día. No afecta a los bonos.</small>
+                </div>
+                <div class="ns-field">
                   <label>Instructor</label>
                   <select name="instructor" id="ns-instructor"><option value="">Sin asignar</option></select>
                 </div>
@@ -5549,8 +5558,12 @@ export async function renderCalendario(container) {
     document.getElementById('ns-type')?.addEventListener('change', (e) => {
       const t = e.target.value;
       document.getElementById('ns-capacity').value = defaultCapacities[t] || 8;
+      // Prerrellena el precio de clase suelta con el de la actividad (editable)
+      const priceEl = document.getElementById('ns-price');
+      if (priceEl && !priceEl.dataset.touched) priceEl.value = getPackPrice(t, 1, 0);
       recomputeEnd();
     });
+    document.getElementById('ns-price')?.addEventListener('input', (e) => { e.target.dataset.touched = '1'; });
     document.getElementById('ns-time-start')?.addEventListener('input', recomputeEnd);
 
     // Dispatch change event on load to sync capacity with default type
@@ -5578,6 +5591,9 @@ export async function renderCalendario(container) {
       // Respeta el aforo escrito (la individual también admite grupo privado >1).
       let maxStudents = parseInt(fd.get('max_students'), 10);
       if (!maxStudents || maxStudents < 1) maxStudents = defaultCapacities[type] || 1;
+      // Precio de clase suelta (drop-in). Si vacío, usa el de la actividad.
+      let classPrice = parseFloat(fd.get('price'));
+      if (!(classPrice >= 0)) classPrice = getPackPrice(type, 1, 0);
       const instructor = fd.get('instructor') || null;
       const audience = fd.get('audience') || null;
       const published = e.target.published.checked;
@@ -5610,7 +5626,7 @@ export async function renderCalendario(container) {
           await upsertClass({
             title: TYPE_LABELS[type], type, level: 'todos', date,
             time_start: timeStart, time_end: timeEnd,
-            max_students: maxStudents, instructor, audience, price: 0, published,
+            max_students: maxStudents, instructor, audience, price: classPrice, published,
             location: 'Playa de Roche', status: 'scheduled',
           });
         }
@@ -6262,6 +6278,11 @@ export async function renderCalendario(container) {
                 </div>
               </div>
               <div class="ns-field">
+                <label>Precio clase suelta (€)</label>
+                <input type="number" name="price" value="${Number(cls.price) > 0 ? Number(cls.price) : getPackPrice(cls.type, 1, 0)}" min="0" step="0.01" />
+                <small style="color:#94a3b8;font-size:.72rem">Lo que paga quien reserva esta clase suelta. Bájalo para abaratarla ese día; no afecta a los bonos.</small>
+              </div>
+              <div class="ns-field">
                 <label>Instructor</label>
                 <select name="instructor" id="es-instructor"><option value="">Sin asignar</option></select>
               </div>
@@ -6349,8 +6370,9 @@ export async function renderCalendario(container) {
       obj.status = cls.status || 'scheduled';
       if (!obj.instructor) obj.instructor = null;
       if (!obj.audience) obj.audience = null;
-      // El precio no se pide: lo rige el pack pricing del tipo. Se preserva el de la clase.
-      obj.price = Number(cls.price) || 0;
+      // Precio de clase suelta editable (drop-in). Si vacío, usa el de la actividad.
+      const editPrice = parseFloat(fd.get('price'));
+      obj.price = (editPrice >= 0) ? editPrice : (Number(cls.price) || getPackPrice(obj.type, 1, 0));
 
       // Alcance del cambio (no es columna de la tabla → fuera del obj)
       const applyScope = obj.apply_scope || 'this';
