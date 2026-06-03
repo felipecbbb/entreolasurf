@@ -523,6 +523,42 @@ export async function renderCalendario(container) {
   }
 
   // ======== DRAG AND DROP ========
+  // Modal para mover una reserva conjunta: todos de golpe o seleccionar individualmente
+  function openMoveGroupModal(group, draggedId, doMove) {
+    document.getElementById('move-group-overlay')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'move-group-overlay';
+    ov.className = 'bk-overlay';
+    ov.style.zIndex = '10001';
+    ov.innerHTML = `
+      <div style="max-width:420px;width:92%;background:#fff;border-radius:14px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+        <h3 style="margin:0 0 6px;font-size:1.1rem">Reserva conjunta</h3>
+        <p style="margin:0 0 14px;font-size:.9rem;color:#64748b">Esta reserva tiene varias personas de la misma cuenta. ¿A quién quieres mover?</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+          ${group.map(en => `
+            <label style="display:flex;align-items:center;gap:10px;font-size:.92rem;cursor:pointer">
+              <input type="checkbox" class="mg-cb" value="${en.id}" ${en.id === draggedId ? 'checked' : ''}>
+              <span>${escapeHtml(en.guest_name || 'Sin nombre')}</span>
+            </label>`).join('')}
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn line" id="mg-cancel">Cancelar</button>
+          <button class="btn line" id="mg-selected">Mover seleccionados</button>
+          <button class="btn red" id="mg-all">Mover todos (${group.length})</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    ov.querySelector('#mg-cancel').addEventListener('click', close);
+    ov.querySelector('#mg-all').addEventListener('click', () => { close(); doMove(group.map(en => en.id)); });
+    ov.querySelector('#mg-selected').addEventListener('click', () => {
+      const ids = [...ov.querySelectorAll('.mg-cb:checked')].map(cb => cb.value);
+      if (!ids.length) { showToast('Selecciona al menos una persona', 'error'); return; }
+      close(); doMove(ids);
+    });
+  }
+
   function initDragAndDrop(container, classes) {
     const clientRows = container.querySelectorAll('.cal-client-row[draggable]');
     const dropZones = container.querySelectorAll('.cal-clients-list');
@@ -577,16 +613,33 @@ export async function renderCalendario(container) {
           if (!data.enrollmentId || toClassId === data.fromClassId) return;
           const toClass = classes.find(c => c.id === toClassId);
           const toEnrollments = enrollmentsCache[toClassId] || [];
-          if (toClass && toEnrollments.length >= toClass.max_students) {
-            showToast('La sesión destino está llena', 'error');
-            return;
-          }
-          try {
-            await moveEnrollment(data.enrollmentId, toClassId);
-            showToast(`${data.clientName} movido correctamente`, 'success');
-            render();
-          } catch (err) {
-            showToast('Error al mover: ' + err.message, 'error');
+          const srcList = enrollmentsCache[data.fromClassId] || [];
+          const dragged = srcList.find(en => en.id === data.enrollmentId);
+          // Reserva conjunta = varias personas de la MISMA cuenta en la MISMA clase
+          const group = (dragged && dragged.user_id)
+            ? srcList.filter(en => en.user_id === dragged.user_id)
+            : [dragged].filter(Boolean);
+
+          const doMove = async (ids) => {
+            const free = (toClass?.max_students || 0) - toEnrollments.length;
+            if (toClass && ids.length > Math.max(0, free)) {
+              showToast(`La sesión destino solo tiene ${Math.max(0, free)} hueco(s)`, 'error');
+              return;
+            }
+            try {
+              for (const id of ids) await moveEnrollment(id, toClassId);
+              showToast(ids.length > 1 ? `${ids.length} personas movidas` : `${data.clientName} movido correctamente`, 'success');
+              render();
+            } catch (err) {
+              showToast('Error al mover: ' + err.message, 'error');
+            }
+          };
+
+          if (group.length > 1) {
+            openMoveGroupModal(group, data.enrollmentId, doMove);
+          } else {
+            if (toClass && toEnrollments.length >= toClass.max_students) { showToast('La sesión destino está llena', 'error'); return; }
+            doMove([data.enrollmentId]);
           }
         }
         // If dragging a rental into a class drop zone — ignore (can't mix)
