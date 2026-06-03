@@ -4,6 +4,7 @@
 import { openModal, closeModal, showToast, formatDate, formatCurrency } from '../modules/ui.js';
 const RENTAL_DEPOSIT = 5;
 import { supabase } from '/lib/supabase.js';
+import { compareSizes } from '/lib/shared-constants.js';
 
 // ---- API helpers ----
 async function fetchEquipment() {
@@ -700,11 +701,7 @@ export async function renderMaterial(container) {
     // Ítems con inventario por unidad: las tallas salen del inventario (no se editan a mano aquí)
     if (hasUnits) {
       const sizes = item._unitStock.sizes;
-      const keys = Object.keys(sizes).sort((a, b) => {
-        const na = parseFloat(a), nb = parseFloat(b);
-        if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
-        return String(a).localeCompare(String(b), 'es');
-      });
+      const keys = Object.keys(sizes).sort(compareSizes);
       return `
         <h3 class="act-detail-section-title">Tallas / Unidades</h3>
         <div class="act-form-card">
