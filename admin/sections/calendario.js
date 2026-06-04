@@ -386,7 +386,7 @@ export async function renderCalendario(container) {
       // status de la inscripción.
       let isPaid, isPartial;
       if (e.bono) {
-        const expected = getPackPrice(e.bono.class_type, e.bono.total_credits, 0);
+        const expected = e.bono.custom_total != null ? Number(e.bono.custom_total) : getPackPrice(e.bono.class_type, e.bono.total_credits, 0);
         // total_paid se mantiene sincronizado con la suma de payments en todos los flujos
         const bonoPaid = Number(e.bono.total_paid || 0);
         const fullyPaid = expected > 0 ? bonoPaid >= expected - 0.01 : bonoPaid > 0;
@@ -938,13 +938,17 @@ export async function renderCalendario(container) {
                     const enrichedBonos = await Promise.all(bonos.map(async (b) => {
                       const bPayments = await fetchPayments('bono', b.id);
                       const totalPaidReal = bPayments.reduce((s, p) => s + Number(p.amount || 0), 0) || Number(b.total_paid || 0);
-                      const expectedPrice = getPackPrice(cls.type, b.total_credits, Number(cls.price || 0));
+                      // Total del bono: el fijado a mano (descuento) si existe, si no el del catálogo
+                      const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(cls.type, b.total_credits, Number(cls.price || 0));
                       const pending = Math.max(0, Math.round((expectedPrice - totalPaidReal) * 100) / 100);
                       return { ...b, totalPaidReal, expectedPrice, pendingAmount: pending, isFullyPaid: pending <= 0 };
                     }));
 
-                    // If enrollment is linked to a bono, pre-select it
-                    linkedBono = linkedBonoId ? (enrichedBonos.find(b => b.id === linkedBonoId) || null) : null;
+                    // Engancha el bono: el de la inscripción, o el bono activo de ese tipo con
+                    // crédito disponible (así la ficha diaria muestra el TOTAL del bono, no 1 clase suelta)
+                    linkedBono = (linkedBonoId && enrichedBonos.find(b => b.id === linkedBonoId))
+                      || enrichedBonos.find(b => Number(b.used_credits) < Number(b.total_credits))
+                      || enrichedBonos[0] || null;
                     personCredits['p1'] = {
                       allBonos: enrichedBonos,
                       useCredit: !!linkedBono,
@@ -983,6 +987,8 @@ export async function renderCalendario(container) {
                   payments: payments,
                   personCredits: personCredits,
                   linkedBonoId: linkedBonoId,
+                  bonoId: linkedBono?.id || null,
+                  bonoCredits: linkedBono ? Number(linkedBono.total_credits) : null,
                   status: isPaid ? 'paid' : (pendingAmount <= 0 ? 'paid' : 'confirmed'),
                   createdAt: new Date(enrollment?.created_at || Date.now()),
                   discount: 0,
@@ -1979,7 +1985,7 @@ export async function renderCalendario(container) {
                 .gt('expires_at', new Date().toISOString());
               // Find bonos with available credits, enrich with expected price
               const allBonos = (bonos || []).filter(b => b.used_credits < b.total_credits).map(b => {
-                const expectedPrice = getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
+                const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
                 // total_paid se mantiene sincronizado con la suma de payments (sin suponer importes)
                 const paid = Number(b.total_paid || 0);
                 const bPending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
@@ -3035,8 +3041,10 @@ export async function renderCalendario(container) {
               </div>
               <div class="rv-info-top-right">
                 <div class="rv-info-stat">
-                  <label>Total</label>
-                  <span class="rv-info-amount">${res.totalFinal.toFixed(2)}€</span>
+                  <label>Total${res.bonoId ? ' (bono, editable)' : ''}</label>
+                  ${res.bonoId
+                    ? `<span class="rv-info-amount" style="display:inline-flex;align-items:center;gap:2px"><input type="number" id="rv-total-edit" value="${Number(res.totalFinal).toFixed(2)}" step="0.01" min="0" style="width:96px;font:inherit;font-weight:700;border:1px solid #e2e8f0;border-radius:8px;padding:2px 6px;text-align:right" title="Total del bono (descuento / precio a medida)">€</span>`
+                    : `<span class="rv-info-amount">${res.totalFinal.toFixed(2)}€</span>`}
                 </div>
                 <div class="rv-info-stat">
                   <label>Pendiente</label>
@@ -3407,14 +3415,30 @@ export async function renderCalendario(container) {
       overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
 
       // Recarga el histórico de pagos de la reserva (bono + inscripción)
+      const _bonoRef = res.bonoId || res.linkedBonoId;
       async function reloadResPayments() {
-        res.payments = res.linkedBonoId
-          ? [...(await fetchPayments('bono', res.linkedBonoId)), ...(await fetchPayments('enrollment', res.id))]
+        res.payments = _bonoRef
+          ? [...(await fetchPayments('bono', _bonoRef)), ...(await fetchPayments('enrollment', res.id))]
           : await fetchPayments('enrollment', res.id);
         const totalPaid = res.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
         res.pending = Math.max(0, Math.round((res.totalFinal - totalPaid) * 100) / 100);
         res.status = totalPaid <= 0 ? 'confirmed' : (res.pending <= 0 ? 'paid' : 'partial');
       }
+
+      // Editar el total del bono (descuento / precio a medida) → bonos.custom_total
+      overlay.querySelector('#rv-total-edit')?.addEventListener('change', async (e) => {
+        if (!res.bonoId) return;
+        const v = parseFloat(e.target.value);
+        if (!(v >= 0)) { e.target.value = Number(res.totalFinal).toFixed(2); return; }
+        try {
+          await supabase.from('bonos').update({ custom_total: v, updated_at: new Date().toISOString() }).eq('id', res.bonoId);
+          res.totalFinal = v;
+          await reloadResPayments();
+          showToast('Total del bono actualizado', 'success');
+          renderDetail();
+          render(); // refresca colores del calendario
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+      });
       // Mantiene total_paid del bono = suma de sus pagos (al editar/borrar)
       async function syncBonoPaid() {
         if (!res.linkedBonoId) return;
@@ -6370,6 +6394,7 @@ export async function renderCalendario(container) {
       obj.status = cls.status || 'scheduled';
       if (!obj.instructor) obj.instructor = null;
       if (!obj.audience) obj.audience = null;
+      obj.max_students = parseInt(obj.max_students, 10) || cls.max_students || 8;
       // Precio de clase suelta editable (drop-in). Si vacío, usa el de la actividad.
       const editPrice = parseFloat(fd.get('price'));
       obj.price = (editPrice >= 0) ? editPrice : (Number(cls.price) || getPackPrice(obj.type, 1, 0));
@@ -6412,6 +6437,11 @@ export async function renderCalendario(container) {
         }
 
         closeEs();
+        // Si cambió la fecha, salta a ese día para que la clase no "desaparezca" de la vista
+        if (obj.date && obj.date !== oldDate) {
+          currentDate = new Date(obj.date + 'T00:00:00');
+          viewMode = 'day';
+        }
         let toastMsg = propagated > 0 ? `Sesión actualizada · ${propagated} clases más aplicadas` : 'Sesión actualizada';
         if (scheduleChanged && (cls.enrolled_count || 0) > 0) {
           const r = await notifyEnrolledClients(cls.id, 'rescheduled', {
