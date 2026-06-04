@@ -26,6 +26,10 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /* Evita el scroll horizontal en móvil (elementos full-bleed 100vw, etc.)
+     'clip' no crea contenedor de scroll → no rompe headers ni position:sticky */
+  overflow-x: clip;
+  max-width: 100%;
 }
 
 body {
@@ -33,6 +37,13 @@ body {
   color: var(--color-text);
   background: var(--color-bg);
   line-height: 1.5;
+  /* Palabras/URLs largas no desbordan el ancho en móvil */
+  overflow-wrap: break-word;
+}
+
+/* Medios nunca más anchos que su contenedor */
+img, svg, video, iframe, canvas {
+  max-width: 100%;
 }
 
 a {
