@@ -39,21 +39,41 @@
         <p class="lead">La villa, la playa de Roche y el ambiente del Surf Camp de septiembre.</p>
       </div>
     </div>
-    <div class="container camp-gallery">
-      <figure class="showcase-photo"><img src="/uploads/2026/06/camp-sep-01.webp" alt="La villa y su piscina" loading="lazy"></figure>
-      <figure class="showcase-photo"><img src="/uploads/2026/06/camp-sep-05.webp" alt="La Surf House desde el aire" loading="lazy"></figure>
-      <figure class="showcase-photo tall"><img src="/uploads/2026/06/camp-sep-12.webp" alt="Nuestros monitores de Entre Olas" loading="lazy"></figure>
-      <figure class="showcase-photo"><img src="/uploads/2026/06/camp-sep-02.webp" alt="Acceso a la playa de Roche" loading="lazy"></figure>
-      <figure class="showcase-photo tall"><img src="/uploads/2026/06/camp-sep-06.webp" alt="Acantilados de Roche al atardecer" loading="lazy"></figure>
-      <figure class="showcase-photo"><img src="/uploads/2026/06/camp-sep-03.webp" alt="Pasarela entre dunas hasta la orilla" loading="lazy"></figure>
-      <figure class="showcase-photo tall"><img src="/uploads/2026/06/camp-sep-11.webp" alt="Surfeando en Playa de Roche" loading="lazy"></figure>
-      <figure class="showcase-photo"><img src="/uploads/2026/06/camp-sep-04.webp" alt="Vista aérea de la urbanización junto al pinar" loading="lazy"></figure>
-      <figure class="showcase-photo tall"><img src="/uploads/2026/06/camp-sep-08.webp" alt="Playa y olas desde el aire" loading="lazy"></figure>
-      <figure class="showcase-photo tall"><img src="/uploads/2026/06/camp-sep-07.webp" alt="La costa y las villas desde el aire" loading="lazy"></figure>
-      <figure class="showcase-photo tall"><img src="/uploads/2026/06/camp-sep-10.webp" alt="El mar al atardecer" loading="lazy"></figure>
-      <figure class="showcase-photo tall"><img src="/uploads/2026/06/camp-sep-09.webp" alt="Urbanización junto al pinar y la playa" loading="lazy"></figure>
+    <div class="container">
+      <div class="camp-carousel">
+        <button type="button" class="camp-car-arrow prev" aria-label="Anterior">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div class="camp-car-track" id="camp-car-track">
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-01.webp" alt="La villa y su piscina" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-05.webp" alt="La Surf House desde el aire" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-02.webp" alt="Acceso a la playa de Roche" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-03.webp" alt="Pasarela entre dunas hasta la orilla" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-04.webp" alt="Vista aérea de la urbanización junto al pinar" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-12.webp" alt="Nuestros monitores de Entre Olas" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-11.webp" alt="Surfeando en Playa de Roche" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-06.webp" alt="Acantilados de Roche al atardecer" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-10.webp" alt="El mar al atardecer" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-08.webp" alt="Playa y olas desde el aire" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-07.webp" alt="La costa y las villas desde el aire" loading="lazy"></figure>
+          <figure class="camp-slide"><img src="/uploads/2026/06/camp-sep-09.webp" alt="Urbanización junto al pinar y la playa" loading="lazy"></figure>
+        </div>
+        <button type="button" class="camp-car-arrow next" aria-label="Siguiente">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
     </div>
   </section>
+  <script>
+    (function () {
+      var t = document.getElementById('camp-car-track');
+      if (!t) return;
+      var box = t.closest('.camp-carousel');
+      var step = function () { return Math.max(260, Math.round(t.clientWidth * 0.8)); };
+      box.querySelector('.camp-car-arrow.prev').addEventListener('click', function () { t.scrollBy({ left: -step(), behavior: 'smooth' }); });
+      box.querySelector('.camp-car-arrow.next').addEventListener('click', function () { t.scrollBy({ left: step(), behavior: 'smooth' }); });
+    })();
+  </script>
 
   <!-- 3. Precio + Reserva -->
   <section class="section" id="reserva">
