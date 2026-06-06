@@ -4,7 +4,7 @@
 import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, fetchClientsPending } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
-import { PACK_PRICING, DEPOSIT } from '../modules/constants.js';
+import { PACK_PRICING } from '../modules/constants.js';
 import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 
@@ -1287,11 +1287,11 @@ export async function renderClientes(container) {
       const cards = bonos.map(b => {
         const remaining = b.total_credits - b.used_credits;
         const pct = b.total_credits > 0 ? Math.round((b.used_credits / b.total_credits) * 100) : 0;
-        const expectedPrice = getPackPrice(b.class_type, b.total_credits);
-        const deposit = DEPOSIT[b.class_type] || 15;
-        const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
+        // Total real del bono (descuento/precio a medida si se fijó) y pagado real
+        const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+        const paid = Number(b.total_paid || 0);
         const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
-        const isFullyPaid = paid >= expectedPrice;
+        const isFullyPaid = pending <= 0;
         return `
           <div class="cli-bono-card" data-bono-id="${b.id}">
             <div class="cli-bono-header">
@@ -1353,8 +1353,8 @@ export async function renderClientes(container) {
   function openExpandBonoModal(c, bono) {
     const classType = bono.class_type;
     const currentCredits = bono.total_credits;
-    const currentPaid = Number(bono.total_paid || 0) || (bono.order_id ? (DEPOSIT[classType] || 15) : 0);
-    const currentExpected = getPackPrice(classType, currentCredits);
+    const currentPaid = Number(bono.total_paid || 0);
+    const currentExpected = bono.custom_total != null ? Number(bono.custom_total) : getPackPrice(classType, currentCredits);
 
     function suggestPrice(extra) {
       const newTotal = currentCredits + extra;
@@ -1474,12 +1474,16 @@ export async function renderClientes(container) {
           </div>
         </div>
 
-        <label style="margin-top:10px">Importe a cobrar (€)</label>
-        <input type="number" id="cli-nb-amount" class="act-form-input" step="0.01" min="0" value="${defaultPrice.toFixed(2)}" required style="margin-bottom:4px" />
-        <small style="color:#6b7280;display:block;margin-bottom:10px">Sugerido según PACK_PRICING. Editable. Pon 0 si solo registras el bono sin cobro.</small>
+        <label style="margin-top:10px">Precio total del bono (€)</label>
+        <input type="number" id="cli-nb-total" class="act-form-input" step="0.01" min="0" value="${defaultPrice.toFixed(2)}" required style="margin-bottom:4px" />
+        <small style="color:#6b7280;display:block;margin-bottom:10px">Lo que cuesta el bono. Sugerido por catálogo; bájalo para aplicar descuento.</small>
+
+        <label>Cobrar ahora (€)</label>
+        <input type="number" id="cli-nb-amount" class="act-form-input" step="0.01" min="0" value="${defaultPrice.toFixed(2)}" style="margin-bottom:4px" />
+        <small style="color:#6b7280;display:block;margin-bottom:10px"><strong>0 = dejar todo pendiente</strong> · menos que el total = anticipo (resto a deber).</small>
 
         <label>Método de pago</label>
-        <select id="cli-nb-method" class="act-form-input" required style="margin-bottom:16px">
+        <select id="cli-nb-method" class="act-form-input" style="margin-bottom:16px">
           <option value="efectivo">Efectivo</option>
           <option value="tarjeta">Tarjeta</option>
           <option value="transferencia">Transferencia</option>
@@ -1487,18 +1491,27 @@ export async function renderClientes(container) {
           <option value="saldo">Saldo a favor</option>
         </select>
 
-        <button type="submit" class="btn red" id="cli-nb-submit" style="width:100%;padding:10px">Crear bono y cobrar</button>
+        <button type="submit" class="btn red" id="cli-nb-submit" style="width:100%;padding:10px">Crear bono</button>
       </form>
     `);
 
     const typeSel = document.getElementById('cli-nb-type');
     const credInput = document.getElementById('cli-nb-credits');
     const amountInput = document.getElementById('cli-nb-amount');
+    const totalInput = document.getElementById('cli-nb-total');
+    let _amountTouched = false, _totalTouched = false;
+    amountInput?.addEventListener('input', () => { _amountTouched = true; });
+    totalInput?.addEventListener('input', () => { _totalTouched = true; });
 
+    // Sugiere precio total y cobro según tipo/créditos mientras no se toquen a mano
     function recalcSuggested() {
       const t = typeSel.value;
       const credits = parseInt(credInput.value) || 0;
-      if (credits > 0) amountInput.value = getPackPrice(t, credits).toFixed(2);
+      if (credits > 0) {
+        const sug = getPackPrice(t, credits).toFixed(2);
+        if (!_totalTouched) totalInput.value = sug;
+        if (!_amountTouched) amountInput.value = sug;
+      }
     }
     typeSel?.addEventListener('change', recalcSuggested);
     credInput?.addEventListener('input', recalcSuggested);
@@ -1507,11 +1520,14 @@ export async function renderClientes(container) {
       ev.preventDefault();
       const classType = typeSel.value;
       const credits = parseInt(credInput.value) || 0;
-      const amount = parseFloat(amountInput.value) || 0;
+      const total = parseFloat(totalInput.value) || 0;
+      let amount = parseFloat(amountInput.value) || 0;        // cobrar ahora (0 = pendiente)
+      amount = Math.min(Math.max(0, amount), total);          // no cobrar más que el total
       const method = document.getElementById('cli-nb-method').value;
       const expiresAtStr = document.getElementById('cli-nb-expires').value;
       if (credits <= 0) { showToast('El bono debe tener al menos 1 clase', 'error'); return; }
       if (!expiresAtStr) { showToast('Indica la fecha de caducidad', 'error'); return; }
+      if (amount > 0 && !method) { showToast('Elige un método de pago para el cobro', 'error'); return; }
 
       const btn = document.getElementById('cli-nb-submit');
       btn.disabled = true; btn.textContent = 'Creando…';
@@ -1523,6 +1539,7 @@ export async function renderClientes(container) {
           used_credits: 0,
           status: 'active',
           total_paid: amount,
+          custom_total: total,            // precio total fijado (respeta descuento)
           expires_at: new Date(expiresAtStr + 'T23:59:59').toISOString(),
         }).select('id').single();
         if (error) throw error;
@@ -1543,13 +1560,14 @@ export async function renderClientes(container) {
           });
         }
 
-        showToast(`Bono creado: ${credits} clases · ${formatCurrency(amount)}`, 'success');
+        const pendiente = Math.max(0, Math.round((total - amount) * 100) / 100);
+        showToast(`Bono creado · cobrado ${formatCurrency(amount)}${pendiente > 0 ? ` · pendiente ${formatCurrency(pendiente)}` : ' · pagado'}`, 'success');
         closeModal();
         loadBonosTab(c);
       } catch (err) {
         console.error('Error creando bono:', err);
         showToast('Error: ' + (err.message || 'No se pudo crear'), 'error');
-        btn.disabled = false; btn.textContent = 'Crear bono y cobrar';
+        btn.disabled = false; btn.textContent = 'Crear bono';
       }
     });
   }
@@ -2212,11 +2230,10 @@ export async function renderClientes(container) {
 
     // Enrich bonos with pricing info
     const enrichedBonos = bonos.map(b => {
-      const expectedPrice = getPackPrice(b.class_type, b.total_credits);
-      const deposit = DEPOSIT[b.class_type] || 15;
-      const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
-      const pending = Math.max(0, expectedPrice - paid);
-      return { ...b, expectedPrice, totalPaidReal: paid, pending, isFullyPaid: paid >= expectedPrice };
+      const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+      const paid = Number(b.total_paid || 0);
+      const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
+      return { ...b, expectedPrice, totalPaidReal: paid, pending, isFullyPaid: pending <= 0 };
     });
 
     const activeBonos = enrichedBonos.filter(b => b.status === 'active' && !b.isFullyPaid);

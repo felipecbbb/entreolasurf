@@ -590,6 +590,101 @@ export async function renderCalendario(container) {
     else doMove([srcEid]);
   }
 
+  // Crear bono para un cliente desde el calendario (mismo flujo que el CRM:
+  // precio total editable + "cobrar ahora" con 0 = todo pendiente).
+  function openCreateBonoModalCal(userId, defaultType, onDone) {
+    const TYPES = Object.keys(TYPE_LABELS);
+    const type0 = TYPES.includes(defaultType) ? defaultType : 'grupal';
+    const credits0 = 4;
+    const price0 = getPackPrice(type0, credits0, 0);
+    const exp = new Date(); exp.setMonth(exp.getMonth() + 12);
+    const closeSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    const modal = document.createElement('div');
+    modal.className = 'bk-overlay'; modal.style.zIndex = '10001';
+    modal.innerHTML = `
+      <div class="bk-panel" style="max-width:460px;margin:auto;border-radius:16px;overflow:hidden">
+        <div class="bk-panel-header" style="background:var(--color-navy,#0f2f39);padding:16px 22px">
+          <div class="bk-header-left" style="display:flex;align-items:center;gap:12px">
+            <button class="bk-close-btn cb-close">${closeSvg}</button>
+            <span class="bk-header-title" style="font-size:1.1rem">Crear bono</span>
+          </div>
+        </div>
+        <div style="padding:24px">
+          <form class="cb-form trip-form" style="gap:12px">
+            <label>Tipo de clase</label>
+            <select class="cb-type act-form-input" required>${TYPES.map(t => `<option value="${t}" ${t === type0 ? 'selected' : ''}>${TYPE_LABELS[t]}</option>`).join('')}</select>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div><label>Nº de clases</label><input type="number" class="cb-credits act-form-input" min="1" step="1" value="${credits0}" required></div>
+              <div><label>Caduca</label><input type="date" class="cb-expires act-form-input" value="${exp.toISOString().slice(0, 10)}" required></div>
+            </div>
+            <label>Precio total del bono (€)</label>
+            <input type="number" class="cb-total act-form-input" step="0.01" min="0" value="${price0.toFixed(2)}" required>
+            <small style="color:#94a3b8">Sugerido por catálogo; bájalo para aplicar descuento.</small>
+            <label>Cobrar ahora (€)</label>
+            <input type="number" class="cb-amount act-form-input" step="0.01" min="0" value="${price0.toFixed(2)}">
+            <small style="color:#94a3b8"><strong>0 = dejar todo pendiente</strong> · menos que el total = anticipo.</small>
+            <label>Método de pago</label>
+            <select class="cb-method act-form-input">
+              <option value="efectivo">Efectivo</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="voucher">Voucher</option>
+              <option value="saldo">Saldo a favor</option>
+            </select>
+            <button type="submit" class="bk-final-confirm-btn cb-submit" style="margin-top:6px">Crear bono</button>
+          </form>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.querySelector('.cb-close').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+    const typeSel = modal.querySelector('.cb-type'), credEl = modal.querySelector('.cb-credits');
+    const totalEl = modal.querySelector('.cb-total'), amtEl = modal.querySelector('.cb-amount');
+    let tTouched = false, aTouched = false;
+    totalEl.addEventListener('input', () => { tTouched = true; });
+    amtEl.addEventListener('input', () => { aTouched = true; });
+    const recalc = () => {
+      const c = parseInt(credEl.value) || 0;
+      if (c > 0) { const s = getPackPrice(typeSel.value, c, 0).toFixed(2); if (!tTouched) totalEl.value = s; if (!aTouched) amtEl.value = s; }
+    };
+    typeSel.addEventListener('change', recalc);
+    credEl.addEventListener('input', recalc);
+
+    modal.querySelector('.cb-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const classType = typeSel.value;
+      const credits = parseInt(credEl.value) || 0;
+      const total = parseFloat(totalEl.value) || 0;
+      const amount = Math.min(Math.max(0, parseFloat(amtEl.value) || 0), total);
+      const method = modal.querySelector('.cb-method').value;
+      const expiresAtStr = modal.querySelector('.cb-expires').value;
+      if (credits <= 0) { showToast('El bono debe tener al menos 1 clase', 'error'); return; }
+      if (!expiresAtStr) { showToast('Indica la caducidad', 'error'); return; }
+      if (amount > 0 && !method) { showToast('Elige un método de pago', 'error'); return; }
+      const btn = modal.querySelector('.cb-submit'); btn.disabled = true; btn.textContent = 'Creando…';
+      try {
+        const { data: bono, error } = await supabase.from('bonos').insert({
+          user_id: userId, class_type: classType, total_credits: credits, used_credits: 0,
+          status: 'active', total_paid: amount, custom_total: total,
+          expires_at: new Date(expiresAtStr + 'T23:59:59').toISOString(),
+        }).select('id').single();
+        if (error) throw error;
+        if (amount > 0 && bono?.id) {
+          await createPayment({ reservation_type: 'bono', reference_id: bono.id, amount, payment_method: method, concept: `Nuevo bono ${TYPE_LABELS[classType] || classType} (${credits} clases)` });
+        }
+        const pend = Math.max(0, Math.round((total - amount) * 100) / 100);
+        close();
+        showToast(`Bono creado · cobrado ${amount.toFixed(2)}€${pend > 0 ? ` · pendiente ${pend.toFixed(2)}€` : ' · pagado'}`, 'success');
+        onDone && onDone();
+      } catch (err) {
+        btn.disabled = false; btn.textContent = 'Crear bono';
+        showToast('Error: ' + (err.message || err), 'error');
+      }
+    });
+  }
+
   function initDragAndDrop(container, classes) {
     const clientRows = container.querySelectorAll('.cal-client-row[draggable]');
     const dropZones = container.querySelectorAll('.cal-clients-list');
@@ -3339,6 +3434,10 @@ export async function renderCalendario(container) {
               <span>Mover de día</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14l2 2 4-4"/></svg>
             </button>
+            <button class="rv-action-link" id="rv-new-bono">
+              <span>Crear bono</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="15" x2="10" y2="15"/></svg>
+            </button>
             <button class="rv-action-link" id="rv-send-email">
               <span>Enviar Email</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -3574,6 +3673,13 @@ export async function renderCalendario(container) {
       // Send email
       overlay.querySelector('#rv-send-email')?.addEventListener('click', () => {
         showToast('Funcionalidad de email próximamente', 'success');
+      });
+
+      // Crear bono para el cliente de esta reserva (igual que en el CRM)
+      overlay.querySelector('#rv-new-bono')?.addEventListener('click', () => {
+        const uid = res.persons?.[0]?.profileId;
+        if (!uid) { showToast('Este cliente no tiene cuenta para asignarle un bono', 'error'); return; }
+        openCreateBonoModalCal(uid, res.activityType, () => { renderDetail(); render(); });
       });
 
       // Mover de día — reutiliza el selector de calendario (con pregunta de grupo conjunto)
