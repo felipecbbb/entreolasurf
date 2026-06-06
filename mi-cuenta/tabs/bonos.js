@@ -10,8 +10,6 @@ const PACK_PRICING = {
   surfskate:  [0, 30, 55, 78, 95, 115, 130],
 };
 
-const DEPOSIT = { grupal: 15, individual: 15, yoga: 15, paddle: 15, surfskate: 15 };
-
 function getPackPrice(type, sessionCount) {
   if (sessionCount <= 0) return 0;
   const tiers = PACK_PRICING[type];
@@ -56,12 +54,11 @@ function renderBonoCard(b, dimmed, switchTab) {
   const pct = Math.round((b.used_credits / b.total_credits) * 100);
   const isActive = b.status === 'active';
 
-  // Payment info
-  const expectedPrice = getPackPrice(b.class_type, b.total_credits);
-  const deposit = DEPOSIT[b.class_type] || 15;
-  const paid = Number(b.total_paid || 0) || (b.order_id ? deposit : 0);
-  const pending = Math.max(0, expectedPrice - paid);
-  const isFullyPaid = paid >= expectedPrice;
+  // Payment info — total real (respeta descuento custom_total) y pagado real
+  const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+  const paid = Number(b.total_paid || 0);
+  const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
+  const isFullyPaid = pending <= 0;
   const payPct = expectedPrice > 0 ? Math.min(100, Math.round((paid / expectedPrice) * 100)) : 100;
 
   return `
@@ -138,8 +135,8 @@ async function openUpgradeModal(panel, switchTab, bonos, bonoId, classType, curr
   const result = await fetchPacksForType(classType);
   const packs = result.packs || result;
   const extraClassPrice = result.extraClassPrice || 0;
-  // totalPaid = everything the client has paid so far (deposit + any admin payments)
-  const alreadyPaid = totalPaid || Number(result.deposit) || 15;
+  // totalPaid = lo que el cliente lleva pagado realmente (0 si aún pendiente)
+  const alreadyPaid = Number(totalPaid) || 0;
 
   if (!packs.length) {
     alert('No hay tarifas disponibles para este tipo de actividad.');
