@@ -3333,7 +3333,10 @@ export async function renderCalendario(container) {
               <h4 style="font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:0 0 8px">Historial de pagos</h4>
               ${paymentsListHtml}
             </div>
-            <button class="rv-add-payment-btn" id="rv-add-payment-tab" style="margin-top:16px">+ Añadir pago</button>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+              <button class="rv-add-payment-btn" id="rv-add-payment-tab">+ Añadir pago</button>
+              <button class="rv-add-payment-btn" id="rv-new-bono-tab" style="background:#fff;color:#0ea5e9;border:1px solid #0ea5e9">+ Crear bono</button>
+            </div>
           </div>`;
       } else if (activeTab === 'historico') {
         // Build timeline from real data
@@ -3700,12 +3703,14 @@ export async function renderCalendario(container) {
         showToast('Funcionalidad de email próximamente', 'success');
       });
 
-      // Crear bono para el cliente de esta reserva (igual que en el CRM)
-      overlay.querySelector('#rv-new-bono')?.addEventListener('click', () => {
+      // Crear bono para el cliente de esta reserva (acción lateral o pestaña Pagos)
+      const onNewBono = () => {
         const uid = res.persons?.[0]?.profileId;
         if (!uid) { showToast('Este cliente no tiene cuenta para asignarle un bono', 'error'); return; }
         openCreateBonoModalCal(uid, res.activityType, () => { renderDetail(); render(); });
-      });
+      };
+      overlay.querySelector('#rv-new-bono')?.addEventListener('click', onNewBono);
+      overlay.querySelector('#rv-new-bono-tab')?.addEventListener('click', onNewBono);
 
       // Mover de día — reutiliza el selector de calendario (con pregunta de grupo conjunto)
       overlay.querySelector('#rv-move')?.addEventListener('click', () => {
