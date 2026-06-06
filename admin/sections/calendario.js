@@ -3845,6 +3845,9 @@ export async function renderCalendario(container) {
 
         if (!method && !useCredit) { showToast('Selecciona un método', 'error'); return; }
 
+        const _payBtn = e.target.querySelector('button[type="submit"]');
+        if (_payBtn) { _payBtn.disabled = true; _payBtn.textContent = 'Registrando…'; }
+        try {
         let creditUsed = 0;
         if (useCredit && clientCreditBalance > 0 && clientProfileId) {
           creditUsed = Math.min(clientCreditBalance, amount);
@@ -3888,6 +3891,10 @@ export async function renderCalendario(container) {
         showToast(`Pago de ${amount.toFixed(2)}€ registrado${creditUsed > 0 ? ` (${creditUsed.toFixed(2)}€ de saldo)` : ` (${effectiveMethod})`}`, 'success');
         renderDetail();
         render(); // refresca el grid del calendario (color de pago)
+        } catch (err) {
+          if (_payBtn) { _payBtn.disabled = false; _payBtn.textContent = 'Registrar Pago'; }
+          showToast('Error al registrar el pago: ' + (err?.message || err), 'error');
+        }
       });
     }
 
