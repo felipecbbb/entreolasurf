@@ -1028,7 +1028,7 @@ export async function renderCalendario(container) {
                 const personCredits = {};
                 let linkedBono = null;
                 if (userId) {
-                  const { data: bonos } = await supabase.from('bonos').select('*').eq('user_id', userId).eq('class_type', cls.type).eq('status', 'active');
+                  const { data: bonos } = await supabase.from('bonos').select('*').eq('user_id', userId).eq('class_type', cls.type).in('status', ['active', 'exhausted']);
                   if (bonos?.length) {
                     const enrichedBonos = await Promise.all(bonos.map(async (b) => {
                       const bPayments = await fetchPayments('bono', b.id);
@@ -1039,11 +1039,10 @@ export async function renderCalendario(container) {
                       return { ...b, totalPaidReal, expectedPrice, pendingAmount: pending, isFullyPaid: pending <= 0 };
                     }));
 
-                    // Engancha el bono: el de la inscripción, o el bono activo de ese tipo con
-                    // crédito disponible (así la ficha diaria muestra el TOTAL del bono, no 1 clase suelta)
-                    linkedBono = (linkedBonoId && enrichedBonos.find(b => b.id === linkedBonoId))
-                      || enrichedBonos.find(b => Number(b.used_credits) < Number(b.total_credits))
-                      || enrichedBonos[0] || null;
+                    // Solo se considera "en uso" el bono realmente enganchado a la
+                    // inscripción (bono_id). Si no hay, la clase es suelta y el admin
+                    // decide si gastarle un crédito (toggle en la tarjeta del bono).
+                    linkedBono = linkedBonoId ? (enrichedBonos.find(b => b.id === linkedBonoId) || null) : null;
                     personCredits['p1'] = {
                       allBonos: enrichedBonos,
                       useCredit: !!linkedBono,
@@ -1084,6 +1083,7 @@ export async function renderCalendario(container) {
                   linkedBonoId: linkedBonoId,
                   bonoId: linkedBono?.id || null,
                   bonoCredits: linkedBono ? Number(linkedBono.total_credits) : null,
+                  singlePrice: packPrice,
                   status: isPaid ? 'paid' : (pendingAmount <= 0 ? 'paid' : 'confirmed'),
                   createdAt: new Date(enrollment?.created_at || Date.now()),
                   discount: 0,
@@ -3080,6 +3080,7 @@ export async function renderCalendario(container) {
             bonosHtml = `
               <div class="rv-info-card" style="margin-top:16px">
                 <h3>Bonos y Saldo</h3>
+                <p style="margin:-6px 0 12px;font-size:.78rem;color:var(--color-muted,#64748b)">Pulsa un bono para <strong>gastarle un crédito</strong> en esta clase (o púlsalo de nuevo para soltarla y pagarla aparte).</p>
                 ${bonoCards}
                 <div id="rv-credit-balances" style="padding:0 24px 16px">${creditHtml}</div>
               </div>`;
@@ -3514,8 +3515,8 @@ export async function renderCalendario(container) {
       overlay.querySelector('#rv-add-payment-tab')?.addEventListener('click', () => openAddPaymentModal(res, overlay));
 
       // Recarga el histórico de pagos de la reserva (bono + inscripción)
-      const _bonoRef = res.bonoId || res.linkedBonoId;
       async function reloadResPayments() {
+        const _bonoRef = res.bonoId || res.linkedBonoId; // recalculado: puede cambiar al enganchar/desenganchar
         res.payments = _bonoRef
           ? [...(await fetchPayments('bono', _bonoRef)), ...(await fetchPayments('enrollment', res.id))]
           : await fetchPayments('enrollment', res.id);
@@ -3589,23 +3590,47 @@ export async function renderCalendario(container) {
         });
       });
 
-      // Bono card clicks — toggle selection
+      // Bono card clicks — engancha/desengancha la inscripción al bono (gasta/libera
+      // un crédito). Es opcional: si la clase se paga aparte, se deja sin enganchar.
       overlay.querySelectorAll('.rv-bono-card').forEach(card => {
-        card.addEventListener('click', (e) => {
-          if (e.target.closest('.rv-bono-pay-btn')) return; // Don't toggle on pay button click
+        card.addEventListener('click', async (e) => {
+          if (e.target.closest('.rv-bono-pay-btn') || e.target.closest('.rv-bono-expand-btn')) return;
           const pid = card.dataset.personId;
           const bid = card.dataset.bonoId;
           const pc = res.personCredits?.[pid];
           if (!pc) return;
-          if (pc.selectedBonoId === bid && pc.useCredit) {
-            pc.useCredit = false;
-            pc.selectedBonoId = null;
-          } else {
-            pc.useCredit = true;
-            pc.selectedBonoId = bid;
-            pc.bono = pc.allBonos?.find(b => b.id === bid) || pc.bono;
+          const bono = pc.allBonos?.find(b => b.id === bid);
+          const turningOn = !(pc.selectedBonoId === bid && pc.useCredit);
+          card.style.pointerEvents = 'none';
+          try {
+            if (turningOn) {
+              if (bono && (Number(bono.total_credits) - Number(bono.used_credits)) <= 0) {
+                showToast('Ese bono no tiene créditos libres', 'error'); card.style.pointerEvents = ''; return;
+              }
+              const newStatus = bono?.isFullyPaid ? 'paid' : 'confirmed';
+              const { error } = await supabase.from('class_enrollments').update({ bono_id: bid, status: newStatus }).eq('id', res.id);
+              if (error) throw error;
+              pc.useCredit = true; pc.selectedBonoId = bid; pc.bono = bono;
+              if (bono) bono.used_credits = Number(bono.used_credits) + 1;
+              res.linkedBonoId = bid; res.bonoId = bid;
+              if (bono) res.totalFinal = bono.expectedPrice;
+              showToast('Crédito del bono asignado a esta clase', 'success');
+            } else {
+              const { error } = await supabase.from('class_enrollments').update({ bono_id: null, status: 'confirmed' }).eq('id', res.id);
+              if (error) throw error;
+              if (bono) bono.used_credits = Math.max(0, Number(bono.used_credits) - 1);
+              pc.useCredit = false; pc.selectedBonoId = null;
+              res.linkedBonoId = null; res.bonoId = null;
+              if (res.singlePrice != null) res.totalFinal = res.singlePrice;
+              showToast('Clase desvinculada del bono (se paga aparte)', 'success');
+            }
+            await reloadResPayments();
+            renderDetail();
+            render();
+          } catch (err) {
+            card.style.pointerEvents = '';
+            showToast('Error: ' + (err.message || err), 'error');
           }
-          renderDetail(); // renderDetail() already calls bindDetailEvents()
         });
       });
 
