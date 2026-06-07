@@ -2623,6 +2623,15 @@ export async function renderCalendario(container) {
               } catch (e) { console.warn('No se pudo crear responsable:', e.message); }
             }
 
+            // Email obligatorio + cuenta garantizada: toda reserva queda vinculada
+            // a una ficha de cliente. Si no se pudo crear/vincular, se bloquea.
+            if (!responsableId) {
+              showToast('No se pudo crear o vincular la cuenta del cliente. Revisa el email e inténtalo de nuevo.', 'error');
+              btn.disabled = false;
+              btn.textContent = 'Confirmar';
+              return;
+            }
+
             // Persona (índice) que ES el responsable y asiste, si aplica
             const respPersonIdx = contactSource.startsWith('persona_') ? (parseInt(contactSource.split('_')[1]) - 1) : -1;
 
@@ -2995,10 +3004,12 @@ export async function renderCalendario(container) {
                 <span class="rv-person-name">${attName}</span>
                 ${fm ? `<span class="rv-lang-badge" style="background:#fef3c7;color:#92400e">Familiar de ${titularName}</span>` : `<span class="rv-lang-badge">Titular</span>`}
               </div>
-              <button class="rv-action-link" id="rv-open-client" style="margin-left:auto;font-size:.78rem;padding:6px 12px;display:flex;align-items:center;gap:6px;white-space:nowrap">
+              ${p.profileId
+                ? `<button class="rv-action-link rv-open-client" data-uid="${p.profileId}" style="margin-left:auto;font-size:.78rem;padding:6px 12px;display:flex;align-items:center;gap:6px;white-space:nowrap">
                 Ver ficha completa
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-              </button>
+              </button>`
+                : `<span style="margin-left:auto;font-size:.72rem;color:#92400e;background:#fef3c7;padding:4px 10px;border-radius:20px;white-space:nowrap">Sin cuenta de cliente</span>`}
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:8px 18px;padding:12px 0 4px;font-size:.85rem;color:var(--color-navy,#0f2f39)">
               <span>🏊 <span style="color:var(--color-muted,#64748b)">Sabe nadar:</span> <strong>${swim}</strong></span>
@@ -3690,12 +3701,15 @@ export async function renderCalendario(container) {
       overlay.querySelector('#rv-new-bono-tab')?.addEventListener('click', onNewBono);
 
       // Ver ficha completa del cliente → abre la sección Clientes con esa ficha
-      overlay.querySelector('#rv-open-client')?.addEventListener('click', () => {
-        const uid = res.persons?.[0]?.profileId;
-        if (!uid) { showToast('Este asistente no tiene cuenta de cliente', 'error'); return; }
-        window.__openClientId = uid;
-        overlay.remove();
-        location.hash = '#clientes';
+      // (una por asistente con cuenta; cada botón lleva su propio data-uid)
+      overlay.querySelectorAll('.rv-open-client').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const uid = btn.dataset.uid;
+          if (!uid) { showToast('Este asistente no tiene cuenta de cliente', 'error'); return; }
+          window.__openClientId = uid;
+          overlay.remove();
+          location.hash = '#clientes';
+        });
       });
 
       // Mover de día — reutiliza el selector de calendario (con pregunta de grupo conjunto)

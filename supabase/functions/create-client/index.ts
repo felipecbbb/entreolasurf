@@ -62,16 +62,23 @@ Deno.serve(async (req) => {
     if (!email) return json({ error: "El email es obligatorio" }, 400);
     if (!full_name) return json({ error: "El nombre es obligatorio" }, 400);
 
-    // 3) Crear usuario (email confirmado; el cliente puede fijar su contraseña
-    //    desde "He olvidado mi contraseña"). NO toca la sesión de quien llama.
-    const tempPassword = crypto.randomUUID() + "Aa1!";
-    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
-      email,
-      password: tempPassword,
-      email_confirm: true,
-      user_metadata: { full_name },
-    });
-    if (createErr || !created.user) return json({ error: translateAuthError(createErr?.message) }, 400);
+    // 3) Crear la cuenta del cliente Y enviarle la invitación por email para que
+    //    fije su contraseña y active su cuenta. NO toca la sesión de quien llama.
+    const siteUrl = Deno.env.get("SITE_URL") || "https://entreolasurf.com";
+    let created: any = null, createErr: any = null;
+    ({ data: created, error: createErr } = await supabase.auth.admin.inviteUserByEmail(email, {
+      data: { full_name },
+      redirectTo: `${siteUrl}/mi-cuenta/`,
+    }));
+    // Si el correo de invitación falla (SMTP), no bloqueamos: creamos igualmente la
+    // cuenta para que la reserva quede vinculada (el cliente podrá usar "olvidé contraseña").
+    if (createErr || !created?.user) {
+      const tempPassword = crypto.randomUUID() + "Aa1!";
+      ({ data: created, error: createErr } = await supabase.auth.admin.createUser({
+        email, password: tempPassword, email_confirm: true, user_metadata: { full_name },
+      }));
+      if (createErr || !created?.user) return json({ error: translateAuthError(createErr?.message) }, 400);
+    }
     const userId = created.user.id;
 
     // 4) Perfil completo (la fila puede existir por trigger → upsert)
