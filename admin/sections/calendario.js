@@ -2974,27 +2974,42 @@ export async function renderCalendario(container) {
           return res.sessions.find(s => s.id === sid);
         }).filter(Boolean);
 
+        // Asistente: puede ser un familiar (niño) distinto del titular que reservó.
+        const fm = res.familyMember;
+        const att = fm || res.profile || {};
+        const attName = fm ? `${fm.full_name || ''} ${fm.last_name || ''}`.trim() : name;
+        const titularName = res.profile?.full_name || name;
+        const LVL = { principiante: 'Principiante', intermedio: 'Intermedio', avanzado: 'Avanzado' };
+        const swim = att.can_swim === true ? 'Sí' : att.can_swim === false ? 'No' : '—';
+        const talla = att.wetsuit_size || '—';
+        const nivel = att.level ? (LVL[att.level] || att.level) : null;
+        let edad = null;
+        if (att.birth_date) { const b = new Date(att.birth_date); const n = new Date(); edad = n.getFullYear() - b.getFullYear() - ((n.getMonth() < b.getMonth() || (n.getMonth() === b.getMonth() && n.getDate() < b.getDate())) ? 1 : 0); }
+        const lesion = att.has_injury ? (att.injury_detail || 'Sí') : null;
+
         personsHtml += `
           <div class="rv-person-card">
             <div class="rv-person-header">
-              <div class="rv-person-avatar" style="background:${res.activityColor}">${initial}</div>
+              <div class="rv-person-avatar" style="background:${res.activityColor}">${getInitial(attName)}</div>
               <div class="rv-person-info">
-                <span class="rv-person-name">${name}</span>
-                <span class="rv-lang-badge">${res.contact.idioma || 'Español'}</span>
+                <span class="rv-person-name">${attName}</span>
+                ${fm ? `<span class="rv-lang-badge" style="background:#fef3c7;color:#92400e">Familiar de ${titularName}</span>` : `<span class="rv-lang-badge">Titular</span>`}
               </div>
-              <button class="rv-person-menu-btn" title="Opciones">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+              <button class="rv-action-link" id="rv-open-client" style="margin-left:auto;font-size:.78rem;padding:6px 12px;display:flex;align-items:center;gap:6px;white-space:nowrap">
+                Ver ficha completa
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </button>
             </div>
-            <div class="rv-person-actions">
-              <button class="rv-icon-btn" title="WhatsApp"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg></button>
-              <button class="rv-icon-btn" title="Llamar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></button>
-              <button class="rv-icon-btn" title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></button>
-              <button class="rv-icon-btn" title="Añadir sesión"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/></svg></button>
+            <div style="display:flex;flex-wrap:wrap;gap:8px 18px;padding:12px 0 4px;font-size:.85rem;color:var(--color-navy,#0f2f39)">
+              <span>🏊 <span style="color:var(--color-muted,#64748b)">Sabe nadar:</span> <strong>${swim}</strong></span>
+              <span>🩱 <span style="color:var(--color-muted,#64748b)">Talla:</span> <strong>${talla}</strong></span>
+              ${nivel ? `<span>📈 <span style="color:var(--color-muted,#64748b)">Nivel:</span> <strong>${nivel}</strong></span>` : ''}
+              ${edad != null ? `<span>🎂 <span style="color:var(--color-muted,#64748b)">Edad:</span> <strong>${edad}</strong></span>` : ''}
+              ${lesion ? `<span style="color:#b91c1c">⚠ <strong>Lesión:</strong> ${lesion}</span>` : ''}
             </div>
             <table class="rv-sessions-table">
               <thead>
-                <tr><th>Fechas</th><th>Producto</th><th></th></tr>
+                <tr><th>Fechas</th><th>Producto</th></tr>
               </thead>
               <tbody>
                 ${personSessions.map(s => `
@@ -3004,11 +3019,6 @@ export async function renderCalendario(container) {
                       <span class="rv-product-icon">⚡</span>
                       <span class="rv-product-qty">1</span>
                       <span class="rv-product-name">${TYPE_LABELS[s.type] || s.title}</span>
-                    </td>
-                    <td class="rv-session-row-actions">
-                      <button class="rv-icon-btn small" title="Eliminar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
-                      <button class="rv-icon-btn small" title="Editar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-                      <button class="rv-icon-btn small" title="Expandir"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
                     </td>
                   </tr>
                 `).join('')}
@@ -3022,9 +3032,10 @@ export async function renderCalendario(container) {
       if (activeTab === 'resumen') {
         // Build bonos section for linked persons
         let bonosHtml = '';
+        let bonoCards = '';
+        let creditHtml = '';
         const linkedPersons = res.persons.filter(p => p.profileId);
         if (linkedPersons.length > 0 || res.personCredits) {
-          let bonoCards = '';
           for (const p of res.persons) {
             const pc = res.personCredits?.[p.id];
             if (!pc || !pc.allBonos?.length) continue;
@@ -3069,61 +3080,31 @@ export async function renderCalendario(container) {
           }
 
           // Credit balance
-          let creditHtml = '';
           for (const p of res.persons) {
             if (!p.profileId) continue;
             // We'll load this async, but show placeholder
             creditHtml += `<div class="rv-credit-row" data-profile-id="${p.profileId}" data-person-name="${p.profileName || p.nombre}"></div>`;
           }
 
-          if (bonoCards || creditHtml) {
-            bonosHtml = `
-              <div class="rv-info-card" style="margin-top:16px">
-                <h3>Bonos y Saldo</h3>
-                <p style="margin:-6px 0 12px;font-size:.78rem;color:var(--color-muted,#64748b)">Pulsa un bono para <strong>gastarle un crédito</strong> en esta clase (o púlsalo de nuevo para soltarla y pagarla aparte).</p>
-                ${bonoCards}
-                <div id="rv-credit-balances" style="padding:0 24px 16px">${creditHtml}</div>
-              </div>`;
-          }
         }
-
-        // Bloque visible "Beneficiario + Titular" cuando la reserva es de un familiar (niño)
-        let beneficiarioHtml = '';
-        const _fmR = res.familyMember;
-        const _profR = res.profile;
-        if (_fmR) {
-          const _ageOf = (bd) => { if (!bd) return null; const t = new Date(), b = new Date(bd); let a = t.getFullYear() - b.getFullYear(); const m = t.getMonth() - b.getMonth(); if (m < 0 || (m === 0 && t.getDate() < b.getDate())) a--; return a; };
-          const _swim = (v) => v === true ? 'Sí' : v === false ? 'No' : 'Sin definir';
-          const age = _ageOf(_fmR.birth_date);
-          beneficiarioHtml = `
-            <div class="rv-info-card rv-who-card" style="margin-top:16px">
-              <h3>Quién asiste · Titular de la cuenta</h3>
-              <div class="rv-who-grid">
-                <div>
-                  <div class="rv-who-tag rv-who-tag-child">Beneficiario (familiar)</div>
-                  <div class="rv-who-name">${escapeHtml((_fmR.full_name || '') + ' ' + (_fmR.last_name || ''))}</div>
-                  <div class="rv-who-meta">
-                    ${age != null ? `<span>${age} años</span>` : ''}
-                    ${_fmR.birth_date ? `<span>${escapeHtml(_fmR.birth_date)}</span>` : ''}
-                    ${_fmR.level ? `<span>Nivel: ${escapeHtml(_fmR.level)}</span>` : ''}
-                    <span>Sabe nadar: ${_swim(_fmR.can_swim)}</span>
-                    <span>Lesión: ${_fmR.has_injury ? ('Sí' + (_fmR.injury_detail ? ' — ' + escapeHtml(_fmR.injury_detail) : '')) : 'No'}</span>
-                    ${_fmR.wetsuit_size ? `<span>Neopreno: ${escapeHtml(_fmR.wetsuit_size)}</span>` : ''}
-                  </div>
-                </div>
-                <div>
-                  <div class="rv-who-tag rv-who-tag-holder">Titular de la cuenta</div>
-                  <div class="rv-who-name">${escapeHtml(((_profR?.full_name) || res.contact.nombre || '') + ' ' + ((_profR?.last_name) || ''))}</div>
-                  <div class="rv-who-meta">
-                    ${(_profR?.email || res.contact.email) ? `<span>${escapeHtml(_profR?.email || res.contact.email)}</span>` : ''}
-                    ${(_profR?.phone || res.contact.telefono) ? `<span>${escapeHtml(_profR?.phone || res.contact.telefono)}</span>` : ''}
-                    ${_profR?.city ? `<span>${escapeHtml(_profR.city)}</span>` : ''}
-                  </div>
-                  <div class="rv-who-more">Pestaña <strong>Datos del comprador</strong> para todos los datos</div>
-                </div>
+        // "Bonos y Saldo" siempre visible (con botón Crear bono) si el cliente tiene cuenta
+        if (linkedPersons.length > 0) {
+          bonosHtml = `
+            <div class="rv-info-card" style="margin-top:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+                <h3 style="margin:0">Bonos y Saldo</h3>
+                <button class="rv-action-link" id="rv-new-bono-saldo" style="font-size:.78rem;padding:6px 12px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:8px;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Crear bono</button>
               </div>
+              ${bonoCards
+                ? `<p style="margin:8px 0 12px;font-size:.78rem;color:var(--color-muted,#64748b)">Pulsa un bono para <strong>gastarle un crédito</strong> en esta clase (o púlsalo de nuevo para soltarla y pagarla aparte).</p>${bonoCards}`
+                : `<p style="margin:8px 0 4px;font-size:.78rem;color:var(--color-muted,#64748b)">Este cliente no tiene bonos de este tipo. Crea uno para gastar créditos en sus clases.</p>`}
+              <div id="rv-credit-balances" style="padding:0 24px 16px">${creditHtml}</div>
             </div>`;
         }
+
+        // Los datos del asistente (familiar o titular) ya se muestran en la tarjeta
+        // del asistente (personsHtml), sin duplicar.
+        const beneficiarioHtml = '';
 
         tabContent = `
           <div class="rv-summary-header">
@@ -3438,10 +3419,6 @@ export async function renderCalendario(container) {
               <span>Mover de día</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14l2 2 4-4"/></svg>
             </button>
-            <button class="rv-action-link" id="rv-new-bono">
-              <span>Crear bono</span>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="15" x2="10" y2="15"/></svg>
-            </button>
             <button class="rv-action-link" id="rv-send-email">
               <span>Enviar Email</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -3703,14 +3680,23 @@ export async function renderCalendario(container) {
         showToast('Funcionalidad de email próximamente', 'success');
       });
 
-      // Crear bono para el cliente de esta reserva (acción lateral o pestaña Pagos)
+      // Crear bono para el cliente de esta reserva (en "Bonos y Saldo" o pestaña Pagos)
       const onNewBono = () => {
         const uid = res.persons?.[0]?.profileId;
         if (!uid) { showToast('Este cliente no tiene cuenta para asignarle un bono', 'error'); return; }
         openCreateBonoModalCal(uid, res.activityType, () => { renderDetail(); render(); });
       };
-      overlay.querySelector('#rv-new-bono')?.addEventListener('click', onNewBono);
+      overlay.querySelector('#rv-new-bono-saldo')?.addEventListener('click', onNewBono);
       overlay.querySelector('#rv-new-bono-tab')?.addEventListener('click', onNewBono);
+
+      // Ver ficha completa del cliente → abre la sección Clientes con esa ficha
+      overlay.querySelector('#rv-open-client')?.addEventListener('click', () => {
+        const uid = res.persons?.[0]?.profileId;
+        if (!uid) { showToast('Este asistente no tiene cuenta de cliente', 'error'); return; }
+        window.__openClientId = uid;
+        overlay.remove();
+        location.hash = '#clientes';
+      });
 
       // Mover de día — reutiliza el selector de calendario (con pregunta de grupo conjunto)
       overlay.querySelector('#rv-move')?.addEventListener('click', () => {

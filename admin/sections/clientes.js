@@ -2451,5 +2451,14 @@ export async function renderClientes(container) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // Deep-link desde el calendario: abrir directamente la ficha de un cliente
+  const _openId = window.__openClientId;
+  if (_openId) {
+    window.__openClientId = null;
+    try {
+      const { data: cli } = await supabase.from('profiles').select('*').eq('id', _openId).single();
+      if (cli) { selectedClient = cli; activeTab = 'datos'; await renderDetail(); return; }
+    } catch (e) { console.warn('open client deep-link:', e?.message); }
+  }
   await renderList();
 }
