@@ -4168,6 +4168,7 @@ a.admin-nav-item-external .nav-icon svg {
   gap: 5px;
   font-size: .78rem;
   color: #64748b;
+  text-decoration: none;
   transition: color .15s;
 }
 .rv-contact-link:hover {
@@ -4235,13 +4236,16 @@ a.admin-nav-item-external .nav-icon svg {
 
 .rv-person-info {
   flex: 1;
+  min-width: 0;
 }
 
 .rv-person-name {
+  display: block;
   font-family: 'Manrope', sans-serif;
   font-size: .95rem;
   font-weight: 700;
   color: var(--color-navy, #0f2f39);
+  margin-bottom: 4px;
 }
 .rv-person-action {
   display: inline-flex;

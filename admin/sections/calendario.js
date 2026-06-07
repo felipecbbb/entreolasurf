@@ -3005,11 +3005,11 @@ export async function renderCalendario(container) {
                 ${fm ? `<span class="rv-lang-badge" style="background:#fef3c7;color:#92400e">Familiar de ${titularName}</span>` : `<span class="rv-lang-badge">Titular</span>`}
               </div>
               ${p.profileId
-                ? `<button class="rv-action-link rv-open-client" data-uid="${p.profileId}" style="margin-left:auto;font-size:.78rem;padding:6px 12px;display:flex;align-items:center;gap:6px;white-space:nowrap">
+                ? `<button class="rv-open-client" data-uid="${p.profileId}" style="flex:0 0 auto;margin-left:auto;font-size:.78rem;font-weight:600;padding:7px 14px;color:#0ea5e9;background:#fff;border:1px solid #bae6fd;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
                 Ver ficha completa
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </button>`
-                : `<span style="margin-left:auto;font-size:.72rem;color:#92400e;background:#fef3c7;padding:4px 10px;border-radius:20px;white-space:nowrap">Sin cuenta de cliente</span>`}
+                : `<span style="flex:0 0 auto;margin-left:auto;font-size:.72rem;color:#92400e;background:#fef3c7;padding:4px 10px;border-radius:20px;white-space:nowrap">Sin cuenta de cliente</span>`}
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:8px 18px;padding:12px 0 4px;font-size:.85rem;color:var(--color-navy,#0f2f39)">
               <span>🏊 <span style="color:var(--color-muted,#64748b)">Sabe nadar:</span> <strong>${swim}</strong></span>
@@ -3104,7 +3104,7 @@ export async function renderCalendario(container) {
             <div class="rv-info-card" style="margin-top:16px">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
                 <h3 style="margin:0">Bonos y Saldo</h3>
-                <button class="rv-action-link" id="rv-new-bono-saldo" style="font-size:.78rem;padding:6px 12px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:8px;display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Crear bono</button>
+                <button id="rv-new-bono-saldo" style="flex:0 0 auto;font-size:.78rem;padding:7px 14px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:8px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-weight:600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Crear bono</button>
               </div>
               ${bonoCards
                 ? `<p style="margin:8px 0 12px;font-size:.78rem;color:var(--color-muted,#64748b)">Pulsa un bono para <strong>gastarle un crédito</strong> en esta clase (o púlsalo de nuevo para soltarla y pagarla aparte).</p>${bonoCards}`
@@ -3124,7 +3124,7 @@ export async function renderCalendario(container) {
           <div class="rv-info-card">
             <div class="rv-info-top">
               <div class="rv-info-top-left">
-                <div class="rv-info-id">Reserva ${shortId}</div>
+                <div class="rv-info-id">Reserva #${res.id.slice(0, 8).toUpperCase()}</div>
                 <div class="rv-info-created">Creada el ${dateStr} · Por ADMIN</div>
               </div>
               <div class="rv-info-top-right">
@@ -3149,8 +3149,8 @@ export async function renderCalendario(container) {
                   <span class="rv-lang-badge">${res.contact.idioma || 'Español'}</span>
                 </div>
                 <div class="rv-contact-links">
-                  ${res.contact.telefono ? `<span class="rv-contact-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg> +34${res.contact.telefono}</span>` : ''}
-                  ${res.contact.email ? `<span class="rv-contact-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> ${res.contact.email}</span>` : ''}
+                  ${res.contact.telefono ? `<a class="rv-contact-link" href="https://wa.me/${String(res.contact.telefono).replace(/\D/g, '')}" target="_blank" rel="noopener" title="Abrir WhatsApp"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg> ${escapeHtml(res.contact.telefono)}</a>` : ''}
+                  ${res.contact.email ? `<a class="rv-contact-link" href="mailto:${res.contact.email}" title="Enviar email"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> ${escapeHtml(res.contact.email)}</a>` : ''}
                 </div>
               </div>
               <div class="rv-info-detail">
