@@ -3011,7 +3011,7 @@ export async function renderCalendario(container) {
               </button>`
                 : `<span style="flex:0 0 auto;margin-left:auto;font-size:.72rem;color:#92400e;background:#fef3c7;padding:4px 10px;border-radius:20px;white-space:nowrap">Sin cuenta de cliente</span>`}
             </div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px 18px;padding:12px 0 4px;font-size:.85rem;color:var(--color-navy,#0f2f39)">
+            <div style="display:flex;flex-wrap:wrap;gap:8px 18px;padding:14px 22px;border-bottom:1px solid rgba(0,0,0,.05);font-size:.85rem;color:var(--color-navy,#0f2f39)">
               <span>🏊 <span style="color:var(--color-muted,#64748b)">Sabe nadar:</span> <strong>${swim}</strong></span>
               <span>🩱 <span style="color:var(--color-muted,#64748b)">Talla:</span> <strong>${talla}</strong></span>
               ${nivel ? `<span>📈 <span style="color:var(--color-muted,#64748b)">Nivel:</span> <strong>${nivel}</strong></span>` : ''}
@@ -3102,14 +3102,16 @@ export async function renderCalendario(container) {
         if (linkedPersons.length > 0) {
           bonosHtml = `
             <div class="rv-info-card" style="margin-top:16px">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-                <h3 style="margin:0">Bonos y Saldo</h3>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:18px 24px 14px;border-bottom:1px solid rgba(0,0,0,.05)">
+                <h3 style="margin:0;padding:0;border:none;font-family:'Space Grotesk',sans-serif;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#64748b">Bonos y Saldo</h3>
                 <button id="rv-new-bono-saldo" style="flex:0 0 auto;font-size:.78rem;padding:7px 14px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:8px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;font-weight:600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Crear bono</button>
               </div>
-              ${bonoCards
-                ? `<p style="margin:8px 0 12px;font-size:.78rem;color:var(--color-muted,#64748b)">Pulsa un bono para <strong>gastarle un crédito</strong> en esta clase (o púlsalo de nuevo para soltarla y pagarla aparte).</p>${bonoCards}`
-                : `<p style="margin:8px 0 4px;font-size:.78rem;color:var(--color-muted,#64748b)">Este cliente no tiene bonos de este tipo. Crea uno para gastar créditos en sus clases.</p>`}
-              <div id="rv-credit-balances" style="padding:0 24px 16px">${creditHtml}</div>
+              <div style="padding:16px 24px">
+                ${bonoCards
+                  ? `<p style="margin:0 0 12px;font-size:.78rem;color:var(--color-muted,#64748b)">Pulsa un bono para <strong>gastarle un crédito</strong> en esta clase (o púlsalo de nuevo para soltarla y pagarla aparte).</p>${bonoCards}`
+                  : `<p style="margin:0;font-size:.78rem;color:var(--color-muted,#64748b)">Este cliente no tiene bonos de este tipo. Crea uno para gastar créditos en sus clases.</p>`}
+                <div id="rv-credit-balances" style="margin-top:${creditHtml ? '12px' : '0'}">${creditHtml}</div>
+              </div>
             </div>`;
         }
 
