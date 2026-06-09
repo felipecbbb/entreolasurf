@@ -114,12 +114,10 @@ async function init() {
       if (!code) return;
       const msgEl = document.getElementById('coupon-msg');
 
-      const { data, error } = await supabase
-        .from('coupons')
-        .select('*')
-        .eq('code', code)
-        .eq('active', true)
-        .single();
+      // Validación server-side: get_coupon solo devuelve el cupón si conoces el
+      // código exacto y está activo (la tabla coupons ya no es de lectura pública).
+      const { data: rows, error } = await supabase.rpc('get_coupon', { p_code: code });
+      const data = Array.isArray(rows) ? rows[0] : rows;
 
       if (error || !data) {
         msgEl.textContent = 'Cupon no valido';
