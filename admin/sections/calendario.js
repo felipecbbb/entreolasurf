@@ -389,7 +389,9 @@ export async function renderCalendario(container) {
         const expected = e.bono.custom_total != null ? Number(e.bono.custom_total) : getPackPrice(e.bono.class_type, e.bono.total_credits, 0);
         // total_paid se mantiene sincronizado con la suma de payments en todos los flujos
         const bonoPaid = Number(e.bono.total_paid || 0);
-        const fullyPaid = expected > 0 ? bonoPaid >= expected - 0.01 : bonoPaid > 0;
+        // Mismo redondeo a céntimo que Cliente/Reserva-clases (evita verde aquí y rojo allí)
+        const bonoPend = Math.max(0, Math.round((expected - bonoPaid) * 100) / 100);
+        const fullyPaid = expected > 0 ? bonoPend <= 0 : bonoPaid > 0;
         isPaid = fullyPaid;
         isPartial = !fullyPaid && bonoPaid > 0;
       } else {
@@ -738,7 +740,8 @@ export async function renderCalendario(container) {
         if (data.itemType === 'enrollment' && toClassId) {
           if (!data.enrollmentId || toClassId === data.fromClassId) return;
           const toClass = classes.find(c => c.id === toClassId);
-          const toEnrollments = enrollmentsCache[toClassId] || [];
+          // El aforo del destino solo cuenta inscripciones no canceladas (como el picker)
+          const toEnrollments = (enrollmentsCache[toClassId] || []).filter(e => e.status !== 'cancelled');
           await moveEnrollmentWithGroup({
             fromClassId: data.fromClassId,
             srcEid: data.enrollmentId,
@@ -786,6 +789,9 @@ export async function renderCalendario(container) {
           if (!confirm(`¿Eliminar la inscripción de ${data.clientName}?`)) return;
           try {
             await deleteEnrollment(data.enrollmentId);
+            // Borra pagos de clase suelta (type 'enrollment') para no dejar huérfanos
+            // que sigan sumando en estadísticas. Los de bono viven en el bono.
+            for (const p of await fetchPayments('enrollment', data.enrollmentId)) { await deletePayment(p.id); }
             showToast(`${data.clientName} eliminado de la sesión`, 'success');
             render();
           } catch (err) { showToast('Error: ' + err.message, 'error'); }
@@ -3677,6 +3683,8 @@ export async function renderCalendario(container) {
         if (confirm('¿Cancelar esta reserva? Esta acción no se puede deshacer.')) {
           try {
             await deleteEnrollment(res.id);
+            // Limpia pagos de clase suelta asociados (sin huérfanos en estadísticas)
+            for (const p of await fetchPayments('enrollment', res.id)) { await deletePayment(p.id); }
             showToast('Reserva cancelada', 'success');
           } catch {
             // If delete fails, try status update
@@ -4240,13 +4248,19 @@ export async function renderCalendario(container) {
           const newExpiresAt = new Date();
           newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
 
-          const { error: bErr } = await supabase.from('bonos').update({
+          const bonoUpdates = {
             total_credits: newTotalCredits,
             total_paid: newTotalPaid,
             status: 'active',
             expires_at: newExpiresAt.toISOString(),
             updated_at: new Date().toISOString(),
-          }).eq('id', bonoId);
+          };
+          // Si el bono tiene precio a medida, el total esperado debe crecer con la
+          // ampliación (igual que en la ficha de Cliente), para no descuadrar pendiente/KPIs.
+          if (bono.custom_total != null) {
+            bonoUpdates.custom_total = Math.round((Number(bono.custom_total) + amount) * 100) / 100;
+          }
+          const { error: bErr } = await supabase.from('bonos').update(bonoUpdates).eq('id', bonoId);
           if (bErr) throw bErr;
 
           // Deduct from saldo if applicable
@@ -4655,6 +4669,10 @@ export async function renderCalendario(container) {
     async function refreshStatusFromPayments() {
       const payments = await fetchPayments('enrollment', eid);
       const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      // Si la inscripción va con bono, sus pagos viven en reservation_type='bono'
+      // (aquí saldría 0) y el estado lo gobierna el bono: NO recalcular ni pisar el
+      // status, que machacaría el 'paid'/'partial' y descuadraría créditos/aforo.
+      if (hasBono) return { payments, totalPaid };
       let newStatus;
       if (totalPaid <= 0) newStatus = 'confirmed';
       else if (clsPrice > 0 && totalPaid >= clsPrice) newStatus = 'paid';
@@ -5330,10 +5348,16 @@ export async function renderCalendario(container) {
 
       const submit = overlay.querySelector('#be-submit');
       submit.disabled = true;
-      let done = 0, failed = 0;
+      let done = 0, failed = 0, capacitySkipped = 0;
       const notifySum = { sent: 0, withoutEmail: 0, failed: 0 };
       for (const c of selected) {
         const upd = { ...changes };
+        // No bajar el aforo por debajo de los inscritos de ESTA clase: se omite ese
+        // campo solo para las clases donde no cabría (el resto del cambio sí se aplica).
+        if (upd.max_students != null && upd.max_students < Number(c.enrolled_count || 0)) {
+          delete upd.max_students;
+          capacitySkipped++;
+        }
         let scheduleChanged = false;
         if (changeTime && newTime) {
           upd.time_start = newTime;
@@ -5358,7 +5382,8 @@ export async function renderCalendario(container) {
         submit.textContent = `Aplicando ${done} / ${selected.length}…`;
       }
       closeBe();
-      const base = failed > 0 ? `${done} actualizadas · ${failed} con error` : `${done} clases actualizadas`;
+      let base = failed > 0 ? `${done} actualizadas · ${failed} con error` : `${done} clases actualizadas`;
+      if (capacitySkipped > 0) base += ` · aforo no bajado en ${capacitySkipped} (tienen más inscritos)`;
       showToast(notifyToastMessage(base, notifySum), failed > 0 ? 'error' : 'success');
       render();
     };
@@ -6540,6 +6565,13 @@ export async function renderCalendario(container) {
       if (!obj.instructor) obj.instructor = null;
       if (!obj.audience) obj.audience = null;
       obj.max_students = parseInt(obj.max_students, 10) || cls.max_students || 8;
+      // No permitir un aforo por debajo de las inscripciones ya existentes (dejaría
+      // la clase sobre-reservada y 'Disponible' en negativo).
+      const curEnrolled = Number(cls.enrolled_count || 0);
+      if (obj.max_students < curEnrolled) {
+        showToast(`La clase tiene ${curEnrolled} inscrito(s): no puedes bajar el aforo por debajo`, 'error');
+        return;
+      }
       // Precio de clase suelta editable (drop-in). Si vacío, usa el de la actividad.
       const editPrice = parseFloat(fd.get('price'));
       obj.price = (editPrice >= 0) ? editPrice : (Number(cls.price) || getPackPrice(obj.type, 1, 0));

@@ -43,9 +43,11 @@ export async function renderReservas(container) {
       byCamp[cid].bookings.push(b);
     });
 
-    // Stats
+    // Stats — ingreso REAL cobrado (total si pagado entero, señal si solo señal),
+    // igual que el dashboard (fetchStats), para no inflar con total_amount.
+    const collected = b => Number((b.status === 'fully_paid' ? b.total_amount : b.deposit_amount) || 0);
     const totalRevenue = filtered.filter(b => ['deposit_paid', 'fully_paid'].includes(b.status))
-      .reduce((s, b) => s + Number(b.total_amount || 0), 0);
+      .reduce((s, b) => s + collected(b), 0);
     const totalDeposits = filtered.filter(b => ['deposit_paid', 'fully_paid'].includes(b.status))
       .reduce((s, b) => s + Number(b.deposit_amount || 0), 0);
 
@@ -77,7 +79,7 @@ export async function renderReservas(container) {
         const c = group.camp;
         const paidCount = group.bookings.filter(b => ['deposit_paid', 'fully_paid'].includes(b.status)).length;
         const groupRevenue = group.bookings.filter(b => ['deposit_paid', 'fully_paid'].includes(b.status))
-          .reduce((s, b) => s + Number(b.total_amount || 0), 0);
+          .reduce((s, b) => s + collected(b), 0);
 
         return `
           <div class="rv-camp-group">

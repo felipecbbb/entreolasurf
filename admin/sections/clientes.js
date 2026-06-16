@@ -29,9 +29,12 @@ async function recalcPaymentState(type, refId) {
     await supabase.from('bookings').update({ deposit_amount: sum, status, updated_at: new Date().toISOString() }).eq('id', refId);
   } else if (type === 'enrollment') {
     const sum = await sumPays();
-    const { data: enr } = await supabase.from('class_enrollments').select('status, surf_classes:class_id(price)').eq('id', refId).single();
+    const { data: enr } = await supabase.from('class_enrollments').select('status, surf_classes:class_id(price, type)').eq('id', refId).single();
     if (enr && enr.status !== 'cancelled') {
-      const price = Number(enr.surf_classes?.price || 0);
+      // Precio efectivo: si la clase no tiene precio (0/NULL) cae al catálogo de 1
+      // sesión, igual que Calendario y estadísticas, para no divergir.
+      const rawPrice = Number(enr.surf_classes?.price || 0);
+      const price = rawPrice > 0 ? rawPrice : getPackPrice(enr.surf_classes?.type, 1);
       const status = sum <= 0 ? 'confirmed' : (price > 0 && sum >= price ? 'paid' : 'partial');
       await supabase.from('class_enrollments').update({ status, updated_at: new Date().toISOString() }).eq('id', refId);
     }
@@ -49,11 +52,6 @@ function getPackPrice(type, sessionCount, fallbackPrice = 0) {
   return maxPrice + (sessionCount - maxTier) * perSession;
 }
 
-// Reserva conjunta: para un bono compartido, desglosa cuántas clases (créditos)
-// consumió cada persona — la titular (family_member_id null) y cada hija.
-// Filtra por status 'confirmed' para cuadrar con bonos.used_credits, que el
-// trigger update_bono_credits() cuenta igual (sin filtrar por familiar).
-// Devuelve [{ key, name, count }] ordenado de mayor a menor consumo.
 // Nombre mostrable de un familiar (nombre + apellido si lo tiene), coherente con
 // el resto del archivo. null = la persona titular de la cuenta.
 function memberDisplayName(fm) {
@@ -63,7 +61,9 @@ function memberDisplayName(fm) {
 
 function computeBonoBreakdown(bono, enrollments) {
   if (!bono) return [];
-  const used = (enrollments || []).filter(e => e.bono_id === bono.id && e.status === 'confirmed');
+  // Cuenta toda inscripción NO cancelada (cuadra con bonos.used_credits tras
+  // migration-fix-enrollment-status-counting, donde el trigger cuenta <> 'cancelled').
+  const used = (enrollments || []).filter(e => e.bono_id === bono.id && e.status !== 'cancelled');
   const byMember = new Map();
   for (const e of used) {
     const key = e.family_member_id || 'titular';
@@ -832,11 +832,15 @@ export async function renderClientes(container) {
     sections.forEach(s => _scrollSpyObserver.observe(s));
   }
 
-  // Recarga coordinada de las secciones de dinero tras cualquier mutación de pago/total
+  // Recarga coordinada de las secciones de dinero tras cualquier mutación de pago/total.
+  // Incluye Surf Camps y Alquileres porque sus filas muestran estado/señal derivados
+  // de payments y deben reflejar el cambio sin recargar la ficha entera.
   function refreshMoneySections(c) {
     resetClientCache(c.id);
     loadBonosTab(c);
     loadPagosTab(c);
+    loadReservasTab(c);
+    loadAlquileresTab(c);
     renderKpis(c);
   }
 
@@ -1839,7 +1843,7 @@ export async function renderClientes(container) {
   async function openEnrollmentDetailModal(c, enr) {
     const cls = enr.surf_class || {};
     const typeLbl = TYPE_LABELS[cls.type] || cls.type || '—';
-    const totalClase = Number(cls.price || 0);
+    const totalClase = Number(cls.price) > 0 ? Number(cls.price) : getPackPrice(cls.type, 1);
     const payments = await fetchPayments('enrollment', enr.id);
     const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
     const pending = Math.max(0, Math.round((totalClase - totalPaid) * 100) / 100);
@@ -1987,8 +1991,12 @@ export async function renderClientes(container) {
           payment_method: method,
           concept: `Pago surf camp ${bk.camp_title || ''}`,
         });
+        // Recalcula deposit_amount/status del booking (igual que al borrar) para que
+        // Reservas y el conteo de plazas no queden desincronizados.
+        await recalcPaymentState('booking', bk.id);
         showToast('Pago añadido', 'success');
         reloadPayments();
+        refreshMoneySections(c);
       } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });
   }
