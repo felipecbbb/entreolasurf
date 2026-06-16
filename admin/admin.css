@@ -4812,6 +4812,179 @@ a.admin-nav-item-external .nav-icon svg {
   margin: 0 0 20px;
 }
 
+/* =========================================================
+   One-page ficha de cliente (índice sticky + KPIs + secciones)
+   ========================================================= */
+.act-detail-layout--onepage {
+  grid-template-columns: 210px 1fr 220px;
+  min-height: auto;
+  align-items: start;
+}
+
+/* Índice lateral sticky (scrollspy) — reusa estética de la nav lateral */
+.cli-toc {
+  position: sticky;
+  top: 76px;
+  align-self: start;
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
+  padding: 12px 0;
+  border-right: 1px solid var(--color-line, #e5e7eb);
+  scrollbar-width: thin;
+}
+.cli-toc-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  font-family: 'Manrope', sans-serif;
+  font-size: .82rem;
+  color: var(--color-muted, #666);
+  text-decoration: none;
+  cursor: pointer;
+  transition: .15s;
+  border-left: 3px solid transparent;
+}
+.cli-toc-item svg { flex-shrink: 0; }
+.cli-toc-item:hover { background: #f3f4f6; color: var(--color-navy, #0f2f39); }
+.cli-toc-item.active {
+  color: #0ea5e9;
+  background: #f0f9ff;
+  border-left-color: #0ea5e9;
+  font-weight: 600;
+}
+
+/* Main one-page: scroll de página (sin overflow propio) */
+.cli-onepage { overflow-y: visible; }
+.cli-section { scroll-margin-top: 84px; margin-bottom: 36px; }
+.cli-section:last-child { margin-bottom: 0; }
+
+/* Subtítulo / contador de sección (sustituye al h3 con count) */
+.cli-sec-count {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .76rem;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--color-muted, #94a3b8);
+}
+
+/* KPIs de la cuenta */
+.cli-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.cli-kpi-card {
+  background: #fff;
+  border: 1px solid var(--color-line, #e5e7eb);
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+.cli-kpi-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--color-muted, #94a3b8);
+  margin-bottom: 4px;
+}
+.cli-kpi-value {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--color-navy, #0f2f39);
+}
+.cli-kpi-card.warn { background: #fffbeb; border-color: #fde68a; }
+.cli-kpi-card.warn .cli-kpi-value,
+.cli-kpi-card.warn .cli-kpi-label { color: #92400e; }
+.cli-kpi-card.ok { background: #f0fdf4; border-color: #bbf7d0; }
+.cli-kpi-card.ok .cli-kpi-value,
+.cli-kpi-card.ok .cli-kpi-label { color: #166534; }
+
+/* Editor de total in-place (bono) */
+.cli-bono-total-row { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.cli-bono-total-display { display: inline-flex; align-items: center; gap: 4px; }
+.cli-bono-total-amount { color: var(--color-navy, #0f2f39); }
+.cli-bono-total-edit,
+.cli-bono-total-save,
+.cli-bono-total-cancel {
+  background: none; border: none; cursor: pointer;
+  padding: 2px 4px; font-size: .85rem; line-height: 1; border-radius: 4px;
+}
+.cli-bono-total-edit { color: #0ea5e9; }
+.cli-bono-total-save { color: #16a34a; font-weight: 700; }
+.cli-bono-total-cancel { color: #dc2626; }
+.cli-bono-total-edit:hover,
+.cli-bono-total-save:hover,
+.cli-bono-total-cancel:hover { background: #f1f5f9; }
+.cli-bono-total-editing { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.cli-bono-total-input {
+  width: 84px; padding: 3px 6px; font-size: .8rem;
+  border: 1px solid #0ea5e9; border-radius: 6px; font-family: 'Manrope', sans-serif;
+}
+.cli-bono-total-scope {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .68rem; color: var(--color-muted, #64748b);
+  cursor: pointer; width: 100%; margin-top: 2px;
+}
+.cli-bono-online-note {
+  margin-top: 6px; font-size: .68rem; color: #92400e;
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px;
+  padding: 3px 8px; display: inline-block;
+}
+
+/* Reserva conjunta (dentro de la card de bono) */
+.cli-conjunta {
+  margin-top: 12px; padding: 10px 12px; background: #f8fafc;
+  border: 1px solid var(--color-line, #e5e7eb); border-radius: 8px;
+}
+.cli-conjunta-title {
+  font-family: 'Space Grotesk', sans-serif; font-size: .72rem; font-weight: 600;
+  color: var(--color-navy, #0f2f39); margin-bottom: 6px;
+}
+.cli-conjunta-members { display: flex; flex-wrap: wrap; gap: 6px; }
+.cli-conjunta-member {
+  font-size: .72rem; padding: 3px 9px; border-radius: 99px;
+  background: #e0f2fe; color: #075985; font-weight: 600;
+}
+
+/* Pill de bono en histórico (color estable por bono) */
+.cli-bono-pill {
+  display: inline-block; font-size: .7rem; font-weight: 600; white-space: nowrap;
+  padding: 2px 8px; border-radius: 99px;
+  background: var(--pill, #0ea5e9); color: #fff;
+}
+.cli-loose-tag {
+  display: inline-block; font-size: .7rem; padding: 2px 8px; border-radius: 99px;
+  background: #f1f5f9; color: #64748b;
+}
+
+/* Responsive one-page */
+@media (max-width: 900px) {
+  .act-detail-layout--onepage { grid-template-columns: 1fr; }
+  .cli-toc {
+    display: flex; flex-direction: row;
+    position: sticky; top: 56px; z-index: 15;
+    max-height: none; overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-bottom: 1px solid var(--color-line, #e5e7eb);
+    padding: 0; background: var(--color-paper, #fff); scrollbar-width: none;
+  }
+  .cli-toc::-webkit-scrollbar { display: none; }
+  .cli-toc .act-nav-group-label { display: none; }
+  .cli-toc-item {
+    border-left: none; border-bottom: 3px solid transparent;
+    white-space: nowrap; padding: 12px 14px; font-size: .78rem; min-height: 44px;
+  }
+  .cli-toc-item.active { border-left-color: transparent; border-bottom-color: #0ea5e9; }
+  .cli-kpi-row { grid-template-columns: 1fr 1fr; }
+  .cli-section { scroll-margin-top: 110px; }
+}
+@media (max-width: 520px) {
+  .cli-kpi-row { gap: 8px; }
+  .cli-kpi-value { font-size: 1.3rem; }
+}
+
 /* Form card */
 .act-form-card {
   background: #fff;

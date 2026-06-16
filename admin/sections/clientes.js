@@ -49,6 +49,42 @@ function getPackPrice(type, sessionCount, fallbackPrice = 0) {
   return maxPrice + (sessionCount - maxTier) * perSession;
 }
 
+// Reserva conjunta: para un bono compartido, desglosa cuántas clases (créditos)
+// consumió cada persona — la titular (family_member_id null) y cada hija.
+// Filtra por status 'confirmed' para cuadrar con bonos.used_credits, que el
+// trigger update_bono_credits() cuenta igual (sin filtrar por familiar).
+// Devuelve [{ key, name, count }] ordenado de mayor a menor consumo.
+// Nombre mostrable de un familiar (nombre + apellido si lo tiene), coherente con
+// el resto del archivo. null = la persona titular de la cuenta.
+function memberDisplayName(fm) {
+  if (!fm) return 'Titular';
+  return fm.full_name + (fm.last_name ? ' ' + fm.last_name : '');
+}
+
+function computeBonoBreakdown(bono, enrollments) {
+  if (!bono) return [];
+  const used = (enrollments || []).filter(e => e.bono_id === bono.id && e.status === 'confirmed');
+  const byMember = new Map();
+  for (const e of used) {
+    const key = e.family_member_id || 'titular';
+    const name = memberDisplayName(e.family_member);
+    const cur = byMember.get(key) || { key, name, count: 0 };
+    cur.count++;
+    byMember.set(key, cur);
+  }
+  return [...byMember.values()].sort((a, b) => b.count - a.count);
+}
+
+// Color estable por bono.id (para agrupar visualmente las clases del mismo bono
+// en el histórico). Hash determinista → paleta corta.
+const BONO_PALETTE = ['#0ea5e9', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#ef4444', '#6366f1'];
+function bonoPillColor(id) {
+  if (!id) return '#94a3b8';
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return BONO_PALETTE[h % BONO_PALETTE.length];
+}
+
 // ---- API helpers (client-specific) ----
 
 async function fetchClientEnrollments(userId) {
@@ -60,19 +96,26 @@ async function fetchClientEnrollments(userId) {
   if (error) { console.warn('fetchClientEnrollments:', error.message); return []; }
   if (!enrollments?.length) return [];
 
+  // Lookups batch (sin N+1): clases + familiares (qué hija) + bonos (qué pack)
   const classIds = [...new Set(enrollments.map(e => e.class_id).filter(Boolean))];
-  let classesMap = {};
-  if (classIds.length) {
-    const { data: classes } = await supabase
-      .from('surf_classes')
-      .select('*')
-      .in('id', classIds);
-    if (classes) classes.forEach(c => { classesMap[c.id] = c; });
-  }
+  const memberIds = [...new Set(enrollments.map(e => e.family_member_id).filter(Boolean))];
+  const bonoIds = [...new Set(enrollments.map(e => e.bono_id).filter(Boolean))];
+
+  const [classesRes, membersRes, bonosRes] = await Promise.all([
+    classIds.length ? supabase.from('surf_classes').select('*').in('id', classIds) : Promise.resolve({ data: [] }),
+    memberIds.length ? supabase.from('family_members').select('id, full_name, last_name').in('id', memberIds) : Promise.resolve({ data: [] }),
+    bonoIds.length ? supabase.from('bonos').select('id, class_type, total_credits, custom_total').in('id', bonoIds) : Promise.resolve({ data: [] }),
+  ]);
+
+  const classesMap = {}; (classesRes.data || []).forEach(c => { classesMap[c.id] = c; });
+  const membersMap = {}; (membersRes.data || []).forEach(m => { membersMap[m.id] = m; });
+  const bonosMap = {}; (bonosRes.data || []).forEach(b => { bonosMap[b.id] = b; });
 
   return enrollments.map(e => ({
     ...e,
     surf_class: classesMap[e.class_id] || null,
+    family_member: membersMap[e.family_member_id] || null, // null = Titular
+    bono: bonosMap[e.bono_id] || null,                      // null = clase suelta
   }));
 }
 
@@ -240,10 +283,26 @@ export async function renderClientes(container) {
   let activeFilter = ''; // '', 'pending_pay', 'pending_assign', 'paid', 'cancelled'
   let debounceTimer = null;
   let selectedClient = null;
-  let activeTab = 'datos';
+  let _scrollSpyObserver = null;
 
   // Cache for auth emails (keyed by user ID)
   const emailCache = {};
+
+  // Cache por render de la ficha one-page: evita refetch duplicado de bonos y
+  // enrollments entre renderKpis, loadBonosTab y loadClasesTab. Se resetea al
+  // entrar a renderDetail y tras cualquier mutación de dinero (ver refreshMoneySections).
+  let _clientCache = { id: null, bonos: null, enrollments: null };
+  function resetClientCache(id) { _clientCache = { id: id ?? null, bonos: null, enrollments: null }; }
+  function getBonos(c) {
+    if (_clientCache.id !== c.id) resetClientCache(c.id);
+    if (!_clientCache.bonos) _clientCache.bonos = fetchClientBonos(c.id);
+    return _clientCache.bonos; // Promise<bono[]>
+  }
+  function getEnrollments(c) {
+    if (_clientCache.id !== c.id) resetClientCache(c.id);
+    if (!_clientCache.enrollments) _clientCache.enrollments = fetchClientEnrollments(c.id);
+    return _clientCache.enrollments; // Promise<enrollment[]>
+  }
 
   // ===================== LIST VIEW =====================
   async function renderList() {
@@ -391,9 +450,8 @@ export async function renderClientes(container) {
         const memberId = tag.dataset.memberId;
         const client = profiles.find(p => p.id === clientId);
         if (!client) return;
-        // Enter detail view first so #cli-tab-content exists
+        // Enter detail view first so the familia section exists
         selectedClient = client;
-        activeTab = 'familia';
         await renderDetail();
         // Now fetch and open member ficha
         const members = await fetchClientFamilyMembers(clientId);
@@ -409,7 +467,6 @@ export async function renderClientes(container) {
         const client = profiles.find(p => p.id === card.dataset.id);
         if (client) {
           selectedClient = client;
-          activeTab = 'datos';
           renderDetail();
         }
       });
@@ -602,28 +659,28 @@ export async function renderClientes(container) {
       if (c._email) emailCache[c.id] = c._email;
     }
 
-    const TABS = [
-      { group: 'CONTENIDO', items: [
-        { id: 'datos', label: 'Datos personales', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
-        { id: 'familia', label: 'Familia', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>' },
-        { id: 'clases', label: 'Historial clases', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' },
-        { id: 'bonos', label: 'Bonos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>' },
-      ]},
-      { group: 'ACTIVIDAD COMERCIAL', items: [
-        { id: 'pagos', label: 'Historial pagos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>' },
-        { id: 'reservas', label: 'Surf Camps', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
-        { id: 'alquileres', label: 'Alquiler Material', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 00-8 0v2"/></svg>' },
-        { id: 'pedidos', label: 'Pedidos Tienda', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>' },
-      ]},
+    // Reset cache por render (bonos/enrollments compartidos entre secciones)
+    resetClientCache(c.id);
+
+    // Secciones del one-page (orden de scroll) + índice lateral (scrollspy).
+    // Las 4 protagonistas primero; el resto debajo. 'datos' trae sus propios
+    // títulos desde renderDatosTab, por eso no lleva <h3> de sección.
+    const SECTIONS = [
+      { id: 'compra', label: 'Resumen de compra', title: 'Resumen de compra', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>' },
+      { id: 'clases', label: 'Histórico de clases', title: 'Histórico de clases', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' },
+      { id: 'pagos', label: 'Resumen de pagos', title: 'Resumen de pagos', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>' },
+      { id: 'familia', label: 'Familia / Reserva conjunta', title: 'Familia · Reserva conjunta', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>' },
+      { id: 'datos', label: 'Datos personales', title: null, icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
+      { id: 'camps', label: 'Surf Camps', title: 'Surf Camps', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
+      { id: 'alquileres', label: 'Alquiler material', title: 'Alquiler de material', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 00-8 0v2"/></svg>' },
+      { id: 'pedidos', label: 'Pedidos tienda', title: 'Pedidos tienda', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>' },
     ];
 
-    // Build tab content (datos is sync, rest are async-loaded)
-    let tabContent = '';
-    if (activeTab === 'datos') {
-      tabContent = renderDatosTab(c);
-    } else {
-      tabContent = '<div class="act-form-card"><p style="color:var(--color-muted)">Cargando…</p></div>';
-    }
+    const sectionHtml = SECTIONS.map(s => `
+      <section class="cli-section" id="sec-${s.id}" data-toc="sec-${s.id}">
+        ${s.title ? `<h3 class="act-detail-section-title">${s.title}</h3>` : ''}
+        <div id="sec-${s.id}-body">${s.id === 'datos' ? renderDatosTab(c) : '<div class="act-form-card"><p style="color:var(--color-muted)">Cargando…</p></div>'}</div>
+      </section>`).join('');
 
     container.innerHTML = `
       <div class="act-detail-page">
@@ -640,20 +697,17 @@ export async function renderClientes(container) {
           </div>
         </div>
 
-        <div class="act-detail-layout">
-          <nav class="act-detail-sidebar">
-            ${TABS.map(group => `
-              <div class="act-nav-group-label">${group.group}</div>
-              ${group.items.map(tab => `
-                <a class="act-nav-item ${activeTab === tab.id ? 'active' : ''}" data-tab="${tab.id}">
-                  ${tab.icon} ${tab.label}
-                </a>
-              `).join('')}
+        <div class="act-detail-layout act-detail-layout--onepage">
+          <nav class="cli-toc" id="cli-toc">
+            <div class="act-nav-group-label">SECCIONES</div>
+            ${SECTIONS.map(s => `
+              <a class="cli-toc-item" data-target="sec-${s.id}">${s.icon} ${s.label}</a>
             `).join('')}
           </nav>
 
-          <main class="act-detail-main" id="cli-tab-content">
-            ${tabContent}
+          <main class="act-detail-main cli-onepage" id="cli-onepage">
+            <div class="cli-kpi-row" id="cli-kpis"></div>
+            ${sectionHtml}
           </main>
 
           <aside class="act-detail-actions">
@@ -689,11 +743,12 @@ export async function renderClientes(container) {
     // ---- Bind events ----
     container.querySelector('#cli-back').addEventListener('click', () => renderList());
 
-    container.querySelectorAll('.act-nav-item').forEach(item => {
+    // Índice lateral: ancla suave a cada sección
+    container.querySelectorAll('.cli-toc-item').forEach(item => {
       item.addEventListener('click', (e) => {
         e.preventDefault();
-        activeTab = item.dataset.tab;
-        renderDetail();
+        container.querySelector('#' + item.dataset.target)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     });
 
@@ -718,14 +773,71 @@ export async function renderClientes(container) {
       if (row) row.style.display = e.target.value === 'true' ? '' : 'none';
     });
 
-    // Load async tab content
-    if (activeTab === 'familia') loadFamiliaTab(c);
-    else if (activeTab === 'clases') loadClasesTab(c);
-    else if (activeTab === 'bonos') loadBonosTab(c);
-    else if (activeTab === 'pagos') loadPagosTab(c);
-    else if (activeTab === 'reservas') loadReservasTab(c);
-    else if (activeTab === 'alquileres') loadAlquileresTab(c);
-    else if (activeTab === 'pedidos') loadPedidosTab(c);
+    // Cargar todas las secciones del one-page (en paralelo, cada una pinta su body)
+    renderKpis(c);
+    loadBonosTab(c);
+    loadClasesTab(c);
+    loadPagosTab(c);
+    loadFamiliaTab(c);
+    loadReservasTab(c);
+    loadAlquileresTab(c);
+    loadPedidosTab(c);
+    setupScrollSpy();
+  }
+
+  // KPIs de la cuenta (total / pendiente / bonos / clases) → #cli-kpis
+  function kpiCard(label, value, tone = '') {
+    return `<div class="cli-kpi-card ${tone}">
+      <div class="cli-kpi-label">${label}</div>
+      <div class="cli-kpi-value">${value}</div>
+    </div>`;
+  }
+  async function renderKpis(c) {
+    const el = container.querySelector('#cli-kpis');
+    if (!el) return;
+    try {
+      const [bonos, enrollments] = await Promise.all([getBonos(c), getEnrollments(c)]);
+      const enriched = (bonos || []).map(b => {
+        const expected = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+        const paid = Number(b.total_paid || 0);
+        return { expected, pending: Math.max(0, Math.round((expected - paid) * 100) / 100), status: b.status };
+      });
+      const activos = enriched.filter(b => b.status === 'active');
+      const totalCuenta = activos.reduce((s, b) => s + b.expected, 0);
+      const pendiente = enriched.reduce((s, b) => s + b.pending, 0);
+      el.innerHTML =
+        kpiCard('Total cuenta', formatCurrency(totalCuenta)) +
+        kpiCard('Pendiente', formatCurrency(pendiente), pendiente > 0 ? 'warn' : 'ok') +
+        kpiCard('Bonos activos', activos.length) +
+        kpiCard('Clases', (enrollments || []).length);
+    } catch (err) {
+      el.innerHTML = kpiCard('Cuenta', '—');
+      console.warn('renderKpis:', err.message);
+    }
+  }
+
+  // ScrollSpy: marca activo en el índice la sección visible más arriba
+  function setupScrollSpy() {
+    if (_scrollSpyObserver) { _scrollSpyObserver.disconnect(); _scrollSpyObserver = null; }
+    const sections = [...container.querySelectorAll('.cli-section[data-toc]')];
+    const tocItems = container.querySelectorAll('.cli-toc-item');
+    if (!sections.length || !tocItems.length) return;
+    _scrollSpyObserver = new IntersectionObserver((entries) => {
+      const visible = entries.filter(e => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (!visible.length) return;
+      const id = visible[0].target.id;
+      tocItems.forEach(t => t.classList.toggle('active', t.dataset.target === id));
+    }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+    sections.forEach(s => _scrollSpyObserver.observe(s));
+  }
+
+  // Recarga coordinada de las secciones de dinero tras cualquier mutación de pago/total
+  function refreshMoneySections(c) {
+    resetClientCache(c.id);
+    loadBonosTab(c);
+    loadPagosTab(c);
+    renderKpis(c);
   }
 
   // ===================== TABS =====================
@@ -829,13 +941,14 @@ export async function renderClientes(container) {
 
   // ===================== FAMILIA TAB =====================
   async function loadFamiliaTab(c) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-familia-body');
+    if (!el) return;
     try {
       const members = await fetchClientFamilyMembers(c.id);
 
       let html = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-          <h3 class="act-detail-section-title" style="margin:0">Familia (${members.length})</h3>
+          <span class="cli-sec-count">${members.length} miembro(s)</span>
           <button class="btn red" id="cli-add-family" style="font-size:.82rem;padding:6px 14px">+ Añadir miembro</button>
         </div>`;
 
@@ -1022,7 +1135,8 @@ export async function renderClientes(container) {
 
   // ---- Member ficha (sub-panel inside Familia tab) ----
   async function openMemberFicha(client, member) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-familia-body');
+    if (!el) return;
     const age = member.birth_date ? calcAge(member.birth_date) : null;
 
     // Fetch enrollments and parent's rentals for this family member
@@ -1213,13 +1327,13 @@ export async function renderClientes(container) {
   }
 
   async function loadClasesTab(c) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-clases-body');
+    if (!el) return;
     try {
-      const enrollments = await fetchClientEnrollments(c.id);
+      const enrollments = await getEnrollments(c);
 
       if (!enrollments.length) {
         el.innerHTML = `
-          <h3 class="act-detail-section-title">Historial de clases</h3>
           <div class="act-form-card">
             <div class="admin-empty"><p>Este cliente no tiene clases registradas</p></div>
           </div>`;
@@ -1228,23 +1342,28 @@ export async function renderClientes(container) {
 
       const rows = enrollments.map((e, i) => {
         const cls = e.surf_class || {};
+        const memberLbl = memberDisplayName(e.family_member);
+        const bonoCell = e.bono
+          ? `<span class="cli-bono-pill" style="--pill:${bonoPillColor(e.bono.id)}">${TYPE_LABELS[e.bono.class_type] || e.bono.class_type} · #${e.bono.id.slice(0, 6)}</span>`
+          : '<span class="cli-loose-tag">Suelta</span>';
         return `<tr class="cli-row-click" data-idx="${i}" style="cursor:pointer">
           <td>${formatDate(cls.date)}</td>
           <td>${TYPE_LABELS[cls.type] || cls.type || '—'}</td>
           <td>${esc(cls.title) || '—'}</td>
           <td>${cls.time_start?.slice(0, 5) || '—'} — ${cls.time_end?.slice(0, 5) || '—'}</td>
-          <td>${esc(cls.instructor) || '—'}</td>
+          <td>${esc(memberLbl)}</td>
+          <td>${bonoCell}</td>
           <td>${statusBadge(e.status || 'confirmed')}</td>
         </tr>`;
       }).join('');
 
       el.innerHTML = `
-        <h3 class="act-detail-section-title">Historial de clases (${enrollments.length})</h3>
+        <div class="cli-sec-count" style="margin-bottom:10px">${enrollments.length} clase(s)</div>
         <div class="act-form-card" style="padding:0;overflow:hidden">
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th>Fecha</th><th>Tipo</th><th>Clase</th><th>Horario</th><th>Instructor</th><th>Estado</th>
+                <th>Fecha</th><th>Tipo</th><th>Clase</th><th>Horario</th><th>Asistente</th><th>Bono</th><th>Estado</th>
               </tr></thead>
               <tbody>${rows}</tbody>
             </table>
@@ -1264,13 +1383,14 @@ export async function renderClientes(container) {
   }
 
   async function loadBonosTab(c) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-compra-body');
+    if (!el) return;
     try {
-      const bonos = await fetchClientBonos(c.id);
+      const [bonos, enrollments] = await Promise.all([getBonos(c), getEnrollments(c)]);
 
       const header = `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-          <h3 class="act-detail-section-title" style="margin:0">Bonos (${bonos.length})</h3>
+          <span class="cli-sec-count">${bonos.length} bono(s)</span>
           <button class="btn red" id="cli-create-bono-btn" style="font-size:.82rem;padding:8px 14px">+ Nuevo bono</button>
         </div>`;
 
@@ -1284,6 +1404,10 @@ export async function renderClientes(container) {
         return;
       }
 
+      // Tipos con >1 bono activo → habilita el toggle "aplicar a todos los de este tipo"
+      const activeTypeCounts = {};
+      bonos.filter(b => b.status === 'active').forEach(b => { activeTypeCounts[b.class_type] = (activeTypeCounts[b.class_type] || 0) + 1; });
+
       const cards = bonos.map(b => {
         const remaining = b.total_credits - b.used_credits;
         const pct = b.total_credits > 0 ? Math.round((b.used_credits / b.total_credits) * 100) : 0;
@@ -1292,10 +1416,14 @@ export async function renderClientes(container) {
         const paid = Number(b.total_paid || 0);
         const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
         const isFullyPaid = pending <= 0;
+        const breakdown = computeBonoBreakdown(b, enrollments);
+        const hasFamily = breakdown.some(m => m.key !== 'titular');
+        const canScopeAll = (activeTypeCounts[b.class_type] || 0) > 1;
+        const typeLabel = TYPE_LABELS[b.class_type] || b.class_type;
         return `
           <div class="cli-bono-card" data-bono-id="${b.id}">
             <div class="cli-bono-header">
-              <strong>${TYPE_LABELS[b.class_type] || b.class_type} — ${b.total_credits} clases</strong>
+              <strong>${typeLabel} — ${b.total_credits} clases</strong>
               <div style="display:flex;gap:6px;align-items:center">
                 ${statusBadge(b.status)}
                 ${isFullyPaid
@@ -1312,9 +1440,29 @@ export async function renderClientes(container) {
               <div class="cli-bono-bar-fill" style="width:${pct}%;background:${isFullyPaid ? '#22c55e' : '#f59e0b'}"></div>
             </div>
             <div class="cli-bono-meta">
-              <span>Pagado: ${formatCurrency(paid)} de ${formatCurrency(expectedPrice)}</span>
-              <span>Caduca: ${formatDate(b.expires_at)}</span>
+              <span class="cli-bono-total-row">
+                Pagado: ${formatCurrency(paid)} de
+                <span class="cli-bono-total-display">
+                  <strong class="cli-bono-total-amount">${formatCurrency(expectedPrice)}</strong>
+                  <button class="cli-bono-total-edit" title="Editar total de la reserva">✎</button>
+                </span>
+                <span class="cli-bono-total-editing" hidden>
+                  <input type="number" step="0.01" min="0" class="cli-bono-total-input" value="${expectedPrice.toFixed(2)}" />
+                  <button class="cli-bono-total-save" data-bono-id="${b.id}" title="Guardar">✓</button>
+                  <button class="cli-bono-total-cancel" title="Cancelar">✕</button>
+                  ${canScopeAll ? `<label class="cli-bono-total-scope"><input type="checkbox" class="cli-bono-scope-all"> a todos los ${typeLabel}</label>` : ''}
+                </span>
+              </span>
+              <span class="cli-bono-caduca">Caduca: ${formatDate(b.expires_at)}</span>
             </div>
+            ${b.order_id != null ? '<div class="cli-bono-online-note">Bono comprado online</div>' : ''}
+            ${hasFamily ? `
+            <div class="cli-conjunta">
+              <div class="cli-conjunta-title">Reserva conjunta · Responsable: ${esc(c.full_name) || '—'}</div>
+              <div class="cli-conjunta-members">
+                ${breakdown.map(m => `<span class="cli-conjunta-member">${esc(m.name)}: ${m.count} clase${m.count === 1 ? '' : 's'}</span>`).join('')}
+              </div>
+            </div>` : ''}
             <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
               ${!isFullyPaid && b.status === 'active' ? `<button class="btn cli-bono-pay-btn" data-bono-id="${b.id}" data-pending="${pending.toFixed(2)}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">Añadir pago</button>` : ''}
               <button class="btn cli-bono-expand-btn" data-bono-id="${b.id}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:6px;cursor:pointer;font-weight:600">+ Ampliar</button>
@@ -1327,6 +1475,51 @@ export async function renderClientes(container) {
         <div class="cli-bonos-grid">${cards}</div>`;
 
       el.querySelector('#cli-create-bono-btn')?.addEventListener('click', () => openCreateBonoModal(c));
+
+      // --- Editor de total in-place ---
+      el.querySelectorAll('.cli-bono-total-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const card = btn.closest('.cli-bono-card');
+          card.querySelector('.cli-bono-total-display').hidden = true;
+          const editing = card.querySelector('.cli-bono-total-editing');
+          editing.hidden = false;
+          editing.querySelector('.cli-bono-total-input')?.focus();
+        });
+      });
+      el.querySelectorAll('.cli-bono-total-cancel').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const card = btn.closest('.cli-bono-card');
+          card.querySelector('.cli-bono-total-editing').hidden = true;
+          card.querySelector('.cli-bono-total-display').hidden = false;
+        });
+      });
+      el.querySelectorAll('.cli-bono-total-save').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const bonoId = btn.dataset.bonoId;
+          const card = btn.closest('.cli-bono-card');
+          const input = card.querySelector('.cli-bono-total-input');
+          const newTotal = parseFloat(input.value);
+          if (isNaN(newTotal) || newTotal < 0) { showToast('Total inválido', 'error'); return; }
+          const b = bonos.find(x => x.id === bonoId);
+          const scopeAll = card.querySelector('.cli-bono-scope-all')?.checked;
+          btn.disabled = true;
+          try {
+            let q = supabase.from('bonos').update({ custom_total: Math.round(newTotal * 100) / 100, updated_at: new Date().toISOString() });
+            if (scopeAll && b) q = q.eq('user_id', c.id).eq('class_type', b.class_type).eq('status', 'active');
+            else q = q.eq('id', bonoId);
+            const { error } = await q;
+            if (error) throw error;
+            showToast(scopeAll ? 'Total actualizado en todos los bonos del tipo' : 'Total actualizado', 'success');
+            refreshMoneySections(c);
+          } catch (err) {
+            showToast('Error: ' + (err.message || ''), 'error');
+            btn.disabled = false;
+          }
+        });
+      });
 
       // Bind add payment to bono
       el.querySelectorAll('.cli-bono-pay-btn').forEach(btn => {
@@ -1410,13 +1603,20 @@ export async function renderClientes(container) {
         const newExpiresAt = new Date();
         newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
 
-        const { error } = await supabase.from('bonos').update({
+        const updates = {
           total_credits: newTotalCredits,
           total_paid: newTotalPaid,
           status: 'active',
           expires_at: newExpiresAt.toISOString(),
           updated_at: new Date().toISOString(),
-        }).eq('id', bono.id);
+        };
+        // Si el bono tiene precio a medida fijado (todos los creados en admin),
+        // el total esperado debe crecer con la ampliación; si no, getPackPrice ya
+        // sigue a total_credits. Así pendiente/KPIs/badge quedan coordinados.
+        if (bono.custom_total != null) {
+          updates.custom_total = Math.round((Number(bono.custom_total) + amount) * 100) / 100;
+        }
+        const { error } = await supabase.from('bonos').update(updates).eq('id', bono.id);
         if (error) throw error;
 
         if (method === 'saldo' && amount > 0) {
@@ -1437,7 +1637,7 @@ export async function renderClientes(container) {
 
         showToast(`Bono ampliado: +${extra} clases · ${formatCurrency(amount)}`, 'success');
         closeModal();
-        loadBonosTab(c);
+        refreshMoneySections(c);
       } catch (err) {
         console.error('Error ampliando bono:', err);
         showToast('Error: ' + (err.message || 'No se pudo ampliar'), 'error');
@@ -1563,7 +1763,7 @@ export async function renderClientes(container) {
         const pendiente = Math.max(0, Math.round((total - amount) * 100) / 100);
         showToast(`Bono creado · cobrado ${formatCurrency(amount)}${pendiente > 0 ? ` · pendiente ${formatCurrency(pendiente)}` : ' · pagado'}`, 'success');
         closeModal();
-        loadBonosTab(c);
+        refreshMoneySections(c);
       } catch (err) {
         console.error('Error creando bono:', err);
         showToast('Error: ' + (err.message || 'No se pudo crear'), 'error');
@@ -1692,6 +1892,10 @@ export async function renderClientes(container) {
         await updateEnrollmentStatus(enr.id, e.target.value);
         enr.status = e.target.value;
         showToast('Estado actualizado', 'success');
+        // El trigger update_bono_credits recalcula used_credits del bono → refresca
+        // compra/pagos/KPIs e histórico (invalida cache) para que cuadren al instante.
+        refreshMoneySections(c);
+        loadClasesTab(c);
       } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });
 
@@ -1722,6 +1926,8 @@ export async function renderClientes(container) {
         await deleteEnrollment(enr.id);
         showToast('Inscripción eliminada', 'success');
         closeModal();
+        // Invalida cache y repinta histórico + compra + pagos + KPIs coordinados
+        refreshMoneySections(c);
         loadClasesTab(c);
       } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });
@@ -1864,7 +2070,8 @@ export async function renderClientes(container) {
   }
 
   async function loadPagosTab(c) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-pagos-body');
+    if (!el) return;
     try {
       // El historial se construye SOLO desde la tabla payments, donde cada pago
       // lleva su reservation_type (booking, bono, enrollment, rental, order, custom).
@@ -1944,7 +2151,7 @@ export async function renderClientes(container) {
 
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-          <h3 class="act-detail-section-title" style="margin:0">Historial de pagos (${timeline.length})</h3>
+          <span class="cli-sec-count">${timeline.length} pago(s)</span>
           <button class="btn red" id="cli-add-payment" style="font-size:.82rem;padding:6px 14px">+ Añadir pago</button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">
@@ -1988,7 +2195,7 @@ export async function renderClientes(container) {
           const idx = parseInt(btn.dataset.idx);
           const t = timeline[idx];
           if (!t?.raw) return;
-          openPaymentEditModal(t.raw, { onSaved: () => loadPagosTab(c) });
+          openPaymentEditModal(t.raw, { onSaved: () => refreshMoneySections(c) });
         });
       });
       el.querySelectorAll('.cli-pay-del-btn').forEach(btn => {
@@ -2000,8 +2207,20 @@ export async function renderClientes(container) {
           if (!confirm(`¿Eliminar este pago de ${formatCurrency(t.amount)}?`)) return;
           try {
             await deletePayment(t.paymentId);
+            if (t.domain === 'custom') {
+              // Saldo a favor: borrar el pago debe revertir el credit_balance
+              // (crear lo suma, así que borrar lo resta). recalcPaymentState no
+              // cubre 'custom', se gestiona aquí.
+              const newBal = Math.max(0, Math.round((Number(c.credit_balance || 0) - Number(t.amount || 0)) * 100) / 100);
+              await supabase.from('profiles').update({ credit_balance: newBal }).eq('id', c.id);
+              c.credit_balance = newBal;
+            } else {
+              // Recalcula el pagado real de la entidad (bono/clase/camp/alquiler)
+              // para que pendiente y KPIs queden coordinados tras el borrado.
+              await recalcPaymentState(t.domain, t.raw?.reference_id);
+            }
             showToast('Pago eliminado', 'success');
-            loadPagosTab(c);
+            refreshMoneySections(c);
           } catch (err) {
             showToast('Error al eliminar: ' + (err.message || ''), 'error');
           }
@@ -2013,13 +2232,13 @@ export async function renderClientes(container) {
   }
 
   async function loadReservasTab(c) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-camps-body');
+    if (!el) return;
     try {
       const bookings = await fetchClientBookings(c.id);
 
       if (!bookings.length) {
         el.innerHTML = `
-          <h3 class="act-detail-section-title">Surf Camps</h3>
           <div class="act-form-card">
             <div class="admin-empty"><p>Este cliente no tiene reservas de surf camp</p></div>
           </div>`;
@@ -2035,7 +2254,6 @@ export async function renderClientes(container) {
       </tr>`).join('');
 
       el.innerHTML = `
-        <h3 class="act-detail-section-title">Surf Camps (${bookings.length})</h3>
         <div class="act-form-card" style="padding:0;overflow:hidden">
           <div class="table-wrap">
             <table>
@@ -2058,13 +2276,13 @@ export async function renderClientes(container) {
   }
 
   async function loadAlquileresTab(c) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-alquileres-body');
+    if (!el) return;
     try {
       const rentals = await fetchClientEquipmentReservations(c.id);
 
       if (!rentals.length) {
         el.innerHTML = `
-          <h3 class="act-detail-section-title">Alquileres de Material</h3>
           <div class="act-form-card">
             <div class="admin-empty"><p>Este cliente no tiene alquileres registrados</p></div>
           </div>`;
@@ -2087,7 +2305,6 @@ export async function renderClientes(container) {
       </tr>`).join('');
 
       el.innerHTML = `
-        <h3 class="act-detail-section-title">Alquileres de Material (${rentals.length})</h3>
         <div class="act-form-card" style="padding:0;overflow:hidden">
           <div class="table-wrap">
             <table>
@@ -2112,13 +2329,13 @@ export async function renderClientes(container) {
   }
 
   async function loadPedidosTab(c) {
-    const el = container.querySelector('#cli-tab-content');
+    const el = container.querySelector('#sec-pedidos-body');
+    if (!el) return;
     try {
       const orders = await fetchClientOrders(c.id);
 
       if (!orders.length) {
         el.innerHTML = `
-          <h3 class="act-detail-section-title">Pedidos Tienda</h3>
           <div class="act-form-card">
             <div class="admin-empty"><p>Este cliente no tiene pedidos en la tienda</p></div>
           </div>`;
@@ -2133,7 +2350,6 @@ export async function renderClientes(container) {
       </tr>`).join('');
 
       el.innerHTML = `
-        <h3 class="act-detail-section-title">Pedidos Tienda (${orders.length})</h3>
         <div class="act-form-card" style="padding:0;overflow:hidden">
           <div class="table-wrap">
             <table>
@@ -2163,7 +2379,7 @@ export async function renderClientes(container) {
     const birthdateEl = container.querySelector('#cli-birthdate');
 
     if (!fullnameEl) {
-      showToast('Ve a la pestaña "Datos personales" para editar', 'error');
+      showToast('No se pudo leer el formulario de datos', 'error');
       return;
     }
 
@@ -2432,10 +2648,8 @@ export async function renderClientes(container) {
 
         closeModal();
 
-        // Refresh current tab
-        if (activeTab === 'bonos') loadBonosTab(c);
-        else if (activeTab === 'pagos') loadPagosTab(c);
-        else renderDetail();
+        // Refresca las secciones de dinero (bonos + pagos + KPIs) de forma coordinada
+        refreshMoneySections(c);
 
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
@@ -2457,7 +2671,7 @@ export async function renderClientes(container) {
     window.__openClientId = null;
     try {
       const { data: cli } = await supabase.from('profiles').select('*').eq('id', _openId).single();
-      if (cli) { selectedClient = cli; activeTab = 'datos'; await renderDetail(); return; }
+      if (cli) { selectedClient = cli; await renderDetail(); return; }
     } catch (e) { console.warn('open client deep-link:', e?.message); }
   }
   await renderList();
