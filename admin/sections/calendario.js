@@ -16,6 +16,7 @@ import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
 import { PACK_PRICING, getPackPrice, bonoExpected, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
 import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry } from '/lib/domain/bonos.js';
+import { openBonoFicha } from '../components/bono-ficha.js';
 import { supabase } from '/lib/supabase.js';
 import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry } from '/lib/shared-constants.js';
 
@@ -902,6 +903,8 @@ export async function renderCalendario(container) {
           const cls = classes.find(c => c.id === classId);
           const enrollment = (enrollmentsCache[classId] || []).find(en => en.id === eid);
           if (!cls || !enrollment) return;
+          // Si la inscripción va con bono → ficha de bono ÚNICA (misma que clientes/reserva-clases)
+          if (enrollment.bono_id) { openBonoFicha(enrollment.bono_id, { onChange: render }); return; }
           openEnrollmentPayModal(cls, enrollment);
         } else if (itemType === 'rental') {
           const rid = row.dataset.rentalId;
@@ -1000,6 +1003,8 @@ export async function renderCalendario(container) {
               try {
                 const classEnrollments = enrollmentsCache[classId] || [];
                 const enrollment = classEnrollments.find(en => en.id === eid);
+                // Inscripción con bono → ficha de bono ÚNICA (misma que clientes/reserva-clases)
+                if (enrollment?.bono_id) { openBonoFicha(enrollment.bono_id, { onChange: render }); return; }
                 const userId = enrollment?.user_id || null;
                 let profile = null;
                 if (userId) {
@@ -2885,7 +2890,16 @@ export async function renderCalendario(container) {
             };
 
             showToast('Reserva confirmada', 'success');
-            openReservationDetail(reservationData, overlay);
+            // Caso común (responsable+familia = un bono): abrir la ficha de bono ÚNICA,
+            // la misma que se ve desde clientes/reserva-clases/calendario. Multi-bono o
+            // sin bono: el resumen de reserva clásico.
+            if (singleBonoId) {
+              if (overlay) overlay.remove();
+              render();
+              await openBonoFicha(singleBonoId, { onChange: render });
+            } else {
+              openReservationDetail(reservationData, overlay);
+            }
           } catch (err) {
             console.error('Error creando reserva:', err);
             let msg = err.message || 'Error desconocido';
