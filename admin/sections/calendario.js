@@ -5104,8 +5104,17 @@ export async function renderCalendario(container) {
   async function openBulkEditClasses() {
     document.getElementById('be-overlay')?.remove();
     const today = getDateStr(new Date());
-    const inThreeMonths = new Date(); inThreeMonths.setMonth(inThreeMonths.getMonth() + 3);
-    const defaultTo = getDateStr(inThreeMonths);
+    // "Hasta" por defecto = ÚLTIMA clase programada, no un +3 meses fijo. Con el +3
+    // meses, las clases más lejanas quedaban fuera del rango y "Seleccionar todas"
+    // no las cargaba → la edición masiva "no se aplicaba a todas las fechas".
+    let defaultTo;
+    try {
+      const { data: lastCls } = await supabase.from('surf_classes')
+        .select('date').neq('status', 'cancelled').gte('date', today)
+        .order('date', { ascending: false }).limit(1).maybeSingle();
+      defaultTo = lastCls?.date || null;
+    } catch { defaultTo = null; }
+    if (!defaultTo) { const f = new Date(); f.setMonth(f.getMonth() + 6); defaultTo = getDateStr(f); }
     const typeOptions = Object.entries(TYPE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
 
     const overlay = document.createElement('div');
