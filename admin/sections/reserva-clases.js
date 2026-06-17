@@ -3,7 +3,8 @@
    ============================================================ */
 import { supabase } from '/lib/supabase.js';
 import { formatDate, formatCurrency, showToast, openModal, closeModal } from '../modules/ui.js';
-import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js';
+import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
+import { bonoExpected } from '/lib/domain/pricing.js';
 
 const BONO_STATUSES = {
   active: 'Activo',
@@ -90,15 +91,7 @@ async function fetchBonoEnrollments(bonoId) {
   return data || [];
 }
 
-function getExpectedPrice(type, totalCredits) {
-  const tiers = PACK_PRICING[type];
-  if (!tiers) return 0;
-  if (totalCredits < tiers.length) return tiers[totalCredits] || 0;
-  const maxTier = tiers.length - 1;
-  const maxPrice = tiers[maxTier];
-  const perSession = maxPrice / maxTier;
-  return maxPrice + (totalCredits - maxTier) * perSession;
-}
+// El precio esperado del bono vive en /lib/domain/pricing.js (bonoExpected).
 
 export async function renderReservaClases(container) {
   let activeTab = 'bonos';
@@ -197,7 +190,7 @@ export async function renderReservaClases(container) {
                 const color = TYPE_COLORS[b.class_type] || '#64748b';
                 const status = BONO_STATUSES[b.status] || b.status;
                 const statusColor = BONO_STATUS_COLORS[b.status] || '#6b7280';
-                const expected = b.custom_total != null ? Number(b.custom_total) : getExpectedPrice(b.class_type, b.total_credits || 0);
+                const expected = bonoExpected(b);
                 const paid = Number(b.total_paid || 0);
                 const pending = Math.max(0, Math.round((expected - paid) * 100) / 100);
                 const pendingHtml = pending > 0 ? `<span style="color:#ef4444;font-size:.72rem;margin-left:4px">(debe ${formatCurrency(pending)})</span>` : '';
@@ -291,7 +284,7 @@ export async function renderReservaClases(container) {
 
     // Total esperado: precio a medida (custom_total) si está fijado, si no catálogo.
     // Misma fórmula que Cliente y Calendario para que no diverjan.
-    const expectedPrice = bono.custom_total != null ? Number(bono.custom_total) : getExpectedPrice(bono.class_type, bono.total_credits || 0);
+    const expectedPrice = bonoExpected(bono);
     const totalPaid = Number(bono.total_paid || 0);
     const pendingAmount = Math.max(0, Math.round((expectedPrice - totalPaid) * 100) / 100);
     const isFullyPaid = pendingAmount <= 0;

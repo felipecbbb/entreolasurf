@@ -4,7 +4,7 @@
 import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, fetchClientsPending } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
-import { PACK_PRICING } from '../modules/constants.js';
+import { getPackPrice, bonoExpected, classPrice } from '/lib/domain/pricing.js';
 import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 
@@ -34,23 +34,14 @@ async function recalcPaymentState(type, refId) {
       // Precio efectivo: si la clase no tiene precio (0/NULL) cae al catálogo de 1
       // sesión, igual que Calendario y estadísticas, para no divergir.
       const rawPrice = Number(enr.surf_classes?.price || 0);
-      const price = rawPrice > 0 ? rawPrice : getPackPrice(enr.surf_classes?.type, 1);
+      const price = classPrice(enr.surf_classes || {});
       const status = sum <= 0 ? 'confirmed' : (price > 0 && sum >= price ? 'paid' : 'partial');
       await supabase.from('class_enrollments').update({ status, updated_at: new Date().toISOString() }).eq('id', refId);
     }
   }
 }
 
-function getPackPrice(type, sessionCount, fallbackPrice = 0) {
-  if (sessionCount <= 0) return 0;
-  const tiers = PACK_PRICING[type];
-  if (!tiers) return fallbackPrice * sessionCount;
-  if (sessionCount < tiers.length) return tiers[sessionCount];
-  const maxTier = tiers.length - 1;
-  const maxPrice = tiers[maxTier];
-  const perSession = maxPrice / maxTier;
-  return maxPrice + (sessionCount - maxTier) * perSession;
-}
+// getPackPrice / bonoExpected / classPrice viven en /lib/domain/pricing.js (fuente única).
 
 // Nombre mostrable de un familiar (nombre + apellido si lo tiene), coherente con
 // el resto del archivo. null = la persona titular de la cuenta.
@@ -798,7 +789,7 @@ export async function renderClientes(container) {
     try {
       const [bonos, enrollments] = await Promise.all([getBonos(c), getEnrollments(c)]);
       const enriched = (bonos || []).map(b => {
-        const expected = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+        const expected = bonoExpected(b);
         const paid = Number(b.total_paid || 0);
         return { expected, pending: Math.max(0, Math.round((expected - paid) * 100) / 100), status: b.status };
       });
@@ -1419,7 +1410,7 @@ export async function renderClientes(container) {
         const remaining = b.total_credits - b.used_credits;
         const pct = b.total_credits > 0 ? Math.round((b.used_credits / b.total_credits) * 100) : 0;
         // Total real del bono (descuento/precio a medida si se fijó) y pagado real
-        const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+        const expectedPrice = bonoExpected(b);
         const paid = Number(b.total_paid || 0);
         const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
         const isFullyPaid = pending <= 0;
@@ -1554,7 +1545,7 @@ export async function renderClientes(container) {
     const classType = bono.class_type;
     const currentCredits = bono.total_credits;
     const currentPaid = Number(bono.total_paid || 0);
-    const currentExpected = bono.custom_total != null ? Number(bono.custom_total) : getPackPrice(classType, currentCredits);
+    const currentExpected = bonoExpected(bono);
 
     function suggestPrice(extra) {
       const newTotal = currentCredits + extra;
@@ -1846,7 +1837,7 @@ export async function renderClientes(container) {
   async function openEnrollmentDetailModal(c, enr) {
     const cls = enr.surf_class || {};
     const typeLbl = TYPE_LABELS[cls.type] || cls.type || '—';
-    const totalClase = Number(cls.price) > 0 ? Number(cls.price) : getPackPrice(cls.type, 1);
+    const totalClase = classPrice(cls);
     const payments = await fetchPayments('enrollment', enr.id);
     const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
     const pending = Math.max(0, Math.round((totalClase - totalPaid) * 100) / 100);
@@ -2457,7 +2448,7 @@ export async function renderClientes(container) {
 
     // Enrich bonos with pricing info
     const enrichedBonos = bonos.map(b => {
-      const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+      const expectedPrice = bonoExpected(b);
       const paid = Number(b.total_paid || 0);
       const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
       return { ...b, expectedPrice, totalPaidReal: paid, pending, isFullyPaid: pending <= 0 };

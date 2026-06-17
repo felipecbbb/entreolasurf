@@ -2,6 +2,7 @@
    API Helpers — Supabase queries for Admin Panel
    ============================================================ */
 import { supabase } from '/lib/supabase.js';
+import { getPackPrice } from '/lib/domain/pricing.js';
 
 // ---- Simple query cache (30s TTL) ----
 const _cache = {};
@@ -384,28 +385,8 @@ export async function fetchPendingOrders() {
   }).filter(o => o.pending > 0);
 }
 
-// Precio esperado de un pack según class_type y nº de créditos (espejo de admin/sections/calendario.js).
-// Si total_credits > tier máximo, extrapola con la tarifa por sesión del último tier.
-const PACK_PRICING_LOCAL = {
-  grupal:     [0, 35, 65, 90, 115, 135, 155, 165],
-  individual: [0, 69, 130, 177, 220, 250],
-  yoga:       [0, 20, 35, 48, 60, 70, 75],
-  paddle:     [0, 49, 95, 135, 170, 205, 240],
-  surfskate:  [0, 30, 55, 78, 95, 115, 130],
-};
-
-function expectedBonoPrice(classType, credits) {
-  if (!credits || credits <= 0) return 0;
-  const tiers = PACK_PRICING_LOCAL[classType];
-  if (!tiers) return 0;
-  if (credits < tiers.length) return tiers[credits];
-  const maxTier = tiers.length - 1;
-  const perSession = tiers[maxTier] / maxTier;
-  return tiers[maxTier] + (credits - maxTier) * perSession;
-}
-
 // Precios reales desde la BD (activity_packs), cacheados 60s. Si no hay tarifa
-// definida para ese tipo, cae al espejo PACK_PRICING_LOCAL.
+// definida para ese tipo, cae al catálogo de /lib/domain/pricing.js (getPackPrice).
 let _packPricing = null, _packPricingTs = 0;
 async function getPackPricing() {
   if (_packPricing && (Date.now() - _packPricingTs) < 60000) return _packPricing;
@@ -433,7 +414,7 @@ function expectedBonoPriceDB(pricing, classType, credits) {
     if (credits > m.maxN) return Math.round((m.maxPrice + (credits - m.maxN) * m.extra) * 100) / 100;
     return Math.round((m.maxPrice / m.maxN) * credits * 100) / 100; // aproxima si falta el tier exacto
   }
-  return expectedBonoPrice(classType, credits); // fallback al espejo hardcodeado
+  return getPackPrice(classType, credits); // fallback al catálogo (lib/domain/pricing)
 }
 
 // Bonos activos cuyo total_paid < precio esperado del catálogo.

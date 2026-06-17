@@ -1,25 +1,7 @@
 import { fetchUserBonos, fetchPacksForType, upgradeBono, startBonoBalanceCheckout } from '/lib/bonos.js';
 import { supabase } from '/lib/supabase.js';
 import { formatDate, formatPrice, TYPE_LABELS } from '/lib/utils.js';
-
-const PACK_PRICING = {
-  grupal:     [0, 35, 65, 90, 115, 135, 155, 165],
-  individual: [0, 69, 130, 177, 220, 250],
-  yoga:       [0, 20, 35, 48, 60, 70, 75],
-  paddle:     [0, 49, 95, 135, 170, 205, 240],
-  surfskate:  [0, 30, 55, 78, 95, 115, 130],
-};
-
-function getPackPrice(type, sessionCount) {
-  if (sessionCount <= 0) return 0;
-  const tiers = PACK_PRICING[type];
-  if (!tiers) return 0;
-  if (sessionCount < tiers.length) return tiers[sessionCount];
-  const maxTier = tiers.length - 1;
-  const maxPrice = tiers[maxTier];
-  const perSession = maxPrice / maxTier;
-  return maxPrice + (sessionCount - maxTier) * perSession;
-}
+import { bonoExpected } from '/lib/domain/pricing.js';
 
 export async function renderBonos(panel, switchTab) {
   const bonos = await fetchUserBonos();
@@ -58,7 +40,7 @@ function renderBonoCard(b, dimmed, switchTab) {
   const isActive = b.status === 'active' || b.status === 'exhausted';
 
   // Payment info — total real (respeta descuento custom_total) y pagado real
-  const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
+  const expectedPrice = bonoExpected(b);
   const paid = Number(b.total_paid || 0);
   const pending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
   const isFullyPaid = pending <= 0;

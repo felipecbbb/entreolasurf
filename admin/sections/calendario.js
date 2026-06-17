@@ -12,22 +12,12 @@ import {
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
-import { TYPE_LABELS, TYPE_COLORS, PACK_PRICING } from '../modules/constants.js';
+import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
+import { PACK_PRICING, getPackPrice, bonoExpected } from '/lib/domain/pricing.js';
 import { supabase } from '/lib/supabase.js';
 import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry } from '/lib/shared-constants.js';
 
-// Get pack price for a person: uses tiered pricing, extra sessions beyond max tier use the per-session rate of max tier
-// fallbackPrice is used when no pack pricing exists for the type
-function getPackPrice(type, sessionCount, fallbackPrice = 0) {
-  if (sessionCount <= 0) return 0;
-  const tiers = PACK_PRICING[type];
-  if (!tiers) return fallbackPrice * sessionCount;
-  if (sessionCount < tiers.length) return tiers[sessionCount];
-  const maxTier = tiers.length - 1;
-  const maxPrice = tiers[maxTier];
-  const perSession = maxPrice / maxTier;
-  return maxPrice + (sessionCount - maxTier) * perSession;
-}
+// getPackPrice / bonoExpected viven en /lib/domain/pricing.js (fuente única).
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -386,7 +376,7 @@ export async function renderCalendario(container) {
       // status de la inscripción.
       let isPaid, isPartial;
       if (e.bono) {
-        const expected = e.bono.custom_total != null ? Number(e.bono.custom_total) : getPackPrice(e.bono.class_type, e.bono.total_credits, 0);
+        const expected = bonoExpected(e.bono);
         // total_paid se mantiene sincronizado con la suma de payments en todos los flujos
         const bonoPaid = Number(e.bono.total_paid || 0);
         // Mismo redondeo a céntimo que Cliente/Reserva-clases (evita verde aquí y rojo allí)
