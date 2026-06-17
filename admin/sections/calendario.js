@@ -445,7 +445,7 @@ export async function renderCalendario(container) {
           <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${isPaid ? '#16a34a' : isPartial ? '#d97706' : '#dc2626'}" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
           </span>
-          ${e.bono ? `<button class="cal-pending-btn" data-eid="${e.id}" data-client-name="${name}" title="Dejar pendiente · libera el crédito del bono para usarlo otro día">
+          ${e.bono ? `<button class="cal-pending-btn" data-eid="${e.id}" data-client-name="${name}" data-attended="${isAttended}" title="Dejar pendiente · libera el crédito del bono para usarlo otro día">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a16207" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
           </button>` : ''}
           <span class="cal-client-move-btns">
@@ -987,7 +987,12 @@ export async function renderCalendario(container) {
         const eid = btn.dataset.eid;
         const name = btn.dataset.clientName || 'esta persona';
         if (!eid) return;
-        if (!confirm(`¿Dejar pendiente la clase de ${name}?\n\nEl crédito del bono no se gasta: queda pendiente de asignar para usarlo otro día.`)) return;
+        // Si ya está marcada como asistida, avisar de la incoherencia (devolver el
+        // crédito de una clase a la que ya asistió).
+        const msg = btn.dataset.attended === 'true'
+          ? `${name} ya está marcada como ASISTIÓ a esta clase.\n\n¿Aun así dejarla pendiente y devolver el crédito del bono?`
+          : `¿Dejar pendiente la clase de ${name}?\n\nEl crédito del bono no se gasta: queda pendiente de asignar para usarlo otro día.`;
+        if (!confirm(msg)) return;
         try {
           const { error } = await supabase.from('class_enrollments')
             .update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', eid);

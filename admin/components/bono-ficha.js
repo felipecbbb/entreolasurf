@@ -158,6 +158,11 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
       #bf-overlay .bf-form label { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--color-muted); }
       #bf-overlay .bf-form input, #bf-overlay .bf-form select { padding:8px 10px; border:1px solid var(--color-line,#e5e7eb); border-radius:8px; font-size:.9rem; background:#fff; }
       #bf-overlay .bf-form .save { background:#22c55e; color:#fff; border:none; border-radius:8px; padding:9px 18px; font-weight:700; cursor:pointer; font-size:.86rem; }
+      /* display en CSS (no inline) para que el atributo [hidden] sí oculte el toggle */
+      #bf-overlay .bf-total-show { display:inline-flex; align-items:center; gap:6px; }
+      #bf-overlay .bf-total-show[hidden] { display:none; }
+      #bf-overlay .bf-total-edit-box { display:inline-flex; align-items:center; gap:4px; margin-top:4px; }
+      #bf-overlay .bf-total-edit-box[hidden] { display:none; }
       #bf-overlay .bf-section-title { font-size:.74rem; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); font-weight:700; margin:0 0 8px; }
       #bf-overlay .bf-cred-pill { font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:99px; background:#e0f2fe; color:#075985; }
       #bf-overlay .bf-bar { height:8px; background:#eef0f2; border-radius:99px; overflow:hidden; margin:8px 0 4px; }
@@ -190,10 +195,10 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
             <div class="bf-kpi ${remaining > 0 ? 'pending' : ''}"><div class="l">Pendientes de asignar</div><div class="v">${remaining}</div></div>
             <div class="bf-kpi"><div class="l">Pagado</div><div class="v">${formatCurrency(paid)}</div></div>
             <div class="bf-kpi"><div class="l">Total del bono</div>
-              <div class="v bf-total-show" style="display:flex;align-items:center;gap:6px">${formatCurrency(expected)}
+              <div class="v bf-total-show">${formatCurrency(expected)}
                 <button class="bf-total-edit" title="Editar total" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:.95rem">✎</button>
               </div>
-              <span class="bf-total-edit-box" hidden style="display:inline-flex;align-items:center;gap:4px;margin-top:4px">
+              <span class="bf-total-edit-box" hidden>
                 <input type="number" step="0.01" min="0" class="bf-total-input" value="${expected.toFixed(2)}" style="width:90px;padding:4px 6px;border:1px solid #0ea5e9;border-radius:6px" />
                 <button class="bf-total-save" style="background:none;border:none;color:#16a34a;cursor:pointer;font-weight:700;font-size:1.05rem">✓</button>
                 <button class="bf-total-cancel" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1.05rem">✕</button>
