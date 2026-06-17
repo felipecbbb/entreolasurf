@@ -7,7 +7,7 @@ import {
   searchProfiles, moveEnrollment, updateEnrollmentStatus, updateEnrollmentAttendance,
   createClientFromAdmin, fetchEquipment, createEquipmentReservation,
   fetchEquipmentReservationsOverlapping, updateEquipmentReservationStatus,
-  updateEquipmentReservation, markEquipmentReservationPaid, markEquipmentReservationUnpaid,
+  updateEquipmentReservation,
   fetchPayments, createPayment, deletePayment,
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
@@ -951,18 +951,18 @@ export async function renderCalendario(container) {
           const rentalIsPaid = rTotal > 0 ? rDeposit >= rTotal : rDeposit > 0;
           try {
             if (rentalIsPaid) {
-              await markEquipmentReservationUnpaid(rid);
-              // Borra los pagos de alquiler asociados (coherencia con payments)
+              // Borra los pagos y recalcula deposit_paid = SUM (payments = verdad)
               const pays = await fetchPayments('rental', rid);
               for (const p of pays) { try { await deletePayment(p.id); } catch {} }
+              await recalcPaidState('rental', rid);
               showToast('Marcado como pendiente', 'success');
             } else {
-              await markEquipmentReservationPaid(rid, rTotal > 0 ? rTotal : 0.01);
-              // Registra el pago para que cuente en estadísticas (payments = verdad).
-              // Los alquileres gratis (total 0) no generan ingreso.
-              if (rTotal > 0) {
+              // Cobra solo el RESTO (no el total de nuevo si ya había señal) y recalcula.
+              const already = (await fetchPayments('rental', rid)).reduce((s, p) => s + Number(p.amount || 0), 0);
+              const remainder = rTotal > 0 ? round2(rTotal - already) : 0;
+              if (remainder > 0) {
                 await createPayment({
-                  amount: rTotal,
+                  amount: remainder,
                   payment_method: 'efectivo',
                   channel: 'in_person',
                   reservation_type: 'rental',
@@ -970,6 +970,7 @@ export async function renderCalendario(container) {
                   concept: `Alquiler ${reservation?.rental_equipment?.name || reservation?.equipment_type || ''}`.trim(),
                 });
               }
+              await recalcPaidState('rental', rid);
               showToast('Marcado como pagado', 'success');
             }
             render();
@@ -6278,7 +6279,7 @@ export async function renderCalendario(container) {
           totalAmount = v; r.total_amount = v;
           showToast('Precio actualizado', 'success');
           renderRdPanel();
-        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }
       });
 
       // Cancel
