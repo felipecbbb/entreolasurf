@@ -5,41 +5,11 @@ import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fet
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { getPackPrice, bonoExpected, classPrice } from '/lib/domain/pricing.js';
+import { recalcPaidState as recalcPaymentState, recalcBonoPaid } from '/lib/domain/payments.js';
 import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 
-// Recalcula el estado/importe pagado de una entidad desde la suma real de sus
-// pagos (payments = única verdad). Se usa tras crear/borrar un pago.
-async function recalcPaymentState(type, refId) {
-  if (!refId) return;
-  const sumPays = async () => {
-    const { data } = await supabase.from('payments').select('amount')
-      .eq('reservation_type', type).eq('reference_id', refId);
-    return (data || []).reduce((s, p) => s + Number(p.amount || 0), 0);
-  };
-  if (type === 'bono') {
-    await supabase.from('bonos').update({ total_paid: await sumPays(), updated_at: new Date().toISOString() }).eq('id', refId);
-  } else if (type === 'rental') {
-    await supabase.from('equipment_reservations').update({ deposit_paid: await sumPays(), updated_at: new Date().toISOString() }).eq('id', refId);
-  } else if (type === 'booking') {
-    const sum = await sumPays();
-    const { data: bk } = await supabase.from('bookings').select('total_amount').eq('id', refId).single();
-    const total = Number(bk?.total_amount || 0);
-    const status = sum <= 0 ? 'pending' : (total > 0 && sum >= total ? 'fully_paid' : 'deposit_paid');
-    await supabase.from('bookings').update({ deposit_amount: sum, status, updated_at: new Date().toISOString() }).eq('id', refId);
-  } else if (type === 'enrollment') {
-    const sum = await sumPays();
-    const { data: enr } = await supabase.from('class_enrollments').select('status, surf_classes:class_id(price, type)').eq('id', refId).single();
-    if (enr && enr.status !== 'cancelled') {
-      // Precio efectivo: si la clase no tiene precio (0/NULL) cae al catálogo de 1
-      // sesión, igual que Calendario y estadísticas, para no divergir.
-      const rawPrice = Number(enr.surf_classes?.price || 0);
-      const price = classPrice(enr.surf_classes || {});
-      const status = sum <= 0 ? 'confirmed' : (price > 0 && sum >= price ? 'paid' : 'partial');
-      await supabase.from('class_enrollments').update({ status, updated_at: new Date().toISOString() }).eq('id', refId);
-    }
-  }
-}
+// recalcPaymentState vive en /lib/domain/payments.js (recalcPaidState).
 
 // getPackPrice / bonoExpected / classPrice viven en /lib/domain/pricing.js (fuente única).
 
@@ -2575,14 +2545,6 @@ export async function renderClientes(container) {
           if (!bonoId) { showToast('Selecciona un bono', 'error'); submitBtn.disabled = false; submitBtn.textContent = 'Registrar pago'; return; }
 
           const bono = enrichedBonos.find(b => b.id === bonoId);
-          const newTotalPaid = (bono?.totalPaidReal || 0) + amount;
-
-          // Update bonos.total_paid
-          const { error } = await supabase
-            .from('bonos')
-            .update({ total_paid: newTotalPaid })
-            .eq('id', bonoId);
-          if (error) throw error;
 
           // Pago del bono: referenciado al bono (no a un enrollment), tipo 'bono'
           await createPayment({
@@ -2592,6 +2554,8 @@ export async function renderClientes(container) {
             payment_method: method,
             concept: `Pago bono ${TYPE_LABELS[bono?.class_type] || ''} (${bono?.total_credits} clases)`,
           });
+          // total_paid = SUM real de payments (evita deriva por incrementos manuales)
+          const newTotalPaid = await recalcBonoPaid(bonoId);
 
           // If fully paid now, update enrollment statuses
           if (newTotalPaid >= (bono?.expectedPrice || 0)) {

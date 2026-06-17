@@ -14,6 +14,7 @@ import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
 import { PACK_PRICING, getPackPrice, bonoExpected } from '/lib/domain/pricing.js';
+import { recalcBonoPaid } from '/lib/domain/payments.js';
 import { supabase } from '/lib/supabase.js';
 import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry } from '/lib/shared-constants.js';
 
@@ -3660,9 +3661,7 @@ export async function renderCalendario(container) {
       // Mantiene total_paid del bono = suma de sus pagos (al editar/borrar)
       async function syncBonoPaid() {
         if (!res.linkedBonoId) return;
-        const bp = await fetchPayments('bono', res.linkedBonoId);
-        const sum = bp.reduce((s, p) => s + Number(p.amount || 0), 0);
-        await supabase.from('bonos').update({ total_paid: sum, updated_at: new Date().toISOString() }).eq('id', res.linkedBonoId);
+        await recalcBonoPaid(res.linkedBonoId);
       }
 
       // Editar pago (método/fecha/concepto) — da igual web o playa
@@ -4248,10 +4247,8 @@ export async function renderCalendario(container) {
             concept: `Pago bono ${TYPE_LABELS[bono.class_type] || bono.class_type}`,
           });
 
-          // total_paid = SUM real de payments (no derivar del snapshot del panel, que
-          // puede ignorar cobros recientes del confirm)
-          const newPaid = (await fetchPayments('bono', bonoId)).reduce((s, p) => s + Number(p.amount || 0), 0);
-          await supabase.from('bonos').update({ total_paid: Math.round(newPaid * 100) / 100, updated_at: new Date().toISOString() }).eq('id', bonoId);
+          // total_paid = SUM real de payments (fuente única en dominio)
+          const newPaid = await recalcBonoPaid(bonoId);
 
           // Update local bono data
           bono.totalPaidReal = newPaid;
@@ -4404,9 +4401,8 @@ export async function renderCalendario(container) {
             });
           }
 
-          // total_paid = SUM real de payments (no derivar del snapshot)
-          const newTotalPaid = (await fetchPayments('bono', bonoId)).reduce((s, p) => s + Number(p.amount || 0), 0);
-          await supabase.from('bonos').update({ total_paid: Math.round(newTotalPaid * 100) / 100 }).eq('id', bonoId);
+          // total_paid = SUM real de payments (fuente única en dominio)
+          const newTotalPaid = await recalcBonoPaid(bonoId);
 
           // Update local state so renderDetail refleje cambios sin recargar
           bono.total_credits = newTotalCredits;
