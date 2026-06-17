@@ -525,7 +525,7 @@ export async function renderCalendario(container) {
       <div class="cal-session-card cal-rental-card" data-rental-id="${r.id}">
         <div class="cal-session-header" style="background:#0ea5e9;cursor:pointer">
           <div class="cal-session-header-left">
-            <span class="cal-session-time">${r.date_start} → ${r.date_end}</span>
+            <span class="cal-session-time">${r.time_start ? r.time_start.slice(0, 5) + ' · ' : ''}${r.date_start} → ${r.date_end}</span>
             <span class="cal-session-title">${equipName}</span>
           </div>
           <div class="cal-session-header-right">
@@ -5466,6 +5466,12 @@ export async function renderCalendario(container) {
                     <input type="date" name="date_start" value="${dateStr}" required />
                   </div>
                   <div class="ns-field">
+                    <label>Hora inicio</label>
+                    <input type="time" name="time_start" value="10:00" required />
+                  </div>
+                </div>
+                <div class="ns-field-2col">
+                  <div class="ns-field">
                     <label>Fecha fin</label>
                     <input type="date" name="date_end" value="${dateStr}" required />
                   </div>
@@ -5779,9 +5785,6 @@ export async function renderCalendario(container) {
       const qty = parseInt(fd.get('quantity')) || 1;
       totalPrice *= qty;
 
-      const eqId = document.getElementById('nr-equipment')?.value;
-      const deposit = Number(equipmentMap[eqId]?.deposit) || 0;
-
       const submitBtn = document.getElementById('ns-submit') || e.target.querySelector('button[type="submit"]');
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creando reserva…'; }
 
@@ -5811,7 +5814,10 @@ export async function renderCalendario(container) {
           size: fd.get('size') || null,
           quantity: qty,
           total_amount: totalPrice,
-          deposit_paid: deposit,
+          // Nace SIN cobrar: deposit_paid lo sincroniza el icono de pago (que crea el
+          // payment). Antes se metía aquí la fianza del material y salía siempre pagado.
+          deposit_paid: 0,
+          time_start: fd.get('time_start') || null,
           status: 'confirmed',
           notes: Object.keys(extraData).length ? JSON.stringify(extraData) : null,
         });
@@ -5944,6 +5950,7 @@ export async function renderCalendario(container) {
                   <div style="display:flex;align-items:center;gap:6px;font-size:.9rem">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                     <input type="date" id="rd-date-start" value="${r.date_start?.slice(0, 10) || ''}" style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:.85rem;font-family:inherit" />
+                    <input type="time" id="rd-time-start" value="${r.time_start ? r.time_start.slice(0, 5) : ''}" title="Hora de inicio" style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:.85rem;font-family:inherit" />
                   </div>
                   <div style="display:flex;align-items:center;gap:6px;font-size:.9rem;margin-top:4px">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
@@ -6304,6 +6311,17 @@ export async function renderCalendario(container) {
       // Date change handlers
       const dateStartInput = overlay.querySelector('#rd-date-start');
       const dateEndInput = overlay.querySelector('#rd-date-end');
+      const timeStartInput = overlay.querySelector('#rd-time-start');
+
+      timeStartInput?.addEventListener('change', async () => {
+        const newTime = timeStartInput.value || null;
+        try {
+          await updateEquipmentReservation(r.id, { time_start: newTime });
+          r.time_start = newTime;
+          showToast('Hora actualizada', 'success');
+          renderRdPanel();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }
+      });
 
       dateStartInput?.addEventListener('change', async () => {
         const newStart = dateStartInput.value;
