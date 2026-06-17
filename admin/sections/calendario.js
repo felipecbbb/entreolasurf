@@ -1037,7 +1037,7 @@ export async function renderCalendario(container) {
                       const bPayments = await fetchPayments('bono', b.id);
                       const totalPaidReal = bPayments.reduce((s, p) => s + Number(p.amount || 0), 0) || Number(b.total_paid || 0);
                       // Total del bono: el fijado a mano (descuento) si existe, si no el del catálogo
-                      const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(cls.type, b.total_credits, Number(cls.price || 0));
+                      const expectedPrice = bonoExpected(b);
                       const pending = Math.max(0, Math.round((expectedPrice - totalPaidReal) * 100) / 100);
                       return { ...b, totalPaidReal, expectedPrice, pendingAmount: pending, isFullyPaid: pending <= 0 };
                     }));
@@ -2102,7 +2102,7 @@ export async function renderCalendario(container) {
               // (el filtro used<total ya descarta los agotados; incluir 'exhausted' solo
               //  alinea el preview con el handler de confirmar)
               const allBonos = (bonos || []).filter(b => b.used_credits < b.total_credits).map(b => {
-                const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
+                const expectedPrice = bonoExpected(b);
                 // total_paid se mantiene sincronizado con la suma de payments (sin suponer importes)
                 const paid = Number(b.total_paid || 0);
                 const bPending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
@@ -3747,23 +3747,12 @@ export async function renderCalendario(container) {
       });
 
       // Bono pay buttons
-      overlay.querySelectorAll('.rv-bono-pay-btn').forEach(btn => {
+      // Pagar y ampliar bono → ficha de bono ÚNICA (misma que el resto de paneles)
+      overlay.querySelectorAll('.rv-bono-pay-btn, .rv-bono-expand-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const bonoId = btn.dataset.bonoId;
-          const pending = parseFloat(btn.dataset.pending) || 0;
-          const pid = btn.dataset.personId;
-          openBonoPayModal(res, overlay, pid, bonoId, pending);
-        });
-      });
-
-      // Bono expand buttons (ampliar créditos)
-      overlay.querySelectorAll('.rv-bono-expand-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const bonoId = btn.dataset.bonoId;
-          const pid = btn.dataset.personId;
-          openBonoExpandModal(res, overlay, pid, bonoId);
+          if (bonoId) openBonoFicha(bonoId, { onChange: () => { renderDetail(); render(); } });
         });
       });
 
@@ -4137,11 +4126,9 @@ export async function renderCalendario(container) {
         res.payments.push({ ...savedPayment, method: effectiveMethod, creditUsed, date: savedPayment.payment_date || new Date().toISOString() });
 
         if (isBono) {
-          // total_paid del bono = suma de sus pagos; si queda saldado, sus
+          // total_paid del bono = suma de sus pagos (dominio); si queda saldado, sus
           // inscripciones pasan a 'paid' (el color del calendario sale del bono)
-          const bp = await fetchPayments('bono', res.linkedBonoId);
-          const sum = bp.reduce((s, p) => s + Number(p.amount || 0), 0);
-          await supabase.from('bonos').update({ total_paid: sum, updated_at: new Date().toISOString() }).eq('id', res.linkedBonoId);
+          await recalcBonoPaid(res.linkedBonoId);
           if (res.pending <= 0) {
             await supabase.from('class_enrollments').update({ status: 'paid' })
               .eq('bono_id', res.linkedBonoId).in('status', ['confirmed', 'partial']);

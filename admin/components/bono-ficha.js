@@ -13,7 +13,7 @@ import { openModal, closeModal, showToast, formatDate, formatCurrency, statusBad
 import { TYPE_LABELS } from '../modules/constants.js';
 import { createPayment, deletePayment, fetchPayments } from '../modules/api.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
-import { bonoExpected, bonoPending, bonoFullyPaid, getPackPrice, round2 } from '/lib/domain/pricing.js';
+import { bonoExpected, getPackPrice, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
 import { extendBono, bonoAvailable, defaultBonoExpiry } from '/lib/domain/bonos.js';
 
@@ -52,9 +52,11 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
 
   const typeLbl = TYPE_LABELS[bono.class_type] || bono.class_type;
   const expected = bonoExpected(bono);
-  const paid = round2(Number(bono.total_paid || 0));
-  const pending = bonoPending(bono);
-  const fullyPaid = bonoFullyPaid(bono);
+  // Pagado = SUM(payments) o total_paid (el mayor), igual que los paneles de pendientes (api.js).
+  const paidSum = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
+  const paid = Math.max(paidSum, round2(Number(bono.total_paid || 0)));
+  const pending = Math.max(0, round2(expected - paid));
+  const fullyPaid = pending <= 0;
   const remaining = bonoAvailable(bono);
   const pct = bono.total_credits > 0 ? Math.round((bono.used_credits / bono.total_credits) * 100) : 0;
   const cli = bono.profiles || {};
@@ -73,13 +75,17 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
 
   const enrollHtml = enrollments.length ? enrollments.map(e => {
     const c = e.surf_classes || {};
-    const st = e.status === 'cancelled' ? 'Cancelada' : e.attendance === true ? 'Asistió' : e.attendance === false ? 'No asistió' : (e.status || 'Inscrito');
+    // Estado = asistencia si está registrada; si no, estado de la inscripción.
+    const estado = e.status === 'cancelled' ? statusBadge('cancelled')
+      : e.attendance === true ? '<span style="color:#16a34a;font-weight:600">Asistió</span>'
+      : e.attendance === false ? '<span style="color:#6b7280">No asistió</span>'
+      : statusBadge(e.status || 'confirmed');
     return `<tr>
       <td>${formatDate(c.date)}</td>
       <td>${c.time_start ? c.time_start.slice(0, 5) : '—'}</td>
       <td>${esc(memberName(e))}</td>
       <td>${esc(c.title || TYPE_LABELS[c.type] || '')}</td>
-      <td>${statusBadge(e.status === 'cancelled' ? 'cancelled' : (e.status || 'confirmed'))}</td>
+      <td>${estado}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="5" style="color:var(--color-muted);padding:10px">Aún no se han usado créditos</td></tr>';
 
@@ -188,17 +194,21 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     const extra = parseInt(prompt('¿Cuántas clases añadir?', '1'), 10);
     if (!extra || extra <= 0) return;
     const newTotal = (bono.total_credits || 0) + extra;
-    const suggested = round2(getPackPrice(bono.class_type, newTotal) - expected);
-    const charge = parseFloat(prompt(`Importe a cobrar por la ampliación (€). Sugerido: ${Math.max(0, suggested).toFixed(2)}`, Math.max(0, suggested).toFixed(2)));
-    if (charge == null || isNaN(charge)) return;
+    const suggested = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - expected));
+    const charge = parseFloat(prompt(`Importe a cobrar por la ampliación (€). Sugerido: ${suggested.toFixed(2)}`, suggested.toFixed(2)));
+    if (charge == null || isNaN(charge) || charge < 0) return;
+    // Validar el método ANTES de tocar el bono: si es inválido, no ampliar (evita
+    // descuadre con cobro perdido en silencio).
+    let method = null;
+    if (charge > 0) {
+      method = (prompt(`Método del cobro (${METHODS.join(' / ')})`, 'efectivo') || '').trim().toLowerCase();
+      if (!METHODS.includes(method)) { showToast('Método no válido — no se amplió', 'error'); return; }
+    }
     try {
       const newCustomTotal = bono.custom_total != null ? round2(Number(bono.custom_total) + charge) : null;
       await extendBono(bonoId, { newTotalCredits: newTotal, newCustomTotal, status: 'active', expires_at: defaultBonoExpiry() });
-      if (charge > 0) {
-        const method = (prompt(`Método del cobro (${METHODS.join(' / ')})`, 'efectivo') || '').trim().toLowerCase();
-        if (METHODS.includes(method)) {
-          await createPayment({ reservation_type: 'bono', reference_id: bonoId, amount: charge, payment_method: method, concept: `Ampliación bono ${typeLbl} (+${extra})` });
-        }
+      if (charge > 0 && method) {
+        await createPayment({ reservation_type: 'bono', reference_id: bonoId, amount: charge, payment_method: method, concept: `Ampliación bono ${typeLbl} (+${extra})` });
       }
       await recalcBonoPaid(bonoId);
       showToast(`Bono ampliado +${extra} clases`, 'success');

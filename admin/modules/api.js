@@ -2,7 +2,7 @@
    API Helpers — Supabase queries for Admin Panel
    ============================================================ */
 import { supabase } from '/lib/supabase.js';
-import { getPackPrice } from '/lib/domain/pricing.js';
+import { getPackPrice, bonoExpected, classPrice, loadPricing } from '/lib/domain/pricing.js';
 
 // ---- Simple query cache (30s TTL) ----
 const _cache = {};
@@ -385,37 +385,8 @@ export async function fetchPendingOrders() {
   }).filter(o => o.pending > 0);
 }
 
-// Precios reales desde la BD (activity_packs), cacheados 60s. Si no hay tarifa
-// definida para ese tipo, cae al catálogo de /lib/domain/pricing.js (getPackPrice).
-let _packPricing = null, _packPricingTs = 0;
-async function getPackPricing() {
-  if (_packPricing && (Date.now() - _packPricingTs) < 60000) return _packPricing;
-  const [actsRes, packsRes] = await Promise.all([
-    supabase.from('activities').select('id, type_key, extra_class_price'),
-    supabase.from('activity_packs').select('activity_id, sessions, price'),
-  ]);
-  const byId = {}; (actsRes.data || []).forEach(a => { byId[a.id] = a; });
-  const map = {};
-  (actsRes.data || []).forEach(a => { map[a.type_key] = { byN: {}, extra: Number(a.extra_class_price) || 0, maxN: 0, maxPrice: 0 }; });
-  (packsRes.data || []).forEach(p => {
-    const a = byId[p.activity_id]; if (!a) return;
-    const m = map[a.type_key]; if (!m) return;
-    m.byN[p.sessions] = Number(p.price);
-    if (p.sessions > m.maxN) { m.maxN = p.sessions; m.maxPrice = Number(p.price); }
-  });
-  _packPricing = map; _packPricingTs = Date.now();
-  return map;
-}
-function expectedBonoPriceDB(pricing, classType, credits) {
-  if (!credits || credits <= 0) return 0;
-  const m = pricing?.[classType];
-  if (m && m.maxN > 0) {
-    if (m.byN[credits] != null) return m.byN[credits];
-    if (credits > m.maxN) return Math.round((m.maxPrice + (credits - m.maxN) * m.extra) * 100) / 100;
-    return Math.round((m.maxPrice / m.maxN) * credits * 100) / 100; // aproxima si falta el tier exacto
-  }
-  return getPackPrice(classType, credits); // fallback al catálogo (lib/domain/pricing)
-}
+// Precio esperado del bono y de clase suelta: una sola fuente en /lib/domain/pricing.js
+// (getPackPrice/bonoExpected/classPrice, ya DB-driven vía loadPricing). Sin espejo paralelo.
 
 // Bonos activos cuyo total_paid < precio esperado del catálogo.
 // Si total_paid es 0 pero hay order_id (compra web), asumimos que al menos se cobró el deposit.
@@ -429,12 +400,13 @@ export async function fetchPendingBonos() {
   const ids = list.map(b => b.id);
   // Fuente de verdad del cobro: SUM(payments) del bono; total_paid solo como
   // respaldo para bonos antiguos sin filas en payments. (Sin suponer importes.)
-  const [profilesMap, pricing, paidMap] = await Promise.all([_profilesById(userIds), getPackPricing(), _paymentsSumBy('bono', ids)]);
+  await loadPricing();
+  const [profilesMap, paidMap] = await Promise.all([_profilesById(userIds), _paymentsSumBy('bono', ids)]);
 
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
 
   return list.map(b => {
-    const expected = b.custom_total != null ? Number(b.custom_total) : expectedBonoPriceDB(pricing, b.class_type, b.total_credits);
+    const expected = bonoExpected(b);
     const paid     = Math.max(Number(paidMap[b.id] || 0), Number(b.total_paid || 0));
     const pending  = Math.max(0, Math.round((expected - paid) * 100) / 100);
     return {
@@ -465,13 +437,14 @@ export async function fetchPendingEnrollments() {
   const list = data || [];
   const ids = list.map(e => e.id);
   const userIds = [...new Set(list.map(e => e.user_id).filter(Boolean))];
-  const [profilesMap, paidMap, pricing] = await Promise.all([_profilesById(userIds), _paymentsSumBy('enrollment', ids), getPackPricing()]);
+  await loadPricing();
+  const [profilesMap, paidMap] = await Promise.all([_profilesById(userIds), _paymentsSumBy('enrollment', ids)]);
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
 
   return list.map(e => {
     const type = e.surf_classes?.type;
     // Precio de la clase suelta: el propio de la clase si lo tiene, si no el del catálogo
-    const total = Number(e.surf_classes?.price) > 0 ? Number(e.surf_classes.price) : expectedBonoPriceDB(pricing, type, 1);
+    const total = classPrice(e.surf_classes || {});
     const paid = paidMap[e.id] || 0;
     const pending = Math.max(0, Math.round((total - paid) * 100) / 100);
     return {
@@ -503,10 +476,10 @@ export async function fetchClientsPending() {
   const bonos = bonosRes.data || [];
   const enr = enrRes.data || [];
   const rentals = rentRes.data || [];
-  const [paidMap, bonoPaidMap, pricing] = await Promise.all([
+  await loadPricing();
+  const [paidMap, bonoPaidMap] = await Promise.all([
     _paymentsSumBy('enrollment', enr.map(e => e.id)),
     _paymentsSumBy('bono', bonos.map(b => b.id)),
-    getPackPricing(),
   ]);
 
   const map = {};
@@ -518,12 +491,12 @@ export async function fetchClientsPending() {
   };
   for (const b of bonos) {
     if (!b.user_id) continue;
-    const expected = b.custom_total != null ? Number(b.custom_total) : expectedBonoPriceDB(pricing, b.class_type, b.total_credits);
+    const expected = bonoExpected(b);
     const paid = Math.max(Number(bonoPaidMap[b.id] || 0), Number(b.total_paid || 0));
     add(b.user_id, `Bono ${TYPE_LBL[b.class_type] || b.class_type} · ${b.total_credits} clases`, Math.max(0, Math.round((expected - paid) * 100) / 100));
   }
   for (const e of enr) {
-    const total = Number(e.surf_classes?.price) > 0 ? Number(e.surf_classes.price) : expectedBonoPriceDB(pricing, e.surf_classes?.type, 1);
+    const total = classPrice(e.surf_classes || {});
     const paid = paidMap[e.id] || 0;
     add(e.user_id, `Clase ${e.surf_classes?.title || TYPE_LBL[e.surf_classes?.type] || ''}`.trim(), Math.max(0, Math.round((total - paid) * 100) / 100));
   }

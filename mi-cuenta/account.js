@@ -9,6 +9,7 @@ import { renderBonos } from '/mi-cuenta/tabs/bonos.js';
 import { renderCalendar } from '/mi-cuenta/tabs/calendar.js';
 import { renderEnrollments } from '/mi-cuenta/tabs/enrollments.js';
 import { renderPayments } from '/mi-cuenta/tabs/payments.js';
+import { loadPricing } from '/lib/domain/pricing.js';
 
 const mainEl = document.querySelector('main');
 
@@ -451,6 +452,7 @@ async function renderDashboard() {
   showFooter();
   const session = await getSession();
   if (!session) return renderAuth();
+  await loadPricing(); // tarifas BD → precios del cliente == admin
   const profile = await getProfile();
   const name = profile?.full_name || session.user.email;
   const email = session.user.email;

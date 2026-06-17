@@ -4,6 +4,7 @@
 import { checkSession, signIn, signOut, getProfile, onAuthChange } from './modules/auth.js';
 import { register, initRouter, applyRolePermissions } from './modules/router.js';
 import { initModal, showToast } from './modules/ui.js';
+import { loadPricing } from '/lib/domain/pricing.js';
 
 // Import sections
 import { renderDashboard } from './sections/dashboard.js';
@@ -80,6 +81,7 @@ loginForm.addEventListener('submit', async (e) => {
 
   try {
     await signIn(email, password);
+    await loadPricing();
     showAdmin();
     if (!location.hash || location.hash === '#') location.hash = '#dashboard';
     initRouter();
@@ -127,6 +129,7 @@ initModal();
 (async () => {
   const isAdmin = await checkSession();
   if (isAdmin) {
+    await loadPricing();
     showAdmin();
     if (!location.hash || location.hash === '#') location.hash = '#dashboard';
     initRouter();
