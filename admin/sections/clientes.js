@@ -658,6 +658,7 @@ export async function renderClientes(container) {
               <span class="act-detail-topbar-id">Clientes · ${c.id.substring(0, 20)}</span>
             </div>
           </div>
+          <span id="cli-debt-badge" class="cli-debt-badge" hidden></span>
         </div>
 
         <div class="act-detail-layout act-detail-layout--onepage">
@@ -757,27 +758,60 @@ export async function renderClientes(container) {
   }
   async function renderKpis(c) {
     const el = container.querySelector('#cli-kpis');
+    const badge = container.querySelector('#cli-debt-badge');
     if (!el) return;
+    const r2 = x => Math.round(x * 100) / 100;
     try {
       const [bonos, enrollments] = await Promise.all([getBonos(c), getEnrollments(c)]);
-      const enriched = (bonos || []).map(b => {
+      // Deuda de TODA la cuenta (igual que el filtro "Pago pendiente" del CRM):
+      // bonos vivos + clases sueltas (sin bono) + alquileres. Así "cuánto debe" es real.
+      let totalExpected = 0, totalPending = 0;
+      const liveBonos = (bonos || []).filter(b => b.status === 'active' || b.status === 'exhausted');
+      for (const b of liveBonos) {
         const expected = bonoExpected(b);
-        const paid = Number(b.total_paid || 0);
-        return { expected, pending: Math.max(0, Math.round((expected - paid) * 100) / 100), status: b.status };
-      });
-      // Cuentan los bonos "vivos": activos Y agotados (un bono agotado puede seguir
-      // debiendo dinero). Total y pendiente se calculan sobre el MISMO conjunto para
-      // que cuadren entre sí (no como antes: total solo 'active' pero pendiente de todos).
-      const contables = enriched.filter(b => b.status === 'active' || b.status === 'exhausted');
-      const totalCuenta = contables.reduce((s, b) => s + b.expected, 0);
-      const pendiente = contables.reduce((s, b) => s + b.pending, 0);
+        totalExpected += expected;
+        totalPending += Math.max(0, r2(expected - Number(b.total_paid || 0)));
+      }
+      // Clases sueltas confirmadas/parciales (bono_id null) → precio - pagos
+      const loose = (enrollments || []).filter(e => !e.bono_id && (e.status === 'confirmed' || e.status === 'partial'));
+      if (loose.length) {
+        const paidByEnr = {};
+        try {
+          const { data } = await supabase.from('payments').select('reference_id, amount')
+            .eq('reservation_type', 'enrollment').in('reference_id', loose.map(e => e.id));
+          (data || []).forEach(p => { paidByEnr[p.reference_id] = (paidByEnr[p.reference_id] || 0) + Number(p.amount || 0); });
+        } catch {}
+        for (const e of loose) {
+          const price = classPrice(e.surf_class || {});
+          totalExpected += price;
+          totalPending += Math.max(0, r2(price - (paidByEnr[e.id] || 0)));
+        }
+      }
+      // Alquileres pendientes (total - pagado)
+      try {
+        const { data: rentals } = await supabase.from('equipment_reservations')
+          .select('total_amount, deposit_paid, status').eq('user_id', c.id)
+          .in('status', ['pending', 'confirmed', 'active']);
+        for (const rt of (rentals || [])) {
+          totalExpected += Number(rt.total_amount || 0);
+          totalPending += Math.max(0, r2(Number(rt.total_amount || 0) - Number(rt.deposit_paid || 0)));
+        }
+      } catch {}
+      totalExpected = r2(totalExpected); totalPending = r2(totalPending);
       el.innerHTML =
-        kpiCard('Total cuenta', formatCurrency(totalCuenta)) +
-        kpiCard('Pendiente', formatCurrency(pendiente), pendiente > 0 ? 'warn' : 'ok') +
-        kpiCard('Bonos', contables.length) +
+        kpiCard('Total cuenta', formatCurrency(totalExpected)) +
+        kpiCard('Pendiente', formatCurrency(totalPending), totalPending > 0 ? 'warn' : 'ok') +
+        kpiCard('Bonos', liveBonos.length) +
         kpiCard('Clases', (enrollments || []).length);
+      if (badge) {
+        if (totalPending > 0) {
+          badge.innerHTML = `<span class="l">Debe</span><span class="v">${formatCurrency(totalPending)}</span>`;
+          badge.hidden = false;
+        } else { badge.hidden = true; }
+      }
     } catch (err) {
       el.innerHTML = kpiCard('Cuenta', '—');
+      if (badge) badge.hidden = true;
       console.warn('renderKpis:', err.message);
     }
   }

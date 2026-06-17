@@ -4929,6 +4929,29 @@ a.admin-nav-item-external .nav-icon svg {
 .cli-kpi-card.ok .cli-kpi-value,
 .cli-kpi-card.ok .cli-kpi-label { color: #166534; }
 
+/* Badge prominente de deuda en la cabecera de la ficha de cliente */
+.cli-debt-badge {
+  margin-left: auto;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  background: #fef2f2;
+  border: 1.5px solid #fecaca;
+  color: #b91c1c;
+  padding: 8px 18px;
+  border-radius: 12px;
+  line-height: 1.05;
+  box-shadow: 0 3px 12px rgba(185, 28, 28, .16);
+  flex-shrink: 0;
+}
+.cli-debt-badge[hidden] { display: none; }
+.cli-debt-badge .l { font-size: .6rem; text-transform: uppercase; letter-spacing: .1em; font-weight: 800; opacity: .85; }
+.cli-debt-badge .v { font-size: 1.85rem; font-weight: 800; font-family: 'Bebas Neue', sans-serif; letter-spacing: .5px; }
+@media (max-width: 640px) {
+  .cli-debt-badge { padding: 6px 12px; }
+  .cli-debt-badge .v { font-size: 1.4rem; }
+}
+
 /* Editor de total in-place (bono) */
 .cli-bono-total-row { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .cli-bono-total-display { display: inline-flex; align-items: center; gap: 4px; }
