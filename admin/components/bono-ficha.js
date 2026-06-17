@@ -1,21 +1,24 @@
 /* ============================================================
-   Ficha de Bono ÚNICA (reserva de clases)
+   Ficha de Bono ÚNICA (reserva de clases) — pantalla completa
    ============================================================
    La MISMA ficha se abra desde donde se abra (reserva-clases, clientes, calendario).
    Lee/escribe TODO vía la capa de dominio (/lib/domain) para que números y acciones
-   sean idénticos en todos los paneles. Sustituye las fichas de bono divergentes
-   (antes: reserva-clases solo-lectura, clientes con acciones, calendario otra).
+   sean idénticos en todos los paneles.
+
+   Panel a pantalla completa (ns-overlay/ns-panel, el mismo lenguaje visual que el
+   resto del admin) con: participantes del bono, editar precio, añadir pagos, ampliar
+   bono y crear bonos nuevos de OTRO tipo de clase para el mismo cliente.
 
    Uso:  await openBonoFicha(bonoId, { onChange })
    ============================================================ */
 import { supabase } from '/lib/supabase.js';
-import { openModal, closeModal, showToast, formatDate, formatCurrency, statusBadge } from '../modules/ui.js';
+import { showToast, formatDate, formatCurrency, statusBadge } from '../modules/ui.js';
 import { TYPE_LABELS } from '../modules/constants.js';
 import { createPayment, deletePayment, fetchPayments } from '../modules/api.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { bonoExpected, getPackPrice, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
-import { extendBono, bonoAvailable, defaultBonoExpiry } from '/lib/domain/bonos.js';
+import { createBono, extendBono, bonoAvailable, defaultBonoExpiry } from '/lib/domain/bonos.js';
 
 const METHODS = ['efectivo', 'tarjeta', 'transferencia', 'voucher', 'saldo'];
 
@@ -29,7 +32,6 @@ async function loadBono(bonoId) {
     .from('bonos').select('*, profiles:user_id(id, full_name, last_name, phone, email)')
     .eq('id', bonoId).single();
   if (!bono) return null;
-  // Inscripciones del bono (con clase y familiar) + pagos del bono
   const { data: enr } = await supabase
     .from('class_enrollments')
     .select('*, surf_classes:class_id(id, type, title, date, time_start, time_end), family_members:family_member_id(full_name, last_name)')
@@ -45,6 +47,19 @@ function memberName(e) {
   return 'Titular';
 }
 
+// nº de crédito (1..n) de cada inscripción dentro del bono, ordenado por fecha de clase.
+function creditOrdinals(enrollments) {
+  const map = {};
+  const live = enrollments.filter(e => e.status !== 'cancelled').slice().sort((a, b) => {
+    const ka = `${a.surf_classes?.date || ''} ${a.surf_classes?.time_start || ''}`;
+    const kb = `${b.surf_classes?.date || ''} ${b.surf_classes?.time_start || ''}`;
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    return new Date(a.created_at) - new Date(b.created_at);
+  });
+  live.forEach((e, i) => { map[e.id] = i + 1; });
+  return map;
+}
+
 export async function openBonoFicha(bonoId, { onChange } = {}) {
   const data = await loadBono(bonoId);
   if (!data) { showToast('Bono no encontrado', 'error'); return; }
@@ -52,7 +67,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
 
   const typeLbl = TYPE_LABELS[bono.class_type] || bono.class_type;
   const expected = bonoExpected(bono);
-  // Pagado = SUM(payments) o total_paid (el mayor), igual que los paneles de pendientes (api.js).
+  // Pagado = SUM(payments) o total_paid (el mayor), igual que los paneles de pendientes.
   const paidSum = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
   const paid = Math.max(paidSum, round2(Number(bono.total_paid || 0)));
   const pending = Math.max(0, round2(expected - paid));
@@ -62,6 +77,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   const cli = bono.profiles || {};
   const cliName = (cli.full_name || 'Cliente') + (cli.last_name ? ' ' + cli.last_name : '');
   const canPay = !fullyPaid && (bono.status === 'active' || bono.status === 'exhausted');
+  const ord = creditOrdinals(enrollments);
 
   // Desglose de reserva conjunta (qué persona usó cuántas clases)
   const byMember = new Map();
@@ -75,19 +91,20 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
 
   const enrollHtml = enrollments.length ? enrollments.map(e => {
     const c = e.surf_classes || {};
-    // Estado = asistencia si está registrada; si no, estado de la inscripción.
     const estado = e.status === 'cancelled' ? statusBadge('cancelled')
       : e.attendance === true ? '<span style="color:#16a34a;font-weight:600">Asistió</span>'
       : e.attendance === false ? '<span style="color:#6b7280">No asistió</span>'
       : statusBadge(e.status || 'confirmed');
+    const credCell = e.status === 'cancelled' ? '—' : `<span class="bf-cred-pill">${ord[e.id] || '?'}/${bono.total_credits}</span>`;
     return `<tr>
       <td>${formatDate(c.date)}</td>
       <td>${c.time_start ? c.time_start.slice(0, 5) : '—'}</td>
       <td>${esc(memberName(e))}</td>
       <td>${esc(c.title || TYPE_LABELS[c.type] || '')}</td>
+      <td style="text-align:center">${credCell}</td>
       <td>${estado}</td>
     </tr>`;
-  }).join('') : '<tr><td colspan="5" style="color:var(--color-muted);padding:10px">Aún no se han usado créditos</td></tr>';
+  }).join('') : '<tr><td colspan="6" style="color:var(--color-muted);padding:10px">Aún no se han usado créditos</td></tr>';
 
   const payHtml = payments.length ? payments.map(p => `<tr>
       <td>${formatDate(p.payment_date)}</td>
@@ -99,88 +116,183 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
         <button class="bf-pay-del" data-id="${p.id}" title="Eliminar" style="background:none;border:none;cursor:pointer;color:#dc2626">🗑</button>`}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:var(--color-muted);padding:10px">Sin pagos registrados</td></tr>';
 
-  openModal(`Reserva de ${typeLbl}`, `
-    <div class="bf" style="min-width:min(560px,92vw)">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+  const methodOpts = METHODS.map(m => `<option value="${m}">${m.charAt(0).toUpperCase() + m.slice(1)}</option>`).join('');
+  const typeOpts = Object.entries(TYPE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+
+  // ---- Overlay a pantalla completa (ns-overlay/ns-panel) ----
+  document.getElementById('bf-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'bf-overlay';
+  overlay.className = 'ns-overlay';
+  overlay.innerHTML = `
+    <style>
+      #bf-overlay .bf-grid { display:grid; grid-template-columns: 1.15fr .85fr; gap:24px; align-items:start; }
+      @media (max-width: 880px){ #bf-overlay .bf-grid { grid-template-columns: 1fr; } }
+      #bf-overlay .bf-card { background:#fff; border:1px solid var(--color-line,#e5e7eb); border-radius:12px; padding:18px 20px; }
+      #bf-overlay .bf-kpis { display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin:14px 0 4px; }
+      #bf-overlay .bf-kpi { background:#f8fafc; border:1px solid var(--color-line,#e5e7eb); border-radius:10px; padding:10px 12px; }
+      #bf-overlay .bf-kpi .l { font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); font-weight:700; }
+      #bf-overlay .bf-kpi .v { font-size:1.15rem; font-weight:800; color:var(--color-navy,#0f2f39); margin-top:2px; }
+      #bf-overlay .bf-actions { display:flex; gap:8px; flex-wrap:wrap; margin:16px 0 4px; }
+      #bf-overlay .bf-act { padding:9px 16px; font-size:.84rem; font-weight:700; border-radius:8px; border:1px solid var(--color-line,#e5e7eb); background:#fff; cursor:pointer; }
+      #bf-overlay .bf-act:hover { background:#f1f5f9; }
+      #bf-overlay .bf-act.primary { background:#22c55e; color:#fff; border-color:#22c55e; }
+      #bf-overlay .bf-act.primary:hover { background:#16a34a; }
+      #bf-overlay .bf-form { background:#f8fafc; border:1px solid var(--color-line,#e5e7eb); border-radius:10px; padding:14px 16px; margin-top:10px; display:grid; gap:10px; }
+      #bf-overlay .bf-form[hidden] { display:none; }
+      #bf-overlay .bf-form .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+      #bf-overlay .bf-form .f { display:flex; flex-direction:column; gap:4px; }
+      #bf-overlay .bf-form label { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--color-muted); }
+      #bf-overlay .bf-form input, #bf-overlay .bf-form select { padding:8px 10px; border:1px solid var(--color-line,#e5e7eb); border-radius:8px; font-size:.9rem; background:#fff; }
+      #bf-overlay .bf-form .save { background:#22c55e; color:#fff; border:none; border-radius:8px; padding:9px 18px; font-weight:700; cursor:pointer; font-size:.86rem; }
+      #bf-overlay .bf-section-title { font-size:.74rem; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); font-weight:700; margin:22px 0 8px; }
+      #bf-overlay .bf-cred-pill { font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:99px; background:#e0f2fe; color:#075985; }
+      #bf-overlay .bf-bar { height:8px; background:#eef0f2; border-radius:99px; overflow:hidden; margin:8px 0 4px; }
+      #bf-overlay .bf-chip { font-size:.74rem; padding:4px 11px; border-radius:99px; background:#e0f2fe; color:#075985; font-weight:700; }
+      #bf-overlay table { width:100%; }
+    </style>
+    <div class="ns-panel">
+      <header class="ns-header">
         <div>
-          <div style="font-weight:700;color:var(--color-navy,#0f2f39)">${esc(cliName)}</div>
-          <div style="font-size:.8rem;color:var(--color-muted)">${esc(cli.phone || '')}${cli.email ? ' · ' + esc(cli.email) : ''}</div>
+          <h2>Reserva de ${esc(typeLbl)}</h2>
+          <p>${esc(cliName)}${cli.phone ? ' · ' + esc(cli.phone) : ''}${cli.email ? ' · ' + esc(cli.email) : ''}</p>
         </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          ${statusBadge(bono.status)}
-          ${fullyPaid ? '<span style="font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:4px;background:#dcfce7;color:#166534">PAGADO</span>'
-            : `<span style="font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e">DEBE ${formatCurrency(pending)}</span>`}
+        <button class="ns-close" id="bf-close" title="Cerrar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </header>
+      <div class="ns-body" style="padding:24px 28px">
+        <div class="bf-grid">
+          <!-- Columna izquierda: resumen + acciones -->
+          <div>
+            <div class="bf-card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+                <div style="font-weight:800;font-size:1.05rem;color:var(--color-navy,#0f2f39)">${esc(cliName)}</div>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  ${statusBadge(bono.status)}
+                  ${fullyPaid ? '<span style="font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:5px;background:#dcfce7;color:#166534">PAGADO</span>'
+                    : `<span style="font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:5px;background:#fef3c7;color:#92400e">DEBE ${formatCurrency(pending)}</span>`}
+                  ${bono.order_id != null ? '<span style="font-size:.66rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:2px 6px">comprado online</span>' : ''}
+                </div>
+              </div>
+
+              <div class="bf-kpis">
+                <div class="bf-kpi"><div class="l">Clases usadas</div><div class="v">${bono.used_credits}/${bono.total_credits}</div></div>
+                <div class="bf-kpi"><div class="l">Restantes</div><div class="v">${remaining}</div></div>
+                <div class="bf-kpi"><div class="l">Caduca</div><div class="v" style="font-size:.92rem">${formatDate(bono.expires_at)}</div></div>
+              </div>
+              <div class="bf-bar"><div style="height:100%;width:${pct}%;background:${fullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
+
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px">
+                <span style="font-size:.9rem">Pagado <strong>${formatCurrency(paid)}</strong> de</span>
+                <span class="bf-total-show">
+                  <strong style="font-size:1.05rem">${formatCurrency(expected)}</strong>
+                  <button class="bf-total-edit" title="Editar total" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:1rem">✎</button>
+                </span>
+                <span class="bf-total-edit-box" hidden>
+                  <input type="number" step="0.01" min="0" class="bf-total-input" value="${expected.toFixed(2)}" style="width:100px;padding:5px 8px;border:1px solid #0ea5e9;border-radius:6px" />
+                  <button class="bf-total-save" style="background:none;border:none;color:#16a34a;cursor:pointer;font-weight:700;font-size:1.05rem">✓</button>
+                  <button class="bf-total-cancel" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1.05rem">✕</button>
+                </span>
+              </div>
+
+              <div class="bf-actions">
+                ${canPay ? `<button class="bf-act primary" data-form="pay">Añadir pago</button>` : ''}
+                <button class="bf-act" data-form="extend">Ampliar bono</button>
+                <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
+              </div>
+
+              <!-- Form: añadir pago -->
+              <div class="bf-form" id="bf-form-pay" hidden>
+                <div class="row">
+                  <div class="f"><label>Importe (€)</label><input type="number" id="bf-pay-amount" step="0.01" min="0.01" value="${pending > 0 ? pending.toFixed(2) : ''}" style="width:120px" /></div>
+                  <div class="f"><label>Método</label><select id="bf-pay-method">${methodOpts}</select></div>
+                  <button class="save" id="bf-pay-save">Registrar pago</button>
+                </div>
+              </div>
+
+              <!-- Form: ampliar -->
+              <div class="bf-form" id="bf-form-extend" hidden>
+                <div class="row">
+                  <div class="f"><label>Añadir clases</label><input type="number" id="bf-ext-credits" min="1" value="1" style="width:90px" /></div>
+                  <div class="f"><label>Cobrar (€)</label><input type="number" id="bf-ext-charge" step="0.01" min="0" style="width:120px" /></div>
+                  <div class="f"><label>Método</label><select id="bf-ext-method">${methodOpts}</select></div>
+                  <button class="save" id="bf-ext-save">Ampliar</button>
+                </div>
+                <p style="font-size:.74rem;color:var(--color-muted);margin:0">El total del bono se ajusta y el cobro queda registrado como pago del bono.</p>
+              </div>
+
+              <!-- Form: nuevo bono de otro tipo -->
+              <div class="bf-form" id="bf-form-newbono" hidden>
+                <div class="row">
+                  <div class="f"><label>Tipo de clase</label><select id="bf-nb-type">${typeOpts}</select></div>
+                  <div class="f"><label>Nº clases</label><input type="number" id="bf-nb-credits" min="1" value="4" style="width:90px" /></div>
+                  <div class="f"><label>Total (€)</label><input type="number" id="bf-nb-total" step="0.01" min="0" style="width:120px" /></div>
+                </div>
+                <div class="row">
+                  <div class="f"><label>Cobrar ahora (€)</label><input type="number" id="bf-nb-paid" step="0.01" min="0" value="0" style="width:120px" /></div>
+                  <div class="f"><label>Método</label><select id="bf-nb-method">${methodOpts}</select></div>
+                  <button class="save" id="bf-nb-save">Crear bono</button>
+                </div>
+                <p style="font-size:.74rem;color:var(--color-muted);margin:0">Crea un bono nuevo del tipo elegido para <strong>${esc(cliName)}</strong> y abre su ficha.</p>
+              </div>
+            </div>
+
+            ${hasFamily ? `<div class="bf-card" style="margin-top:18px">
+              <div class="bf-section-title" style="margin:0 0 8px">Participantes · Responsable: ${esc(cliName)}</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                ${breakdown.map(m => `<span class="bf-chip">${esc(m.name)}: ${m.n} clase${m.n === 1 ? '' : 's'}</span>`).join('')}
+              </div>
+            </div>` : ''}
+          </div>
+
+          <!-- Columna derecha: histórico + pagos -->
+          <div>
+            <div class="bf-section-title" style="margin-top:0">Histórico de clases (${enrollments.filter(e => e.status !== 'cancelled').length})</div>
+            <div class="table-wrap"><table><thead><tr><th>Día</th><th>Hora</th><th>Asistente</th><th>Clase</th><th style="text-align:center">Crédito</th><th>Estado</th></tr></thead><tbody>${enrollHtml}</tbody></table></div>
+
+            <div class="bf-section-title">Pagos (${payments.length})</div>
+            <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Importe</th><th>Método</th><th>Origen</th><th></th></tr></thead><tbody>${payHtml}</tbody></table></div>
+          </div>
         </div>
       </div>
+    </div>`;
+  document.body.appendChild(overlay);
 
-      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-top:14px">
-        <span>${bono.used_credits} / ${bono.total_credits} clases usadas</span>
-        <span style="color:var(--color-muted)">${remaining} restantes · caduca ${formatDate(bono.expires_at)}</span>
-      </div>
-      <div style="height:6px;background:#eef0f2;border-radius:99px;overflow:hidden;margin:6px 0 14px">
-        <div style="height:100%;width:${pct}%;background:${fullyPaid ? '#22c55e' : '#f59e0b'}"></div>
-      </div>
+  const close = () => overlay.remove();
+  const reload = async () => { close(); if (onChange) await onChange(); await openBonoFicha(bonoId, { onChange }); };
+  overlay.querySelector('#bf-close').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
-        <span style="font-size:.82rem">Pagado ${formatCurrency(paid)} de</span>
-        <span class="bf-total-show">
-          <strong>${formatCurrency(expected)}</strong>
-          <button class="bf-total-edit" title="Editar total" style="background:none;border:none;color:#0ea5e9;cursor:pointer">✎</button>
-        </span>
-        <span class="bf-total-edit-box" hidden>
-          <input type="number" step="0.01" min="0" class="bf-total-input" value="${expected.toFixed(2)}" style="width:90px;padding:3px 6px;border:1px solid #0ea5e9;border-radius:6px" />
-          <button class="bf-total-save" style="background:none;border:none;color:#16a34a;cursor:pointer;font-weight:700">✓</button>
-          <button class="bf-total-cancel" style="background:none;border:none;color:#dc2626;cursor:pointer">✕</button>
-        </span>
-        ${bono.order_id != null ? '<span style="font-size:.66rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:2px 6px">comprado online</span>' : ''}
-      </div>
-
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 16px">
-        ${canPay ? `<button class="btn bf-add-pay" style="background:#22c55e;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:.82rem;font-weight:600;cursor:pointer">Añadir pago</button>` : ''}
-        <button class="btn line bf-extend" style="padding:7px 14px;font-size:.82rem">+ Ampliar</button>
-      </div>
-
-      ${hasFamily ? `<div style="background:#f8fafc;border:1px solid var(--color-line,#e5e7eb);border-radius:8px;padding:10px 12px;margin-bottom:14px">
-        <div style="font-size:.72rem;font-weight:600;color:var(--color-navy);margin-bottom:6px">Reserva conjunta · Responsable: ${esc(cliName)}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${breakdown.map(m => `<span style="font-size:.72rem;padding:3px 9px;border-radius:99px;background:#e0f2fe;color:#075985;font-weight:600">${esc(m.name)}: ${m.n} clase${m.n === 1 ? '' : 's'}</span>`).join('')}
-        </div>
-      </div>` : ''}
-
-      <h4 style="font-size:.8rem;margin:6px 0 4px;text-transform:uppercase;color:var(--color-muted)">Histórico de clases (${enrollments.length})</h4>
-      <div class="table-wrap"><table><thead><tr><th>Día</th><th>Hora</th><th>Asistente</th><th>Clase</th><th>Estado</th></tr></thead><tbody>${enrollHtml}</tbody></table></div>
-
-      <h4 style="font-size:.8rem;margin:16px 0 4px;text-transform:uppercase;color:var(--color-muted)">Pagos (${payments.length})</h4>
-      <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Importe</th><th>Método</th><th>Origen</th><th></th></tr></thead><tbody>${payHtml}</tbody></table></div>
-    </div>
-  `);
-
-  const root = document.getElementById('admin-modal');
-  const reload = async () => { closeModal(); if (onChange) await onChange(); await openBonoFicha(bonoId, { onChange }); };
+  // Toggle de formularios de acción (uno visible a la vez)
+  overlay.querySelectorAll('.bf-act[data-form]').forEach(btn => btn.addEventListener('click', () => {
+    const target = btn.dataset.form;
+    ['pay', 'extend', 'newbono'].forEach(k => {
+      const el = overlay.querySelector(`#bf-form-${k}`);
+      if (el) el.hidden = (k !== target) ? true : !el.hidden;
+    });
+  }));
 
   // Editar total in-place
-  root.querySelector('.bf-total-edit')?.addEventListener('click', () => {
-    root.querySelector('.bf-total-show').hidden = true;
-    root.querySelector('.bf-total-edit-box').hidden = false;
-    root.querySelector('.bf-total-input')?.focus();
+  overlay.querySelector('.bf-total-edit')?.addEventListener('click', () => {
+    overlay.querySelector('.bf-total-show').hidden = true;
+    overlay.querySelector('.bf-total-edit-box').hidden = false;
+    overlay.querySelector('.bf-total-input')?.focus();
   });
-  root.querySelector('.bf-total-cancel')?.addEventListener('click', () => {
-    root.querySelector('.bf-total-edit-box').hidden = true;
-    root.querySelector('.bf-total-show').hidden = false;
+  overlay.querySelector('.bf-total-cancel')?.addEventListener('click', () => {
+    overlay.querySelector('.bf-total-edit-box').hidden = true;
+    overlay.querySelector('.bf-total-show').hidden = false;
   });
-  root.querySelector('.bf-total-save')?.addEventListener('click', async () => {
-    const v = parseFloat(root.querySelector('.bf-total-input').value);
+  overlay.querySelector('.bf-total-save')?.addEventListener('click', async () => {
+    const v = parseFloat(overlay.querySelector('.bf-total-input').value);
     if (isNaN(v) || v < 0) { showToast('Total inválido', 'error'); return; }
     try { await extendBono(bonoId, { newCustomTotal: v }); showToast('Total actualizado', 'success'); await reload(); }
     catch (err) { showToast('Error: ' + err.message, 'error'); }
   });
 
   // Añadir pago
-  root.querySelector('.bf-add-pay')?.addEventListener('click', async () => {
-    const amount = parseFloat(prompt(`Importe a cobrar (€). Pendiente: ${pending.toFixed(2)}`, pending > 0 ? pending.toFixed(2) : ''));
-    if (!amount || amount <= 0) return;
-    const method = (prompt(`Método (${METHODS.join(' / ')})`, 'efectivo') || '').trim().toLowerCase();
-    if (!METHODS.includes(method)) { showToast('Método no válido', 'error'); return; }
+  overlay.querySelector('#bf-pay-save')?.addEventListener('click', async () => {
+    const amount = parseFloat(overlay.querySelector('#bf-pay-amount').value);
+    if (!amount || amount <= 0) { showToast('Importe inválido', 'error'); return; }
+    const method = overlay.querySelector('#bf-pay-method').value;
     try {
       await createPayment({ reservation_type: 'bono', reference_id: bonoId, amount, payment_method: method, concept: `Pago bono ${typeLbl}` });
       await recalcBonoPaid(bonoId);
@@ -189,25 +301,27 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
   });
 
-  // Ampliar
-  root.querySelector('.bf-extend')?.addEventListener('click', async () => {
-    const extra = parseInt(prompt('¿Cuántas clases añadir?', '1'), 10);
-    if (!extra || extra <= 0) return;
+  // Ampliar: sugiere el cobro al cambiar el nº de clases
+  const extCredits = overlay.querySelector('#bf-ext-credits');
+  const extCharge = overlay.querySelector('#bf-ext-charge');
+  function suggestExtCharge() {
+    const extra = parseInt(extCredits.value, 10) || 0;
     const newTotal = (bono.total_credits || 0) + extra;
-    const suggested = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - expected));
-    const charge = parseFloat(prompt(`Importe a cobrar por la ampliación (€). Sugerido: ${suggested.toFixed(2)}`, suggested.toFixed(2)));
-    if (charge == null || isNaN(charge) || charge < 0) return;
-    // Validar el método ANTES de tocar el bono: si es inválido, no ampliar (evita
-    // descuadre con cobro perdido en silencio).
-    let method = null;
-    if (charge > 0) {
-      method = (prompt(`Método del cobro (${METHODS.join(' / ')})`, 'efectivo') || '').trim().toLowerCase();
-      if (!METHODS.includes(method)) { showToast('Método no válido — no se amplió', 'error'); return; }
-    }
+    extCharge.value = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - expected)).toFixed(2);
+  }
+  extCredits?.addEventListener('input', suggestExtCharge);
+  if (extCredits) suggestExtCharge();
+  overlay.querySelector('#bf-ext-save')?.addEventListener('click', async () => {
+    const extra = parseInt(overlay.querySelector('#bf-ext-credits').value, 10);
+    if (!extra || extra <= 0) { showToast('Indica cuántas clases añadir', 'error'); return; }
+    const charge = parseFloat(overlay.querySelector('#bf-ext-charge').value);
+    if (isNaN(charge) || charge < 0) { showToast('Importe inválido', 'error'); return; }
+    const method = overlay.querySelector('#bf-ext-method').value;
+    const newTotal = (bono.total_credits || 0) + extra;
     try {
       const newCustomTotal = bono.custom_total != null ? round2(Number(bono.custom_total) + charge) : null;
       await extendBono(bonoId, { newTotalCredits: newTotal, newCustomTotal, status: 'active', expires_at: defaultBonoExpiry() });
-      if (charge > 0 && method) {
+      if (charge > 0) {
         await createPayment({ reservation_type: 'bono', reference_id: bonoId, amount: charge, payment_method: method, concept: `Ampliación bono ${typeLbl} (+${extra})` });
       }
       await recalcBonoPaid(bonoId);
@@ -216,12 +330,49 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
   });
 
+  // Nuevo bono de otro tipo: sugiere total al cambiar tipo/clases
+  const nbType = overlay.querySelector('#bf-nb-type');
+  const nbCredits = overlay.querySelector('#bf-nb-credits');
+  const nbTotal = overlay.querySelector('#bf-nb-total');
+  function suggestNbTotal() {
+    const t = nbType.value;
+    const n = parseInt(nbCredits.value, 10) || 0;
+    nbTotal.value = round2(getPackPrice(t, n)).toFixed(2);
+  }
+  nbType?.addEventListener('change', suggestNbTotal);
+  nbCredits?.addEventListener('input', suggestNbTotal);
+  if (nbType) suggestNbTotal();
+  overlay.querySelector('#bf-nb-save')?.addEventListener('click', async () => {
+    const classType = nbType.value;
+    const credits = parseInt(nbCredits.value, 10);
+    if (!credits || credits <= 0) { showToast('Nº de clases inválido', 'error'); return; }
+    const total = parseFloat(nbTotal.value);
+    if (isNaN(total) || total < 0) { showToast('Total inválido', 'error'); return; }
+    const amount = parseFloat(overlay.querySelector('#bf-nb-paid').value) || 0;
+    const method = overlay.querySelector('#bf-nb-method').value;
+    if (!bono.user_id) { showToast('Este bono no tiene cliente asociado', 'error'); return; }
+    try {
+      const newId = await createBono({
+        user_id: bono.user_id, class_type: classType, total_credits: credits,
+        custom_total: total, total_paid: 0, expires_at: defaultBonoExpiry(),
+      });
+      if (amount > 0 && newId) {
+        await createPayment({ reservation_type: 'bono', reference_id: newId, amount, payment_method: method, concept: `Nuevo bono ${TYPE_LABELS[classType] || classType} (${credits} clases)` });
+        await recalcBonoPaid(newId);
+      }
+      showToast(`Bono de ${TYPE_LABELS[classType] || classType} creado`, 'success');
+      close();
+      if (onChange) await onChange();
+      if (newId) await openBonoFicha(newId, { onChange });
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+  });
+
   // Editar / borrar pagos (manuales)
-  root.querySelectorAll('.bf-pay-edit').forEach(b => b.addEventListener('click', () => {
+  overlay.querySelectorAll('.bf-pay-edit').forEach(b => b.addEventListener('click', () => {
     const p = payments.find(x => x.id === b.dataset.id);
     if (p) openPaymentEditModal(p, { onSaved: async () => { await recalcBonoPaid(bonoId); await reload(); } });
   }));
-  root.querySelectorAll('.bf-pay-del').forEach(b => b.addEventListener('click', async () => {
+  overlay.querySelectorAll('.bf-pay-del').forEach(b => b.addEventListener('click', async () => {
     const p = payments.find(x => x.id === b.dataset.id);
     if (!p || !confirm(`¿Eliminar el pago de ${formatCurrency(p.amount)}?`)) return;
     try { await deletePayment(p.id); await recalcBonoPaid(bonoId); showToast('Pago eliminado', 'success'); await reload(); }
