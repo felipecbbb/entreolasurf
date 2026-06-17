@@ -246,6 +246,8 @@ function renderAuth() {
     // Combina prefijo de país + número
     const regPrefix = document.getElementById('reg-phone-prefix')?.value || '';
     const regNum = e.target.phone.value.trim();
+    // Teléfono OBLIGATORIO al crear cuenta.
+    if (regNum.replace(/\D/g, '').length < 6) { errEl.textContent = 'Escribe un teléfono de contacto válido.'; return; }
     const regPhone = regNum.startsWith('+') ? regNum : (regPrefix ? `${regPrefix} ${regNum}`.trim() : regNum);
 
     regStep1Data = {
@@ -283,6 +285,9 @@ function renderAuth() {
     const email = e.target.email.value.trim();
     const pass = e.target.password.value;
     const pass2 = e.target.password2.value;
+    // Email y contraseña OBLIGATORIOS.
+    if (!email) { errEl.textContent = 'Escribe tu email.'; return; }
+    if (!pass || pass.length < 6) { errEl.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
     if (pass !== pass2) {
       errEl.textContent = 'Las contraseñas no coinciden.';
       return;
