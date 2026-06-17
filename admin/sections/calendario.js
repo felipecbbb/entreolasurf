@@ -1494,12 +1494,24 @@ export async function renderCalendario(container) {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
     }
 
-    // Calculate total using pack pricing: ALL sessions across ALL persons count as one pack
+    // Clave de "dueño del bono" para previsualizar el MISMO precio que cobra el confirm:
+    // cada cliente distinto se precia como su propio pack; los familiares / no vinculados
+    // (sin cuenta propia) cuelgan del responsable y comparten un único pack ('resp').
+    function ownerKeyForPerson(p) {
+      if (p.profileId) return 'pid:' + p.profileId;
+      if ((p.email || '').trim()) return 'email:' + p.email.trim().toLowerCase();
+      return 'resp';
+    }
+
+    // Precio = suma del pack de cada dueño (no un único pack combinado entre clientes
+    // distintos, que daría un descuento por volumen que no se aplica a clientes separados).
     function getTotalPrice() {
       const totalSessions = persons.reduce((s, p) => s + p.sessions.length, 0);
       // Drop-in de 1 sola clase: respeta el precio propio de la clase si lo tiene
       if (totalSessions === 1 && Number(cls.price) > 0) return Number(cls.price);
-      return getPackPrice(cls.type, totalSessions, price);
+      const byOwner = {};
+      for (const p of persons) { const k = ownerKeyForPerson(p); byOwner[k] = (byOwner[k] || 0) + p.sessions.length; }
+      return Object.values(byOwner).reduce((s, n) => s + getPackPrice(cls.type, n, price), 0);
     }
 
     // Get unit price label for display
@@ -2011,24 +2023,23 @@ export async function renderCalendario(container) {
 
       // Recalculate subtotal excluding sessions covered by credit/bono
       function recalcSubtotal() {
-        const paidSessions = [];
-        const creditSessions = [];
+        // Sesiones a cobrar (no cubiertas por crédito) agrupadas POR DUEÑO, y cada
+        // dueño preciado como su propio pack → coincide con el cargo real del confirm
+        // (totalCharge) y con el tope del anticipo.
+        const paidByOwner = {};
         for (const p of persons) {
+          const k = ownerKeyForPerson(p);
           const pc = personCredits[p.id];
+          let paidCount = p.sessions.length;
           if (pc?.useCredit && pc.bono) {
-            // Solo las sesiones que caben en los créditos disponibles van gratis;
-            // las que exceden (overage) se cobran, para que el total y el tope del
-            // anticipo reflejen el déficit real (coherente con el confirm).
+            // Solo las sesiones que caben en los créditos disponibles van gratis; el
+            // overage se cobra (coherente con el déficit del confirm).
             const avail = Math.max(0, (pc.bono.total_credits || 0) - (pc.bono.used_credits || 0));
-            const credited = Math.min(avail, p.sessions.length);
-            creditSessions.push(...p.sessions.slice(0, credited));
-            paidSessions.push(...p.sessions.slice(credited));
-          } else {
-            paidSessions.push(...p.sessions);
+            paidCount = Math.max(0, p.sessions.length - avail);
           }
+          paidByOwner[k] = (paidByOwner[k] || 0) + paidCount;
         }
-        // Price only the non-credit sessions
-        subtotal = getPackPrice(cls.type, paidSessions.length, price);
+        subtotal = Object.values(paidByOwner).reduce((s, n) => s + getPackPrice(cls.type, n, price), 0);
       }
 
       // Checkout state
@@ -2826,7 +2837,9 @@ export async function renderCalendario(container) {
                 await supabase.from('bonos').update({ total_paid: Math.round(paidSum * 100) / 100, updated_at: _now }).eq('id', bId);
               }
               const isFullyPaid = finalExpected > 0 ? paidSum >= finalExpected - 0.01 : paidSum > 0;
-              bonoByOwner[ownerId] = { id: bId, status: paidSum <= 0 ? 'confirmed' : (isFullyPaid ? 'paid' : 'partial') };
+              // expected/paid = total y pagado REALES del bono (no solo el cargo de esta
+              // tanda): la ficha debe mostrar el total del bono, no el cargo nuevo.
+              bonoByOwner[ownerId] = { id: bId, expected: finalExpected, paid: paidSum, status: paidSum <= 0 ? 'confirmed' : (isFullyPaid ? 'paid' : 'partial') };
             }
 
             // 5) Crear inscripciones enganchadas al bono del dueño (el trigger cuenta créditos/aforo)
@@ -2861,22 +2874,26 @@ export async function renderCalendario(container) {
             // sobre datos reales y no sobre un id inventado.
             const bonoIdsUsed = [...new Set(Object.values(bonoByOwner).map(b => b.id).filter(Boolean))];
             const singleBonoId = bonoIdsUsed.length === 1 ? bonoIdsUsed[0] : null;
+            const singleBono = singleBonoId ? Object.values(bonoByOwner).find(b => b.id === singleBonoId) : null;
 
-            // Importes REALES de la reserva (lo que se cargó a los bonos y lo cobrado),
-            // no los del panel: así la ficha de detalle/pagos coincide con la tabla payments.
-            const total = totalCharge;
+            // Si la reserva cuelga de UN solo bono, la ficha representa ESE bono: total y
+            // pendiente son los REALES del bono (incluye saldo previo si se amplió), no solo
+            // el cargo de esta tanda — así el campo Total editable no corrompe el custom_total
+            // y el pendiente cuadra con SUM(payments) del bono. Multi-bono: usa el cargo de la tanda.
+            const total = singleBono ? singleBono.expected : totalCharge;
+            const paidShown = singleBono ? singleBono.paid : anticipoTotal;
             const reservationData = {
               id: createdEnrollmentIds[0] || (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)),
               enrollmentIds: createdEnrollmentIds,
               bonoId: singleBonoId,
               linkedBonoId: singleBonoId,
               createdAt: new Date(),
-              status: cobrarAnticipo ? (anticipoTotal >= total ? 'paid' : anticipoTotal > 0 ? 'partial' : 'confirmed') : 'confirmed',
-              total: totalCharge,
+              status: paidShown <= 0 ? 'confirmed' : (total > 0 && paidShown >= total - 0.01 ? 'paid' : 'partial'),
+              total: total,
               discount: getDiscount(),
-              totalFinal: totalCharge,
-              anticipoAmount: anticipoTotal,
-              pending: Math.round(Math.max(0, totalCharge - anticipoTotal) * 100) / 100,
+              totalFinal: total,
+              anticipoAmount: paidShown,
+              pending: Math.round(Math.max(0, total - paidShown) * 100) / 100,
               paymentMethod,
               cobrarAnticipo,
               crearInvitacion,
@@ -4222,13 +4239,6 @@ export async function renderCalendario(container) {
         btn.disabled = true; btn.textContent = 'Procesando…';
 
         try {
-          // Update bono total_paid in DB
-          const newPaid = bono.totalPaidReal + amount;
-          await supabase.from('bonos').update({
-            total_paid: newPaid,
-            updated_at: new Date().toISOString(),
-          }).eq('id', bonoId);
-
           // If paying with saldo, deduct from profile
           if (method === 'saldo') {
             const person = res.persons.find(p => p.id === personId);
@@ -4247,6 +4257,11 @@ export async function renderCalendario(container) {
             payment_method: method,
             concept: `Pago bono ${TYPE_LABELS[bono.class_type] || bono.class_type}`,
           });
+
+          // total_paid = SUM real de payments (no derivar del snapshot del panel, que
+          // puede ignorar cobros recientes del confirm)
+          const newPaid = (await fetchPayments('bono', bonoId)).reduce((s, p) => s + Number(p.amount || 0), 0);
+          await supabase.from('bonos').update({ total_paid: Math.round(newPaid * 100) / 100, updated_at: new Date().toISOString() }).eq('id', bonoId);
 
           // Update local bono data
           bono.totalPaidReal = newPaid;
@@ -4362,13 +4377,11 @@ export async function renderCalendario(container) {
 
         try {
           const newTotalCredits = currentCredits + extra;
-          const newTotalPaid = Number(bono.totalPaidReal || 0) + amount;
           const newExpiresAt = new Date();
           newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
 
           const bonoUpdates = {
             total_credits: newTotalCredits,
-            total_paid: newTotalPaid,
             status: 'active',
             expires_at: newExpiresAt.toISOString(),
             updated_at: new Date().toISOString(),
@@ -4400,6 +4413,10 @@ export async function renderCalendario(container) {
               concept: `Ampliación bono ${TYPE_LABELS[classType] || classType} (+${extra})`,
             });
           }
+
+          // total_paid = SUM real de payments (no derivar del snapshot)
+          const newTotalPaid = (await fetchPayments('bono', bonoId)).reduce((s, p) => s + Number(p.amount || 0), 0);
+          await supabase.from('bonos').update({ total_paid: Math.round(newTotalPaid * 100) / 100 }).eq('id', bonoId);
 
           // Update local state so renderDetail refleje cambios sin recargar
           bono.total_credits = newTotalCredits;
