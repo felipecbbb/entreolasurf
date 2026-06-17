@@ -163,7 +163,37 @@ export async function renderCalendario(container) {
 
   // Enrollments cache: classId → [enrollment, ...]
   let enrollmentsCache = {};
+  // Nº de crédito (1..total) de cada inscripción dentro de su bono, ordenado por fecha
+  // de clase: enrollmentId → ordinal. El chip muestra "2/4" = esta clase gasta el
+  // crédito 2 de 4, en vez del used_credits global (que ya es 4/4 si se reservó todo
+  // el bono de golpe). Se recalcula por render desde TODAS las clases del bono.
+  let creditOrdinals = {};
   let _openMovePicker = null; // picker de "mover de día", expuesto desde bindEvents para reusar en la ficha
+
+  // Mapa enrollmentId → nº de crédito (1-based) dentro de su bono. Necesita TODAS las
+  // inscripciones del bono (no solo las visibles), por eso consulta por bono_id.
+  async function buildCreditOrdinals(bonoIds) {
+    const map = {};
+    const ids = [...new Set((bonoIds || []).filter(Boolean))];
+    if (!ids.length) return map;
+    const { data } = await supabase
+      .from('class_enrollments')
+      .select('id, bono_id, created_at, status, surf_classes:class_id(date, time_start)')
+      .in('bono_id', ids).neq('status', 'cancelled');
+    if (!data) return map;
+    const byBono = {};
+    data.forEach(e => { (byBono[e.bono_id] = byBono[e.bono_id] || []).push(e); });
+    Object.values(byBono).forEach(list => {
+      list.sort((a, b) => {
+        const ka = `${a.surf_classes?.date || ''} ${a.surf_classes?.time_start || ''}`;
+        const kb = `${b.surf_classes?.date || ''} ${b.surf_classes?.time_start || ''}`;
+        if (ka !== kb) return ka < kb ? -1 : 1;
+        return new Date(a.created_at) - new Date(b.created_at);
+      });
+      list.forEach((e, i) => { map[e.id] = i + 1; });
+    });
+    return map;
+  }
 
   // ======== MAIN RENDER ========
   async function render() {
@@ -192,6 +222,10 @@ export async function renderCalendario(container) {
         );
         const results = await Promise.all(enrollPromises);
         results.forEach(r => { enrollmentsCache[r.classId] = r.enrollments; });
+        // Ordinal de crédito por inscripción (qué nº de clase del bono gasta cada una)
+        const visibleBonoIds = Object.values(enrollmentsCache).flat().map(e => e.bono_id);
+        try { creditOrdinals = await buildCreditOrdinals(visibleBonoIds); }
+        catch { creditOrdinals = {}; }
       } catch (err) {
         console.warn('Could not fetch enrollments:', err);
       }
@@ -201,6 +235,8 @@ export async function renderCalendario(container) {
       } catch (err) {
         console.warn('Could not fetch rental reservations:', err);
       }
+    } else {
+      creditOrdinals = {};
     }
 
     const { dayName, dayNum, month, year } = formatDayHeader(currentDate);
@@ -372,7 +408,9 @@ export async function renderCalendario(container) {
       }
       let bonoLabel = '';
       if (e.bono && (e.bono.status === 'active' || e.bono.status === 'exhausted')) {
-        bonoLabel = `${e.bono.used_credits}/${e.bono.total_credits}`;
+        // nº de crédito que gasta ESTA clase (ordinal por fecha), no el used global
+        const credNo = creditOrdinals[e.id] || e.bono.used_credits;
+        bonoLabel = `${credNo}/${e.bono.total_credits}`;
       }
       // Pago: si la inscripción va con bono, el color sale del estado de pago
       // del BONO (todas sus clases comparten el mismo pago). Si es suelta, del
@@ -1421,13 +1459,16 @@ export async function renderCalendario(container) {
     try {
       const enrollments = await fetchClassEnrollments(cls.id);
       const active = enrollments.filter(e => e.status !== 'cancelled');
+      // Ordinal de crédito (qué nº de clase del bono gasta cada inscripción)
+      let ordMap = {};
+      try { ordMap = await buildCreditOrdinals(enrollments.map(e => e.bono_id)); } catch {}
 
       const listHtml = enrollments.length
         ? `<div class="enrollment-list">${enrollments.map(e => {
             const name = e.guest_name || e.family_members?.full_name || e.profiles?.full_name || 'Sin nombre';
             const ageLabel = ageFromBirthDate(e.family_members?.birth_date || e.profiles?.birth_date);
             const bonoLabel = (e.bono && (e.bono.status === 'active' || e.bono.status === 'exhausted'))
-              ? `<span style="color:#0ea5e9;font-size:.7rem;font-weight:600;white-space:nowrap">Bono ${e.bono.used_credits}/${e.bono.total_credits}</span>`
+              ? `<span style="color:#0ea5e9;font-size:.7rem;font-weight:600;white-space:nowrap">Bono ${ordMap[e.id] || e.bono.used_credits}/${e.bono.total_credits}</span>`
               : '';
             const st = ENROLLMENT_STATUS[e.status] || { label: e.status, color: '#6b7280' };
             const att = e.attendance === true
@@ -6372,22 +6413,33 @@ export async function renderCalendario(container) {
 
     // "Aplicar a": otras clases programadas (futuras) del mismo tipo
     let applyCandidates = [];
-    let applyLoaded = false;
+    let applyCandidatesPromise = null;
     const applyScopeSel = overlay.querySelector('#es-apply-scope');
     const applyListWrap = overlay.querySelector('#es-apply-list-wrap');
     const applyListEl = overlay.querySelector('#es-apply-list');
-    async function loadApplyCandidates() {
-      if (applyLoaded) return;
-      applyLoaded = true;
-      const today = getDateStr(new Date());
-      const { data } = await supabase.from('surf_classes')
-        .select('id, date, time_start, type')
-        .eq('type', cls.type).eq('status', 'scheduled').gte('date', today).neq('id', cls.id)
-        .order('date', { ascending: true }).order('time_start', { ascending: true });
-      applyCandidates = data || [];
-      applyListEl.innerHTML = applyCandidates.length
-        ? applyCandidates.map(c => `<label class="es-apply-item"><input type="checkbox" class="es-apply-cb" value="${c.id}"><span>${formatDate(c.date)} · ${(c.time_start || '').slice(0, 5)}</span></label>`).join('')
-        : '<p style="font-size:.8rem;color:#94a3b8">No hay otras clases programadas de este tipo</p>';
+    // Cache de PROMESA (no de booleano): si se llama dos veces seguidas — el change
+    // del select y luego el submit — la segunda espera la MISMA carga en vuelo en
+    // vez de devolver la lista aún vacía y propagar a 0 clases (race que dejaba la
+    // edición sin aplicarse a las demás fechas).
+    function loadApplyCandidates() {
+      if (!applyCandidatesPromise) {
+        applyCandidatesPromise = (async () => {
+          const today = getDateStr(new Date());
+          // Todas las clases futuras NO canceladas del tipo (igual que las que muestra
+          // el calendario, que no filtra por status). Antes exigía status='scheduled'
+          // y dejaba fuera 'completed'/otras → la edición "no se aplicaba a todas".
+          const { data } = await supabase.from('surf_classes')
+            .select('id, date, time_start, type')
+            .eq('type', cls.type).neq('status', 'cancelled').gte('date', today).neq('id', cls.id)
+            .order('date', { ascending: true }).order('time_start', { ascending: true });
+          applyCandidates = data || [];
+          applyListEl.innerHTML = applyCandidates.length
+            ? applyCandidates.map(c => `<label class="es-apply-item"><input type="checkbox" class="es-apply-cb" value="${c.id}"><span>${formatDate(c.date)} · ${(c.time_start || '').slice(0, 5)}</span></label>`).join('')
+            : '<p style="font-size:.8rem;color:#94a3b8">No hay otras clases programadas de este tipo</p>';
+          return applyCandidates;
+        })();
+      }
+      return applyCandidatesPromise;
     }
     applyScopeSel.addEventListener('change', async () => {
       const v = applyScopeSel.value;
@@ -6439,7 +6491,7 @@ export async function renderCalendario(container) {
 
         // Propagar los detalles a otras clases del mismo tipo (la fecha de cada
         // una se respeta; solo se aplican los campos de detalle).
-        let propagated = 0;
+        let propagated = 0, propFailed = 0;
         if (applyScope !== 'this') {
           await loadApplyCandidates();
           const targetIds = applyScope === 'type'
@@ -6453,7 +6505,8 @@ export async function renderCalendario(container) {
           };
           for (const id of targetIds) {
             const { error } = await supabase.from('surf_classes').update(propagate).eq('id', id);
-            if (!error) propagated++;
+            if (error) { console.error('propagar clase', id, error.message); propFailed++; }
+            else propagated++;
           }
         }
 
@@ -6464,6 +6517,7 @@ export async function renderCalendario(container) {
           viewMode = 'day';
         }
         let toastMsg = propagated > 0 ? `Sesión actualizada · ${propagated} clases más aplicadas` : 'Sesión actualizada';
+        if (propFailed > 0) toastMsg += ` · ${propFailed} con error`;
         if (scheduleChanged && (cls.enrolled_count || 0) > 0) {
           const r = await notifyEnrolledClients(cls.id, 'rescheduled', {
             className: TYPE_LABELS[obj.type] || obj.title || 'Clase',
