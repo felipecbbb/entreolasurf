@@ -37,19 +37,14 @@ function esc(s: any): string {
   ).slice(0, 2000);
 }
 
-/* Logos */
+/* Logos — imagen real (PNG, compatible con clientes de correo; AVIF no lo es) */
+const LOGO_URL = "https://entreolasurf.com/images/logo.png";
 function logoDefault() {
-  return `<table cellpadding="0" cellspacing="0"><tr>
-    <td style="font-family:${F};font-size:26px;font-weight:700;color:#0f2f39">entre</td>
-    <td style="font-family:${F};font-size:26px;font-weight:700;color:#FFCC01">olas</td>
-  </tr></table>`;
+  return `<img src="${LOGO_URL}" width="92" height="92" alt="Entre Olas Surf" style="display:block;width:92px;height:92px;border:0;border-radius:14px" />`;
 }
 
 function logoCamp() {
-  return `<table cellpadding="0" cellspacing="0">
-    <tr><td style="font-family:${FU};font-size:16px;font-weight:800;color:#FFCC01;letter-spacing:2px;text-transform:uppercase;line-height:1.15">ENTRE OLAS</td></tr>
-    <tr><td style="font-family:${FU};font-size:16px;font-weight:800;color:#FFCC01;letter-spacing:2px;text-transform:uppercase;line-height:1.15">SURF HOUSE</td></tr>
-  </table>`;
+  return `<img src="${LOGO_URL}" width="104" height="104" alt="Entre Olas Surf House" style="display:block;width:104px;height:104px;border:0;border-radius:14px" />`;
 }
 
 /* Label like the site uses */
