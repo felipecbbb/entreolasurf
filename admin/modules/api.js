@@ -441,7 +441,7 @@ function expectedBonoPriceDB(pricing, classType, credits) {
 export async function fetchPendingBonos() {
   const { data } = await supabase.from('bonos')
     .select('id, user_id, order_id, class_type, total_credits, used_credits, total_paid, status, created_at, custom_total')
-    .eq('status', 'active')
+    .in('status', ['active', 'exhausted'])
     .order('created_at', { ascending: false });
   const list = data || [];
   const userIds = [...new Set(list.map(b => b.user_id).filter(Boolean))];
@@ -512,7 +512,7 @@ export async function fetchPendingEnrollments() {
 export async function fetchClientsPending() {
   const TYPE_LBL = { grupal: 'Surf grupal', individual: 'Surf individual', yoga: 'Yoga', paddle: 'Paddle', surfskate: 'SurfSkate' };
   const [bonosRes, enrRes, rentRes] = await Promise.all([
-    supabase.from('bonos').select('id, user_id, class_type, total_credits, order_id, total_paid, status, custom_total').eq('status', 'active'),
+    supabase.from('bonos').select('id, user_id, class_type, total_credits, order_id, total_paid, status, custom_total').in('status', ['active', 'exhausted']),
     supabase.from('class_enrollments').select('id, user_id, status, surf_classes:class_id(title, type, price)')
       .is('bono_id', null).in('status', ['confirmed', 'partial']),
     supabase.from('equipment_reservations')

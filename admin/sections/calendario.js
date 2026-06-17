@@ -378,7 +378,7 @@ export async function renderCalendario(container) {
         ageLabel = ` (${age})`;
       }
       let bonoLabel = '';
-      if (e.bono && e.bono.status === 'active') {
+      if (e.bono && (e.bono.status === 'active' || e.bono.status === 'exhausted')) {
         bonoLabel = `${e.bono.used_credits}/${e.bono.total_credits}`;
       }
       // Pago: si la inscripción va con bono, el color sale del estado de pago
@@ -1433,7 +1433,7 @@ export async function renderCalendario(container) {
         ? `<div class="enrollment-list">${enrollments.map(e => {
             const name = e.guest_name || e.family_members?.full_name || e.profiles?.full_name || 'Sin nombre';
             const ageLabel = ageFromBirthDate(e.family_members?.birth_date || e.profiles?.birth_date);
-            const bonoLabel = (e.bono && e.bono.status === 'active')
+            const bonoLabel = (e.bono && (e.bono.status === 'active' || e.bono.status === 'exhausted'))
               ? `<span style="color:#0ea5e9;font-size:.7rem;font-weight:600;white-space:nowrap">Bono ${e.bono.used_credits}/${e.bono.total_credits}</span>`
               : '';
             const st = ENROLLMENT_STATUS[e.status] || { label: e.status, color: '#6b7280' };
@@ -2016,7 +2016,13 @@ export async function renderCalendario(container) {
         for (const p of persons) {
           const pc = personCredits[p.id];
           if (pc?.useCredit && pc.bono) {
-            creditSessions.push(...p.sessions);
+            // Solo las sesiones que caben en los créditos disponibles van gratis;
+            // las que exceden (overage) se cobran, para que el total y el tope del
+            // anticipo reflejen el déficit real (coherente con el confirm).
+            const avail = Math.max(0, (pc.bono.total_credits || 0) - (pc.bono.used_credits || 0));
+            const credited = Math.min(avail, p.sessions.length);
+            creditSessions.push(...p.sessions.slice(0, credited));
+            paidSessions.push(...p.sessions.slice(credited));
           } else {
             paidSessions.push(...p.sessions);
           }
@@ -2082,9 +2088,11 @@ export async function renderCalendario(container) {
                 .select('*')
                 .eq('user_id', p.profileId)
                 .eq('class_type', cls.type)
-                .eq('status', 'active')
+                .in('status', ['active', 'exhausted'])
                 .gt('expires_at', new Date().toISOString());
               // Find bonos with available credits, enrich with expected price
+              // (el filtro used<total ya descarta los agotados; incluir 'exhausted' solo
+              //  alinea el preview con el handler de confirmar)
               const allBonos = (bonos || []).filter(b => b.used_credits < b.total_credits).map(b => {
                 const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits, Number(cls.price) || 0);
                 // total_paid se mantiene sincronizado con la suma de payments (sin suponer importes)
@@ -2694,51 +2702,147 @@ export async function renderCalendario(container) {
                 // Adulto independiente con email → su propia cuenta + invitación
                 const uid = await ensureAccountByEmail(p);
                 personTarget[p.id] = uid ? { user_id: uid, family_member_id: null, guest_name: null } : { guest_name: fullName || 'Invitado' };
+              } else if (responsableId && fullName) {
+                // Sin vincular pero con nombre → se cuelga del responsable como familiar suyo,
+                // así su reserva entra en el bono del responsable y el cobro queda registrado
+                // (el dueño del bono es siempre el responsable de la reserva).
+                const fid = await ensureFamilyMember(p);
+                personTarget[p.id] = { user_id: responsableId, family_member_id: fid, guest_name: fullName };
               } else {
-                // Sin cuenta → invitado
+                // Sin cuenta y sin nombre → invitado suelto
                 personTarget[p.id] = { guest_name: fullName || 'Invitado' };
               }
             }
 
-            // Create enrollments — the DB trigger auto-updates enrolled_count
-            // Créditos disponibles por bono en ESTA tanda: las primeras clases
-            // se cubren con el bono; las que excedan quedan impagas (rojas).
-            const bonoCreditsLeft = {};
+            // ---- BONO POR DUEÑO (modelo "un bono por cliente y tipo, se amplía") ----
+            // El dueño del bono es el responsable de la reserva; sus familiares
+            // cuelgan de su bono (inscripciones con user_id = responsableId). Una
+            // persona enlazada a su propia cuenta usa su propio bono. Invitados sin
+            // cuenta quedan sueltos. Siempre hay bono: si no existe se crea, si
+            // existe se amplía para cubrir las clases nuevas. Los créditos prepagados
+            // ya disponibles se consumen primero (no se cobran dos veces).
+
+            // 1) Sesiones nuevas por dueño (user_id)
+            const ownerSessions = {};
             for (const p of persons) {
-              const pc = personCredits[p.id];
-              const usingCredit = pc?.useCredit && pc.bono;
-              const selectedBono = usingCredit
-                ? (pc.allBonos?.find(b => b.id === pc.selectedBonoId) || pc.bono)
-                : null;
-              if (usingCredit && !selectedBono) {
-                showToast(`No hay bono disponible para ${p.profileName || p.nombre || 'persona'}`, 'error');
-                btn.disabled = false;
-                btn.textContent = 'Confirmar';
-                return;
-              }
-              if (selectedBono && bonoCreditsLeft[selectedBono.id] === undefined) {
-                bonoCreditsLeft[selectedBono.id] = Math.max(0, (selectedBono.total_credits || 0) - (selectedBono.used_credits || 0));
-              }
+              const tgt = personTarget[p.id];
+              if (tgt?.user_id) ownerSessions[tgt.user_id] = (ownerSessions[tgt.user_id] || 0) + p.sessions.length;
+            }
 
-              for (const sid of p.sessions) {
-                const enrollData = {
-                  class_id: sid,
-                  created_at: new Date().toISOString(),
-                };
+            // 2) Déficit (clases nuevas no cubiertas por créditos prepagados) y CARGO por dueño.
+            //    El cargo se calcula sobre el DÉFICIT (no sobre el total del panel) para no
+            //    cobrar dos veces los créditos ya prepagados. Precio de pack del déficit con
+            //    el descuento del panel aplicado. Cada dueño se precia por separado (sin
+            //    mezclar el descuento por volumen entre clientes distintos).
+            const _now = new Date().toISOString();
+            const discRate = subtotal > 0 ? Math.min(1, getDiscount() / subtotal) : 0;
+            const ownerIds = Object.keys(ownerSessions);
+            const ownerInfo = {}; // userId → { bono, need, deficit, charge }
+            for (const ownerId of ownerIds) {
+              const need = ownerSessions[ownerId];
+              let bono = null;
+              try {
+                const { data: rows } = await supabase.from('bonos')
+                  .select('*').eq('user_id', ownerId).eq('class_type', cls.type)
+                  .in('status', ['active', 'exhausted']).gt('expires_at', _now)
+                  .order('created_at', { ascending: false });
+                const list = rows || [];
+                // Prefiere un bono con créditos libres (no malgastar prepago) antes que el más reciente
+                bono = list.find(b => (b.total_credits || 0) - (b.used_credits || 0) > 0) || list[0] || null;
+              } catch {}
+              const avail = bono ? Math.max(0, (bono.total_credits || 0) - (bono.used_credits || 0)) : 0;
+              const deficit = Math.max(0, need - avail);
+              const rawDeficit = deficit > 0 ? getPackPrice(cls.type, deficit, Number(cls.price) || 0) : 0;
+              const charge = Math.round(rawDeficit * (1 - discRate) * 100) / 100;
+              ownerInfo[ownerId] = { bono, need, deficit, charge };
+            }
 
-                if (selectedBono && bonoCreditsLeft[selectedBono.id] > 0) {
-                  // Cubierta por el bono → verde (pagado) o naranja (bono con pendiente)
-                  enrollData.bono_id = selectedBono.id;
-                  enrollData.status = selectedBono.isFullyPaid ? 'paid' : 'partial';
-                  bonoCreditsLeft[selectedBono.id]--;
-                } else if (selectedBono) {
-                  // Bono sin créditos restantes → clase impaga (roja); el cliente la debe
-                  enrollData.status = 'confirmed';
-                } else {
-                  enrollData.status = (cobrarAnticipo && anticipoAmount >= getTotal()) ? 'paid' : (cobrarAnticipo && anticipoAmount > 0) ? 'partial' : 'confirmed';
+            // 3) Anticipo cobrado (no supera el cargo total)
+            const totalCharge = Math.round(ownerIds.reduce((s, id) => s + ownerInfo[id].charge, 0) * 100) / 100;
+            const anticipoTotal = cobrarAnticipo ? Math.max(0, Math.min(anticipoAmount, totalCharge)) : 0;
+
+            // Reparto del anticipo SOLO entre dueños con cargo > 0 (el último de esos
+            // absorbe el residuo de redondeo). Evita crear un pago de céntimos sobre un
+            // bono ya saldado (deficit 0).
+            const anticipoByOwner = {};
+            const chargeOwners = ownerIds.filter(id => ownerInfo[id].charge > 0);
+            let _anticipoAllocated = 0;
+            chargeOwners.forEach((id, i) => {
+              let a;
+              if (i === chargeOwners.length - 1) a = Math.round((anticipoTotal - _anticipoAllocated) * 100) / 100;
+              else { a = totalCharge > 0 ? Math.round(anticipoTotal * (ownerInfo[id].charge / totalCharge) * 100) / 100 : 0; _anticipoAllocated += a; }
+              anticipoByOwner[id] = Math.max(0, a);
+            });
+
+            // 4) Crear/ampliar el bono de cada dueño, registrar el pago y fijar total_paid = SUM(payments)
+            const _expiry = new Date(); _expiry.setMonth(_expiry.getMonth() + 12);
+            const bonoByOwner = {}; // userId → { id, status }
+            for (let oi = 0; oi < ownerIds.length; oi++) {
+              const ownerId = ownerIds[oi];
+              const { bono, deficit, charge } = ownerInfo[ownerId];
+              const ownerAnticipo = anticipoByOwner[ownerId] || 0;
+
+              let bId = bono?.id || null;
+              let finalExpected;
+              if (bono) {
+                const curExpected = bono.custom_total != null ? Number(bono.custom_total) : getPackPrice(cls.type, bono.total_credits || 0, Number(cls.price) || 0);
+                finalExpected = Math.round((curExpected + (deficit > 0 ? charge : 0)) * 100) / 100;
+                if (deficit > 0) {
+                  await supabase.from('bonos').update({
+                    total_credits: (bono.total_credits || 0) + deficit,
+                    custom_total: finalExpected,
+                    updated_at: _now,
+                  }).eq('id', bId);
                 }
+              } else {
+                finalExpected = charge;
+                const { data: created, error: cErr } = await supabase.from('bonos').insert({
+                  user_id: ownerId, class_type: cls.type,
+                  total_credits: Math.max(1, deficit), used_credits: 0,
+                  status: 'active', total_paid: 0, custom_total: charge,
+                  expires_at: _expiry.toISOString(),
+                }).select('id').single();
+                if (cErr) throw cErr;
+                bId = created?.id || null;
+              }
 
-                const tgt = personTarget[p.id] || { guest_name: `${p.nombre} ${p.apellidos}`.trim() || 'Invitado' };
+              // Registrar el pago; total_paid se deriva DESPUÉS de la suma real de payments
+              // (si createPayment falla, total_paid no se infla y el pendiente sigue siendo correcto).
+              if (bId && ownerAnticipo > 0) {
+                try {
+                  await createPayment({
+                    reservation_type: 'bono', reference_id: bId, amount: ownerAnticipo,
+                    payment_method: paymentMethod || 'efectivo', channel: 'in_person',
+                    concept: `Reserva ${TYPE_LABELS[cls.type] || cls.type}`,
+                  });
+                } catch (e) { console.warn('pago bono', e.message); }
+              }
+              let paidSum = 0;
+              if (bId) {
+                // total_paid = SUM real de payments; si la consulta falla, estima
+                // (previo + anticipo) en vez de poner 0 y perder el cobro recién hecho.
+                try { paidSum = (await fetchPayments('bono', bId)).reduce((s, p) => s + Number(p.amount || 0), 0); }
+                catch { paidSum = Math.round(((bono ? Number(bono.total_paid || 0) : 0) + ownerAnticipo) * 100) / 100; }
+                await supabase.from('bonos').update({ total_paid: Math.round(paidSum * 100) / 100, updated_at: _now }).eq('id', bId);
+              }
+              const isFullyPaid = finalExpected > 0 ? paidSum >= finalExpected - 0.01 : paidSum > 0;
+              bonoByOwner[ownerId] = { id: bId, status: paidSum <= 0 ? 'confirmed' : (isFullyPaid ? 'paid' : 'partial') };
+            }
+
+            // 5) Crear inscripciones enganchadas al bono del dueño (el trigger cuenta créditos/aforo)
+            const createdEnrollmentIds = [];
+            for (const p of persons) {
+              const tgt = personTarget[p.id] || { guest_name: `${p.nombre} ${p.apellidos}`.trim() || 'Invitado' };
+              const ownerBono = tgt.user_id ? bonoByOwner[tgt.user_id] : null;
+              for (const sid of p.sessions) {
+                const enrollData = { class_id: sid, created_at: new Date().toISOString() };
+                if (ownerBono?.id) {
+                  enrollData.bono_id = ownerBono.id;
+                  enrollData.status = ownerBono.status; // 'paid' | 'partial' | 'confirmed' según el bono
+                } else {
+                  // Invitado sin cuenta y sin nombre → clase suelta sin cobro asociado aquí
+                  enrollData.status = 'confirmed';
+                }
                 if (tgt.user_id) {
                   enrollData.user_id = tgt.user_id;
                   if (tgt.family_member_id) {
@@ -2748,23 +2852,31 @@ export async function renderCalendario(container) {
                 } else {
                   enrollData.guest_name = tgt.guest_name || 'Invitado';
                 }
-                await createEnrollment(enrollData);
+                const createdEnr = await createEnrollment(enrollData);
+                if (createdEnr?.id) createdEnrollmentIds.push(createdEnr.id);
               }
-              // El consumo de crédito lo gestiona el trigger update_bono_credits
-              // (cuenta inscripciones no canceladas). No se actualiza a mano para
-              // que al cancelar se devuelva el crédito correctamente.
             }
+            // Si la reserva cuelga de UN solo bono (caso común: responsable+familia), enlazar
+            // la ficha a ese bono real para que "Añadir pago"/"Cancelar"/editar total operen
+            // sobre datos reales y no sobre un id inventado.
+            const bonoIdsUsed = [...new Set(Object.values(bonoByOwner).map(b => b.id).filter(Boolean))];
+            const singleBonoId = bonoIdsUsed.length === 1 ? bonoIdsUsed[0] : null;
 
-            const total = getTotal();
+            // Importes REALES de la reserva (lo que se cargó a los bonos y lo cobrado),
+            // no los del panel: así la ficha de detalle/pagos coincide con la tabla payments.
+            const total = totalCharge;
             const reservationData = {
-              id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36),
+              id: createdEnrollmentIds[0] || (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)),
+              enrollmentIds: createdEnrollmentIds,
+              bonoId: singleBonoId,
+              linkedBonoId: singleBonoId,
               createdAt: new Date(),
-              status: cobrarAnticipo ? (anticipoAmount >= total ? 'paid' : anticipoAmount > 0 ? 'partial' : 'confirmed') : 'confirmed',
-              total: subtotal,
+              status: cobrarAnticipo ? (anticipoTotal >= total ? 'paid' : anticipoTotal > 0 ? 'partial' : 'confirmed') : 'confirmed',
+              total: totalCharge,
               discount: getDiscount(),
-              totalFinal: total,
-              anticipoAmount: cobrarAnticipo ? anticipoAmount : 0,
-              pending: cobrarAnticipo ? Math.round(Math.max(0, total - anticipoAmount) * 100) / 100 : total,
+              totalFinal: totalCharge,
+              anticipoAmount: anticipoTotal,
+              pending: Math.round(Math.max(0, totalCharge - anticipoTotal) * 100) / 100,
               paymentMethod,
               cobrarAnticipo,
               crearInvitacion,
@@ -3681,14 +3793,20 @@ export async function renderCalendario(container) {
       // Cancel reservation
       overlay.querySelector('#rv-cancel')?.addEventListener('click', async () => {
         if (confirm('¿Cancelar esta reserva? Esta acción no se puede deshacer.')) {
+          // Borra TODAS las inscripciones de la reserva (una reserva nueva puede tener
+          // varias clases/personas). Si no hay lista, cae al id único (ficha desde inscripción).
+          const ids = (Array.isArray(res.enrollmentIds) && res.enrollmentIds.length) ? res.enrollmentIds : [res.id];
           try {
-            await deleteEnrollment(res.id);
-            // Limpia pagos de clase suelta asociados (sin huérfanos en estadísticas)
-            for (const p of await fetchPayments('enrollment', res.id)) { await deletePayment(p.id); }
+            for (const eid of ids) {
+              try {
+                await deleteEnrollment(eid);
+                for (const p of await fetchPayments('enrollment', eid)) { await deletePayment(p.id); }
+              } catch {
+                await updateEnrollmentStatus(eid, 'cancelled').catch(() => {});
+              }
+            }
             showToast('Reserva cancelada', 'success');
           } catch {
-            // If delete fails, try status update
-            await updateEnrollmentStatus(res.id, 'cancelled').catch(() => {});
             showToast('Reserva cancelada', 'success');
           }
           overlay.remove();
@@ -3817,7 +3935,7 @@ export async function renderCalendario(container) {
                         ${userBonos.map(bo => {
                           const boDate = new Date(bo.created_at);
                           const boDateStr = boDate.getDate() + '/' + (boDate.getMonth() + 1) + '/' + boDate.getFullYear();
-                          const statusLbl = bo.status === 'active' ? 'Activo' : bo.status === 'completed' ? 'Completado' : bo.status === 'expired' ? 'Expirado' : bo.status;
+                          const statusLbl = bo.status === 'active' ? 'Activo' : bo.status === 'exhausted' ? 'Agotado' : bo.status === 'completed' ? 'Completado' : bo.status === 'expired' ? 'Expirado' : bo.status;
                           const statusClr = bo.status === 'active' ? '#0ea5e9' : bo.status === 'completed' ? '#22c55e' : '#6b7280';
                           return `<div class="rv-timeline-item">
                             <div class="rv-timeline-dot" style="background:${statusClr}"></div>

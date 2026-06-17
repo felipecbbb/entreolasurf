@@ -802,13 +802,16 @@ export async function renderClientes(container) {
         const paid = Number(b.total_paid || 0);
         return { expected, pending: Math.max(0, Math.round((expected - paid) * 100) / 100), status: b.status };
       });
-      const activos = enriched.filter(b => b.status === 'active');
-      const totalCuenta = activos.reduce((s, b) => s + b.expected, 0);
-      const pendiente = enriched.reduce((s, b) => s + b.pending, 0);
+      // Cuentan los bonos "vivos": activos Y agotados (un bono agotado puede seguir
+      // debiendo dinero). Total y pendiente se calculan sobre el MISMO conjunto para
+      // que cuadren entre sí (no como antes: total solo 'active' pero pendiente de todos).
+      const contables = enriched.filter(b => b.status === 'active' || b.status === 'exhausted');
+      const totalCuenta = contables.reduce((s, b) => s + b.expected, 0);
+      const pendiente = contables.reduce((s, b) => s + b.pending, 0);
       el.innerHTML =
         kpiCard('Total cuenta', formatCurrency(totalCuenta)) +
         kpiCard('Pendiente', formatCurrency(pendiente), pendiente > 0 ? 'warn' : 'ok') +
-        kpiCard('Bonos activos', activos.length) +
+        kpiCard('Bonos', contables.length) +
         kpiCard('Clases', (enrollments || []).length);
     } catch (err) {
       el.innerHTML = kpiCard('Cuenta', '—');
@@ -1410,7 +1413,7 @@ export async function renderClientes(container) {
 
       // Tipos con >1 bono activo → habilita el toggle "aplicar a todos los de este tipo"
       const activeTypeCounts = {};
-      bonos.filter(b => b.status === 'active').forEach(b => { activeTypeCounts[b.class_type] = (activeTypeCounts[b.class_type] || 0) + 1; });
+      bonos.filter(b => b.status === 'active' || b.status === 'exhausted').forEach(b => { activeTypeCounts[b.class_type] = (activeTypeCounts[b.class_type] || 0) + 1; });
 
       const cards = bonos.map(b => {
         const remaining = b.total_credits - b.used_credits;
@@ -1468,7 +1471,7 @@ export async function renderClientes(container) {
               </div>
             </div>` : ''}
             <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-              ${!isFullyPaid && b.status === 'active' ? `<button class="btn cli-bono-pay-btn" data-bono-id="${b.id}" data-pending="${pending.toFixed(2)}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">Añadir pago</button>` : ''}
+              ${!isFullyPaid && (b.status === 'active' || b.status === 'exhausted') ? `<button class="btn cli-bono-pay-btn" data-bono-id="${b.id}" data-pending="${pending.toFixed(2)}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">Añadir pago</button>` : ''}
               <button class="btn cli-bono-expand-btn" data-bono-id="${b.id}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:6px;cursor:pointer;font-weight:600">+ Ampliar</button>
             </div>
           </div>`;
@@ -1512,7 +1515,7 @@ export async function renderClientes(container) {
           btn.disabled = true;
           try {
             let q = supabase.from('bonos').update({ custom_total: Math.round(newTotal * 100) / 100, updated_at: new Date().toISOString() });
-            if (scopeAll && b) q = q.eq('user_id', c.id).eq('class_type', b.class_type).eq('status', 'active');
+            if (scopeAll && b) q = q.eq('user_id', c.id).eq('class_type', b.class_type).in('status', ['active', 'exhausted']);
             else q = q.eq('id', bonoId);
             const { error } = await q;
             if (error) throw error;
@@ -2460,7 +2463,7 @@ export async function renderClientes(container) {
       return { ...b, expectedPrice, totalPaidReal: paid, pending, isFullyPaid: pending <= 0 };
     });
 
-    const activeBonos = enrichedBonos.filter(b => b.status === 'active' && !b.isFullyPaid);
+    const activeBonos = enrichedBonos.filter(b => (b.status === 'active' || b.status === 'exhausted') && !b.isFullyPaid);
     const activeEnrollments = enrollments.filter(e => ['confirmed', 'partial'].includes(e.status));
 
     const selectedType = preselectedType || 'bono';

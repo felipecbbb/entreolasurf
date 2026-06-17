@@ -35,6 +35,7 @@ export function statusBadge(status) {
     active: 'Activo', draft: 'Borrador', out_of_stock: 'Sin stock',
     confirmed: 'Confirmado', returned: 'Devuelto',
     paid: 'Pagado', shipped: 'Enviado', delivered: 'Entregado',
+    exhausted: 'Agotado', partial: 'Parcial', expired: 'Expirado', no_show: 'No asistió',
     admin: 'Admin', client: 'Cliente'
   };
   const label = labels[status] || status;

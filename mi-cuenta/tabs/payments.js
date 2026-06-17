@@ -7,12 +7,11 @@ export async function renderPayments(panel) {
 
   panel.innerHTML = '<p style="color:var(--color-muted)">Cargando pagos…</p>';
 
-  const [paymentsRes, ordersRes, bookingsRes, profileRes, bonosRes, rentalsRes] = await Promise.all([
+  const [paymentsRes, ordersRes, bookingsRes, profileRes, rentalsRes] = await Promise.all([
     supabase.rpc('get_user_payments', { p_user_id: user.id }),
     supabase.from('orders').select('*, order_items(id)').eq('user_id', user.id).order('created_at', { ascending: false }),
     supabase.from('bookings').select('*, surf_camps:camp_id(title)').eq('user_id', user.id).order('created_at', { ascending: false }),
     supabase.from('profiles').select('credit_balance').eq('id', user.id).single(),
-    supabase.from('bonos').select('*, payments:payments(amount)').eq('user_id', user.id).eq('status', 'active'),
     supabase.from('equipment_reservations')
       .select('id, size, total_amount, deposit_paid, status, date_start, date_end, rental_equipment:equipment_id(name)')
       .eq('user_id', user.id).not('status', 'in', '(cancelled,returned)')
@@ -23,7 +22,6 @@ export async function renderPayments(panel) {
   const orders = ordersRes.data || [];
   const bookings = bookingsRes.data || [];
   const creditBalance = Number(profileRes.data?.credit_balance || 0);
-  const activeBonos = bonosRes.data || [];
   // Alquileres con saldo pendiente (total - señal pagada)
   const pendingRentals = (rentalsRes.data || [])
     .map(r => ({ ...r, pending: Number(r.total_amount || 0) - Number(r.deposit_paid || 0) }))

@@ -130,7 +130,7 @@ export async function renderReservaClases(container) {
     const bonoPayments = payments.filter(p => p.reservation_type === 'bono');
     const enrollmentPayments = payments.filter(p => p.reservation_type === 'enrollment');
     const totalBonoRevenue = bonoPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
-    const activeBonos = bonos.filter(b => b.status === 'active').length;
+    const activeBonos = bonos.filter(b => b.status === 'active' || b.status === 'exhausted').length;
     const totalCredits = bonos.reduce((s, b) => s + (b.total_credits || 0), 0);
     const usedCredits = bonos.reduce((s, b) => s + (b.used_credits || 0), 0);
     const classPaymentTotal = enrollmentPayments.reduce((s, p) => s + Number(p.amount || 0), 0);

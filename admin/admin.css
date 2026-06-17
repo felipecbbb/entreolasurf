@@ -745,9 +745,17 @@ a.admin-nav-item.active .nav-icon {
 .admin-badge[data-status="full"],
 .admin-badge[data-status="closed"],
 .admin-badge[data-status="completed"],
+.admin-badge[data-status="exhausted"],
+.admin-badge[data-status="expired"],
+.admin-badge[data-status="no_show"],
 .admin-badge[data-status="returned"] {
   --badge-bg: #f0f4f8;
   --badge-color: #475569;
+}
+
+.admin-badge[data-status="partial"] {
+  --badge-bg: #fffbeb;
+  --badge-color: #92400e;
 }
 
 .admin-badge[data-status="draft"] {

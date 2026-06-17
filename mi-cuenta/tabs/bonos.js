@@ -31,8 +31,8 @@ export async function renderBonos(panel, switchTab) {
     return;
   }
 
-  const active = bonos.filter(b => b.status === 'active');
-  const inactive = bonos.filter(b => b.status !== 'active');
+  const active = bonos.filter(b => b.status === 'active' || b.status === 'exhausted');
+  const inactive = bonos.filter(b => b.status !== 'active' && b.status !== 'exhausted');
 
   let html = '';
 
@@ -52,7 +52,10 @@ export async function renderBonos(panel, switchTab) {
 function renderBonoCard(b, dimmed, switchTab) {
   const remaining = b.total_credits - b.used_credits;
   const pct = Math.round((b.used_credits / b.total_credits) * 100);
-  const isActive = b.status === 'active';
+  // 'exhausted' = todos los créditos usados, pero el bono sigue VIVO (puede deber
+  // dinero y ampliarse). Con el modelo nuevo es el estado habitual, así que se trata
+  // como activo para pagar/ampliar/reservar.
+  const isActive = b.status === 'active' || b.status === 'exhausted';
 
   // Payment info — total real (respeta descuento custom_total) y pagado real
   const expectedPrice = b.custom_total != null ? Number(b.custom_total) : getPackPrice(b.class_type, b.total_credits);
@@ -318,8 +321,8 @@ function openPayBonoModal(panel, switchTab, bonos, bonoId, classType, totalCredi
 async function refreshBonosPanel(panel, switchTab) {
   const freshBonos = await fetchUserBonos();
   panel.innerHTML = '';
-  const active = freshBonos.filter(b => b.status === 'active');
-  const inactive = freshBonos.filter(b => b.status !== 'active');
+  const active = freshBonos.filter(b => b.status === 'active' || b.status === 'exhausted');
+  const inactive = freshBonos.filter(b => b.status !== 'active' && b.status !== 'exhausted');
   let html = '';
   if (active.length) html += active.map(b => renderBonoCard(b, false, switchTab)).join('');
   if (inactive.length) {
