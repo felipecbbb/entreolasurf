@@ -209,9 +209,16 @@ export async function renderReservas(container) {
       cancelled: '#ef4444', refunded: '#6b7280',
     }[booking.status] || '#6b7280';
 
-    const depositPaid = Number(booking.deposit_amount || 0);
+    // Pagado REAL = SUM(payments del booking) = única verdad. booking.deposit_amount
+    // es un denormalizado que puede driftar (p.ej. backfills que no lo resincronizan);
+    // calcular el pendiente con él mostraría "Cobrar resto" en reservas ya pagadas.
     const totalAmount = Number(booking.total_amount || 0);
-    const pendingAmount = Math.max(0, totalAmount - depositPaid);
+    let depositPaid = Number(booking.deposit_amount || 0);
+    try {
+      const pays = await fetchPayments('booking', booking.id);
+      depositPaid = (pays || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+    } catch {}
+    const pendingAmount = Math.max(0, Math.round((totalAmount - depositPaid) * 100) / 100);
     const isFullyPaid = booking.status === 'fully_paid' || pendingAmount <= 0;
 
     // Health info
