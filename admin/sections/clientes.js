@@ -6,6 +6,7 @@ import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeM
 import { supabase } from '/lib/supabase.js';
 import { getPackPrice, bonoExpected, classPrice } from '/lib/domain/pricing.js';
 import { recalcPaidState as recalcPaymentState, recalcBonoPaid } from '/lib/domain/payments.js';
+import { createBono } from '/lib/domain/bonos.js';
 import { openBonoFicha } from '../components/bono-ficha.js';
 import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
@@ -1533,17 +1534,11 @@ export async function renderClientes(container) {
       const btn = document.getElementById('cli-nb-submit');
       btn.disabled = true; btn.textContent = 'Creando…';
       try {
-        const { data: bonoCreated, error } = await supabase.from('bonos').insert({
-          user_id: c.id,
-          class_type: classType,
-          total_credits: credits,
-          used_credits: 0,
-          status: 'active',
-          total_paid: amount,
-          custom_total: total,            // precio total fijado (respeta descuento)
+        const bonoId = await createBono({
+          user_id: c.id, class_type: classType, total_credits: credits,
+          custom_total: total, total_paid: 0,   // precio fijado; total_paid lo deriva el pago
           expires_at: new Date(expiresAtStr + 'T23:59:59').toISOString(),
-        }).select('id').single();
-        if (error) throw error;
+        });
 
         if (method === 'saldo' && amount > 0) {
           const currentBalance = Number(c.credit_balance || 0);
@@ -1551,14 +1546,15 @@ export async function renderClientes(container) {
           c.credit_balance = Math.max(0, currentBalance - amount);
         }
 
-        if (amount > 0 && bonoCreated?.id) {
+        if (amount > 0 && bonoId) {
           await createPayment({
             reservation_type: 'bono',
-            reference_id: bonoCreated.id,
+            reference_id: bonoId,
             amount,
             payment_method: method,
             concept: `Nuevo bono ${TYPE_LABELS[classType] || classType} (${credits} clases)`,
           });
+          await recalcBonoPaid(bonoId);  // total_paid = SUM(payments)
         }
 
         const pendiente = Math.max(0, Math.round((total - amount) * 100) / 100);

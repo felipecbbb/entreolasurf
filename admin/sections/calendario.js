@@ -13,7 +13,7 @@ import {
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
-import { PACK_PRICING, getPackPrice, bonoExpected, round2 } from '/lib/domain/pricing.js';
+import { PACK_PRICING, getPackPrice, bonoExpected, bonoFullyPaid, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
 import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry } from '/lib/domain/bonos.js';
 import { openBonoFicha } from '../components/bono-ficha.js';
@@ -379,14 +379,10 @@ export async function renderCalendario(container) {
       // status de la inscripción.
       let isPaid, isPartial;
       if (e.bono) {
-        const expected = bonoExpected(e.bono);
-        // total_paid se mantiene sincronizado con la suma de payments en todos los flujos
-        const bonoPaid = Number(e.bono.total_paid || 0);
-        // Mismo redondeo a céntimo que Cliente/Reserva-clases (evita verde aquí y rojo allí)
-        const bonoPend = Math.max(0, Math.round((expected - bonoPaid) * 100) / 100);
-        const fullyPaid = expected > 0 ? bonoPend <= 0 : bonoPaid > 0;
+        // Estado de pago del bono desde el dominio (misma regla que el resto de paneles)
+        const fullyPaid = bonoFullyPaid(e.bono);
         isPaid = fullyPaid;
-        isPartial = !fullyPaid && bonoPaid > 0;
+        isPartial = !fullyPaid && Number(e.bono.total_paid || 0) > 0;
       } else {
         isPaid = e.status === 'paid';
         isPartial = e.status === 'partial';
@@ -660,14 +656,14 @@ export async function renderCalendario(container) {
       if (amount > 0 && !method) { showToast('Elige un método de pago', 'error'); return; }
       const btn = modal.querySelector('.cb-submit'); btn.disabled = true; btn.textContent = 'Creando…';
       try {
-        const { data: bono, error } = await supabase.from('bonos').insert({
-          user_id: userId, class_type: classType, total_credits: credits, used_credits: 0,
-          status: 'active', total_paid: amount, custom_total: total,
+        const bonoId = await createBono({
+          user_id: userId, class_type: classType, total_credits: credits,
+          custom_total: total, total_paid: 0,
           expires_at: new Date(expiresAtStr + 'T23:59:59').toISOString(),
-        }).select('id').single();
-        if (error) throw error;
-        if (amount > 0 && bono?.id) {
-          await createPayment({ reservation_type: 'bono', reference_id: bono.id, amount, payment_method: method, concept: `Nuevo bono ${TYPE_LABELS[classType] || classType} (${credits} clases)` });
+        });
+        if (amount > 0 && bonoId) {
+          await createPayment({ reservation_type: 'bono', reference_id: bonoId, amount, payment_method: method, concept: `Nuevo bono ${TYPE_LABELS[classType] || classType} (${credits} clases)` });
+          await recalcBonoPaid(bonoId);
         }
         const pend = Math.max(0, Math.round((total - amount) * 100) / 100);
         close();
