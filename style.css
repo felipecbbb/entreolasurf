@@ -2325,6 +2325,13 @@ td a {
 .hp-reviews-section {
   background: var(--color-bg);
 }
+.hp-reviews-rating {
+  margin: 10px 0 0;
+  font-size: .95rem;
+  color: var(--color-muted);
+}
+.hp-reviews-rating strong { color: var(--color-navy); }
+.hp-reviews-stars-big { color: #fbbf24; letter-spacing: 2px; font-size: 1.05rem; }
 .hp-reviews-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
