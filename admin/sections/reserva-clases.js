@@ -2,7 +2,7 @@
    Reserva Clases — Bonos y reservas de clases (pagos web + admin)
    ============================================================ */
 import { supabase } from '/lib/supabase.js';
-import { formatDate, formatCurrency, showToast, openModal, closeModal } from '../modules/ui.js';
+import { formatDate, formatCurrency, showToast } from '../modules/ui.js';
 import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
 import { bonoExpected } from '/lib/domain/pricing.js';
 import { openBonoFicha as openBonoFichaUnica } from '../components/bono-ficha.js';
@@ -49,48 +49,6 @@ async function fetchClassPayments() {
   return data || [];
 }
 
-async function fetchBonoPayments(bonoId) {
-  // Anticipo del bono (online): reservation_type='bono', reference_id=bonoId
-  const { data: directPayments } = await supabase
-    .from('payments')
-    .select('*')
-    .eq('reservation_type', 'bono')
-    .eq('reference_id', bonoId)
-    .order('payment_date', { ascending: false });
-
-  // Pagos de inscripción (presencial) ligados a este bono vía enrollment IDs
-  const { data: enrollments } = await supabase
-    .from('class_enrollments')
-    .select('id')
-    .eq('bono_id', bonoId);
-
-  let enrollPayments = [];
-  if (enrollments?.length) {
-    const eIds = enrollments.map(e => e.id);
-    const { data } = await supabase
-      .from('payments')
-      .select('*')
-      .eq('reservation_type', 'enrollment')
-      .in('reference_id', eIds);
-    if (data) enrollPayments = data;
-  }
-
-  // Merge and deduplicate
-  const all = [...(directPayments || []), ...enrollPayments];
-  const seen = new Set();
-  return all.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; })
-    .sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date));
-}
-
-async function fetchBonoEnrollments(bonoId) {
-  const { data, error } = await supabase
-    .from('class_enrollments')
-    .select('*, surf_classes:class_id(id, type, date, time_start, time_end)')
-    .eq('bono_id', bonoId)
-    .order('created_at', { ascending: false });
-  if (error) return [];
-  return data || [];
-}
 
 // El precio esperado del bono vive en /lib/domain/pricing.js (bonoExpected).
 
@@ -272,160 +230,6 @@ export async function renderReservaClases(container) {
     });
   }
 
-  // ---- Ficha de Bono ----
-  async function openBonoFicha(bono) {
-    const type = TYPE_LABELS[bono.class_type] || bono.class_type || '—';
-    const color = TYPE_COLORS[bono.class_type] || '#64748b';
-    const status = BONO_STATUSES[bono.status] || bono.status;
-    const statusColor = BONO_STATUS_COLORS[bono.status] || '#6b7280';
-    const clientName = bono.profiles?.full_name || '—';
-    const clientPhone = bono.profiles?.phone || '—';
-    const clientEmail = bono.profiles?.email || '—';
-
-    // Total esperado: precio a medida (custom_total) si está fijado, si no catálogo.
-    // Misma fórmula que Cliente y Calendario para que no diverjan.
-    const expectedPrice = bonoExpected(bono);
-    const totalPaid = Number(bono.total_paid || 0);
-    const pendingAmount = Math.max(0, Math.round((expectedPrice - totalPaid) * 100) / 100);
-    const isFullyPaid = pendingAmount <= 0;
-
-    // Fetch payments and enrollments for this bono
-    const [bonoPayments, enrollments] = await Promise.all([
-      fetchBonoPayments(bono.id),
-      fetchBonoEnrollments(bono.id),
-    ]);
-
-    // Credit usage bar
-    const used = bono.used_credits || 0;
-    const total = bono.total_credits || 0;
-    const usagePct = total > 0 ? Math.round(used / total * 100) : 0;
-    const barColor = usagePct >= 100 ? '#6b7280' : usagePct >= 80 ? '#f59e0b' : '#22c55e';
-
-    // Expiry
-    const expiresAt = bono.expires_at ? new Date(bono.expires_at) : null;
-    const isExpired = expiresAt && expiresAt < new Date();
-    const expiryStr = expiresAt ? formatDate(bono.expires_at) : 'Sin fecha';
-
-    // Payments list
-    const paymentsHtml = bonoPayments.length
-      ? bonoPayments.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6">
-          <div>
-            <strong style="font-size:.85rem">${formatCurrency(p.amount)}</strong>
-            <span style="color:var(--color-muted);font-size:.78rem;margin-left:8px">${METHOD_LABELS[p.payment_method] || p.payment_method || '—'}</span>
-          </div>
-          <span style="color:var(--color-muted);font-size:.78rem">${formatDate(p.payment_date)}</span>
-        </div>`).join('')
-      : '<p style="color:var(--color-muted);font-size:.85rem;padding:8px 0">Sin pagos registrados directamente al bono</p>';
-
-    // Enrollments list (classes used with this bono)
-    const enrollmentsHtml = enrollments.length
-      ? enrollments.map(e => {
-        const cls = e.surf_classes;
-        const clsType = cls ? (TYPE_LABELS[cls.type] || cls.type) : '—';
-        const clsDate = cls ? formatDate(cls.date) : '—';
-        const clsTime = cls ? `${(cls.time_start || '').slice(0,5)} – ${(cls.time_end || '').slice(0,5)}` : '';
-        const eStatus = e.status === 'cancelled' ? 'Cancelada' : e.attendance === true ? 'Asistió' : e.attendance === false ? 'No asistió' : 'Inscrito';
-        const eColor = e.status === 'cancelled' ? '#ef4444' : e.attendance === true ? '#22c55e' : e.attendance === false ? '#6b7280' : '#0ea5e9';
-        return `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;gap:12px">
-            <div style="min-width:0">
-              <div style="font-size:.85rem;font-weight:600">${clsType}</div>
-              <div style="font-size:.76rem;color:var(--color-muted)">${clsDate} ${clsTime}</div>
-            </div>
-            <span class="admin-badge" style="--badge-bg:${eColor}18;--badge-color:${eColor};flex-shrink:0">${eStatus}</span>
-          </div>`;
-      }).join('')
-      : '<p style="color:var(--color-muted);font-size:.85rem;padding:8px 0">No se han usado créditos aún</p>';
-
-    openModal(`Ficha de Bono — ${type}`, `
-      <div style="display:flex;flex-direction:column;gap:20px">
-        <!-- Client info -->
-        <div style="display:flex;gap:16px;align-items:center;padding:16px;background:#f8fafc;border-radius:10px">
-          <div style="width:42px;height:42px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:1rem;flex-shrink:0">
-            ${clientName.charAt(0).toUpperCase()}
-          </div>
-          <div style="min-width:0">
-            <div style="font-weight:700;font-size:.95rem;color:var(--color-navy)">${clientName}</div>
-            <div style="font-size:.78rem;color:var(--color-muted)">${clientPhone} · ${clientEmail}</div>
-            ${bono.profiles?.id ? `<a href="#clientes" class="rc-goto-client" data-client-id="${bono.profiles.id}" style="font-size:.72rem;color:#0ea5e9;text-decoration:underline;cursor:pointer">Ver ficha de cliente</a>` : ''}
-          </div>
-        </div>
-
-        <!-- Status + type -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-          <div>
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600;margin-bottom:4px">Estado</div>
-            <span class="admin-badge" style="--badge-bg:${statusColor}18;--badge-color:${statusColor}">${status}</span>
-          </div>
-          <div>
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600;margin-bottom:4px">Tipo</div>
-            <span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:.88rem"><span style="width:10px;height:10px;border-radius:50%;background:${color}"></span>${type}</span>
-          </div>
-          <div>
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600;margin-bottom:4px">Expira</div>
-            <span style="font-size:.88rem;${isExpired ? 'color:#ef4444;font-weight:600' : ''}">${expiryStr}</span>
-          </div>
-        </div>
-
-        <!-- Credit usage -->
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-            <span style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);font-weight:600">Créditos usados</span>
-            <span style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--color-navy)">${used} / ${total}</span>
-          </div>
-          <div style="height:10px;background:#e5e7eb;border-radius:5px;overflow:hidden">
-            <div style="height:100%;width:${usagePct}%;background:${barColor};border-radius:5px;transition:width .3s"></div>
-          </div>
-          <div style="font-size:.74rem;color:var(--color-muted);margin-top:4px">${total - used} créditos restantes</div>
-        </div>
-
-        <!-- Payment status -->
-        <div style="padding:16px;border-radius:10px;background:${isFullyPaid ? '#f0fdf4' : '#fef2f2'};border:1px solid ${isFullyPaid ? '#bbf7d0' : '#fecaca'}">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font-weight:700;color:${isFullyPaid ? '#166534' : '#b91c1c'};font-size:.88rem">
-                ${isFullyPaid ? 'Pagado completamente' : 'Pendiente de pago'}
-              </div>
-              <div style="font-size:.78rem;color:${isFullyPaid ? '#15803d' : '#dc2626'};margin-top:2px">
-                Pagado: ${formatCurrency(totalPaid)} ${expectedPrice > 0 ? `de ${formatCurrency(expectedPrice)}` : ''}
-              </div>
-            </div>
-            ${!isFullyPaid && pendingAmount > 0 ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:#b91c1c">${formatCurrency(pendingAmount)}</div>` : ''}
-          </div>
-        </div>
-
-        <!-- Payments history -->
-        <div>
-          <h4 style="font-family:'Space Grotesk',sans-serif;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);margin:0 0 8px">Historial de pagos</h4>
-          ${paymentsHtml}
-        </div>
-
-        <!-- Enrollments (classes used) -->
-        <div>
-          <h4 style="font-family:'Space Grotesk',sans-serif;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--color-muted);margin:0 0 8px">Clases utilizadas (${enrollments.length})</h4>
-          ${enrollmentsHtml}
-        </div>
-
-        <!-- Meta -->
-        <div style="font-size:.72rem;color:#b0b8c1;border-top:1px solid #f3f4f6;padding-top:12px">
-          ID: ${bono.id.slice(0, 8)} · Creado: ${formatDate(bono.created_at)}
-        </div>
-      </div>
-    `);
-
-    // Link to client ficha
-    document.querySelector('.rc-goto-client')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      const clientId = e.target.dataset.clientId;
-      closeModal();
-      location.hash = '#clientes';
-      setTimeout(() => {
-        const card = document.querySelector(`.cli-list-card[data-id="${clientId}"]`);
-        if (card) card.click();
-      }, 400);
-    });
-  }
 
   await render();
 }
