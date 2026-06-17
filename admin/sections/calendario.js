@@ -445,6 +445,9 @@ export async function renderCalendario(container) {
           <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${isPaid ? '#16a34a' : isPartial ? '#d97706' : '#dc2626'}" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
           </span>
+          ${e.bono ? `<button class="cal-pending-btn" data-eid="${e.id}" data-client-name="${name}" title="Dejar pendiente · libera el crédito del bono para usarlo otro día">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a16207" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </button>` : ''}
           <span class="cal-client-move-btns">
             <button class="cal-move-btn" data-eid="${e.id}" data-class-id="${c.id}" title="Mover a otro día">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14l2 2 4-4"/></svg>
@@ -972,6 +975,26 @@ export async function renderCalendario(container) {
             render();
           } catch (err) { showToast('Error: ' + err.message, 'error'); }
         }
+      });
+    });
+
+    // Botón "dejar pendiente": libera el crédito del bono SIN canjearlo. Cancela la
+    // inscripción (el trigger repone used_credits y la plaza), así el crédito queda
+    // "pendiente de asignar" y el cliente lo puede usar otro día (figura en su ficha).
+    container.querySelectorAll('.cal-pending-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const eid = btn.dataset.eid;
+        const name = btn.dataset.clientName || 'esta persona';
+        if (!eid) return;
+        if (!confirm(`¿Dejar pendiente la clase de ${name}?\n\nEl crédito del bono no se gasta: queda pendiente de asignar para usarlo otro día.`)) return;
+        try {
+          const { error } = await supabase.from('class_enrollments')
+            .update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', eid);
+          if (error) throw error;
+          showToast('Clase liberada · crédito pendiente de asignar', 'success');
+          render();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
       });
     });
 

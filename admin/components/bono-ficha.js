@@ -78,9 +78,11 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   const cliName = (cli.full_name || 'Cliente') + (cli.last_name ? ' ' + cli.last_name : '');
   const canPay = !fullyPaid && (bono.status === 'active' || bono.status === 'exhausted');
   const ord = creditOrdinals(enrollments);
-  // Histórico en orden cronológico (igual que los créditos 1→N). loadBono carga DESC
-  // por created_at; sin reordenar, la tabla salía al revés (4/4 arriba, 1/4 abajo).
-  const enrollSorted = enrollments.slice().sort((a, b) => {
+  // Histórico = clases USADAS (no canceladas), en orden cronológico (igual que los
+  // créditos 1→N). Las canceladas liberan el crédito y figuran como "pendiente de
+  // asignar" (KPI), no como una clase del histórico. loadBono carga DESC por
+  // created_at; sin reordenar, la tabla salía al revés (4/4 arriba, 1/4 abajo).
+  const enrollSorted = enrollments.filter(e => e.status !== 'cancelled').slice().sort((a, b) => {
     const ka = `${a.surf_classes?.date || ''} ${a.surf_classes?.time_start || ''}`;
     const kb = `${b.surf_classes?.date || ''} ${b.surf_classes?.time_start || ''}`;
     if (ka !== kb) return ka < kb ? -1 : 1;
@@ -134,13 +136,16 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   overlay.className = 'ns-overlay';
   overlay.innerHTML = `
     <style>
-      #bf-overlay .bf-grid { display:grid; grid-template-columns: 1.15fr .85fr; gap:24px; align-items:start; }
-      @media (max-width: 880px){ #bf-overlay .bf-grid { grid-template-columns: 1fr; } }
-      #bf-overlay .bf-card { background:#fff; border:1px solid var(--color-line,#e5e7eb); border-radius:12px; padding:18px 20px; }
-      #bf-overlay .bf-kpis { display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin:14px 0 4px; }
-      #bf-overlay .bf-kpi { background:#f8fafc; border:1px solid var(--color-line,#e5e7eb); border-radius:10px; padding:10px 12px; }
+      #bf-overlay .ns-panel { max-width: 1500px; }
+      #bf-overlay .bf-cols { display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start; margin-top:22px; }
+      @media (max-width: 980px){ #bf-overlay .bf-cols { grid-template-columns:1fr; } }
+      #bf-overlay .bf-card { background:#fff; border:1px solid var(--color-line,#e5e7eb); border-radius:12px; padding:20px 24px; }
+      #bf-overlay .bf-kpis { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap:12px; margin:16px 0 4px; }
+      #bf-overlay .bf-kpi { background:#f8fafc; border:1px solid var(--color-line,#e5e7eb); border-radius:10px; padding:12px 14px; }
+      #bf-overlay .bf-kpi.pending { background:#fffbeb; border-color:#fde68a; }
       #bf-overlay .bf-kpi .l { font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); font-weight:700; }
-      #bf-overlay .bf-kpi .v { font-size:1.15rem; font-weight:800; color:var(--color-navy,#0f2f39); margin-top:2px; }
+      #bf-overlay .bf-kpi .v { font-size:1.25rem; font-weight:800; color:var(--color-navy,#0f2f39); margin-top:2px; }
+      #bf-overlay .bf-kpi.pending .v { color:#b45309; }
       #bf-overlay .bf-actions { display:flex; gap:8px; flex-wrap:wrap; margin:16px 0 4px; }
       #bf-overlay .bf-act { padding:9px 16px; font-size:.84rem; font-weight:700; border-radius:8px; border:1px solid var(--color-line,#e5e7eb); background:#fff; cursor:pointer; }
       #bf-overlay .bf-act:hover { background:#f1f5f9; }
@@ -153,7 +158,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
       #bf-overlay .bf-form label { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--color-muted); }
       #bf-overlay .bf-form input, #bf-overlay .bf-form select { padding:8px 10px; border:1px solid var(--color-line,#e5e7eb); border-radius:8px; font-size:.9rem; background:#fff; }
       #bf-overlay .bf-form .save { background:#22c55e; color:#fff; border:none; border-radius:8px; padding:9px 18px; font-weight:700; cursor:pointer; font-size:.86rem; }
-      #bf-overlay .bf-section-title { font-size:.74rem; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); font-weight:700; margin:22px 0 8px; }
+      #bf-overlay .bf-section-title { font-size:.74rem; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); font-weight:700; margin:0 0 8px; }
       #bf-overlay .bf-cred-pill { font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:99px; background:#e0f2fe; color:#075985; }
       #bf-overlay .bf-bar { height:8px; background:#eef0f2; border-radius:99px; overflow:hidden; margin:8px 0 4px; }
       #bf-overlay .bf-chip { font-size:.74rem; padding:4px 11px; border-radius:99px; background:#e0f2fe; color:#075985; font-weight:700; }
@@ -167,97 +172,94 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
         </div>
         <button class="ns-close" id="bf-close" title="Cerrar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </header>
-      <div class="ns-body" style="padding:24px 28px">
-        <div class="bf-grid">
-          <!-- Columna izquierda: resumen + acciones -->
-          <div>
-            <div class="bf-card">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
-                <div style="font-weight:800;font-size:1.05rem;color:var(--color-navy,#0f2f39)">${esc(cliName)}</div>
-                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                  ${statusBadge(bono.status)}
-                  ${fullyPaid ? '<span style="font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:5px;background:#dcfce7;color:#166534">PAGADO</span>'
-                    : `<span style="font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:5px;background:#fef3c7;color:#92400e">DEBE ${formatCurrency(pending)}</span>`}
-                  ${bono.order_id != null ? '<span style="font-size:.66rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:2px 6px">comprado online</span>' : ''}
-                </div>
-              </div>
-
-              <div class="bf-kpis">
-                <div class="bf-kpi"><div class="l">Clases usadas</div><div class="v">${bono.used_credits}/${bono.total_credits}</div></div>
-                <div class="bf-kpi"><div class="l">Restantes</div><div class="v">${remaining}</div></div>
-                <div class="bf-kpi"><div class="l">Caduca</div><div class="v" style="font-size:.92rem">${formatDate(bono.expires_at)}</div></div>
-              </div>
-              <div class="bf-bar"><div style="height:100%;width:${pct}%;background:${fullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
-
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px">
-                <span style="font-size:.9rem">Pagado <strong>${formatCurrency(paid)}</strong> de</span>
-                <span class="bf-total-show">
-                  <strong style="font-size:1.05rem">${formatCurrency(expected)}</strong>
-                  <button class="bf-total-edit" title="Editar total" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:1rem">✎</button>
-                </span>
-                <span class="bf-total-edit-box" hidden>
-                  <input type="number" step="0.01" min="0" class="bf-total-input" value="${expected.toFixed(2)}" style="width:100px;padding:5px 8px;border:1px solid #0ea5e9;border-radius:6px" />
-                  <button class="bf-total-save" style="background:none;border:none;color:#16a34a;cursor:pointer;font-weight:700;font-size:1.05rem">✓</button>
-                  <button class="bf-total-cancel" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1.05rem">✕</button>
-                </span>
-              </div>
-
-              <div class="bf-actions">
-                ${canPay ? `<button class="bf-act primary" data-form="pay">Añadir pago</button>` : ''}
-                <button class="bf-act" data-form="extend">Ampliar bono</button>
-                <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
-              </div>
-
-              ${canPay ? `
-              <!-- Form: añadir pago (solo si el bono admite cobro) -->
-              <div class="bf-form" id="bf-form-pay" hidden>
-                <div class="row">
-                  <div class="f"><label>Importe (€)</label><input type="number" id="bf-pay-amount" step="0.01" min="0.01" value="${pending > 0 ? pending.toFixed(2) : ''}" style="width:120px" /></div>
-                  <div class="f"><label>Método</label><select id="bf-pay-method">${methodOpts}</select></div>
-                  <button class="save" id="bf-pay-save">Registrar pago</button>
-                </div>
-              </div>` : ''}
-
-              <!-- Form: ampliar -->
-              <div class="bf-form" id="bf-form-extend" hidden>
-                <div class="row">
-                  <div class="f"><label>Añadir clases</label><input type="number" id="bf-ext-credits" min="1" value="1" style="width:90px" /></div>
-                  <div class="f"><label>Cobrar (€)</label><input type="number" id="bf-ext-charge" step="0.01" min="0" style="width:120px" /></div>
-                  <div class="f"><label>Método</label><select id="bf-ext-method">${methodOpts}</select></div>
-                  <button class="save" id="bf-ext-save">Ampliar</button>
-                </div>
-                <p style="font-size:.74rem;color:var(--color-muted);margin:0">El total del bono se ajusta y el cobro queda registrado como pago del bono.</p>
-              </div>
-
-              <!-- Form: nuevo bono de otro tipo -->
-              <div class="bf-form" id="bf-form-newbono" hidden>
-                <div class="row">
-                  <div class="f"><label>Tipo de clase</label><select id="bf-nb-type">${typeOpts}</select></div>
-                  <div class="f"><label>Nº clases</label><input type="number" id="bf-nb-credits" min="1" value="4" style="width:90px" /></div>
-                  <div class="f"><label>Total (€)</label><input type="number" id="bf-nb-total" step="0.01" min="0" style="width:120px" /></div>
-                </div>
-                <div class="row">
-                  <div class="f"><label>Cobrar ahora (€)</label><input type="number" id="bf-nb-paid" step="0.01" min="0" value="0" style="width:120px" /></div>
-                  <div class="f"><label>Método</label><select id="bf-nb-method">${methodOpts}</select></div>
-                  <button class="save" id="bf-nb-save">Crear bono</button>
-                </div>
-                <p style="font-size:.74rem;color:var(--color-muted);margin:0">Crea un bono nuevo del tipo elegido para <strong>${esc(cliName)}</strong> y abre su ficha.</p>
-              </div>
+      <div class="ns-body" style="padding:24px 32px">
+        <!-- Resumen (ancho completo) -->
+        <div class="bf-card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+            <div style="font-weight:800;font-size:1.15rem;color:var(--color-navy,#0f2f39)">${esc(cliName)}</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              ${statusBadge(bono.status)}
+              ${fullyPaid ? '<span style="font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:5px;background:#dcfce7;color:#166534">PAGADO</span>'
+                : `<span style="font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:5px;background:#fef3c7;color:#92400e">DEBE ${formatCurrency(pending)}</span>`}
+              ${bono.order_id != null ? '<span style="font-size:.66rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:2px 6px">comprado online</span>' : ''}
             </div>
-
-            ${hasFamily ? `<div class="bf-card" style="margin-top:18px">
-              <div class="bf-section-title" style="margin:0 0 8px">Participantes · Responsable: ${esc(cliName)}</div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                ${breakdown.map(m => `<span class="bf-chip">${esc(m.name)}: ${m.n} clase${m.n === 1 ? '' : 's'}</span>`).join('')}
-              </div>
-            </div>` : ''}
           </div>
 
-          <!-- Columna derecha: histórico + pagos -->
-          <div>
-            <div class="bf-section-title" style="margin-top:0">Histórico de clases (${enrollments.filter(e => e.status !== 'cancelled').length})</div>
-            <div class="table-wrap"><table><thead><tr><th>Día</th><th>Hora</th><th>Asistente</th><th>Clase</th><th style="text-align:center">Crédito</th><th>Estado</th></tr></thead><tbody>${enrollHtml}</tbody></table></div>
+          <div class="bf-kpis">
+            <div class="bf-kpi"><div class="l">Clases usadas</div><div class="v">${bono.used_credits}/${bono.total_credits}</div></div>
+            <div class="bf-kpi ${remaining > 0 ? 'pending' : ''}"><div class="l">Pendientes de asignar</div><div class="v">${remaining}</div></div>
+            <div class="bf-kpi"><div class="l">Pagado</div><div class="v">${formatCurrency(paid)}</div></div>
+            <div class="bf-kpi"><div class="l">Total del bono</div>
+              <div class="v bf-total-show" style="display:flex;align-items:center;gap:6px">${formatCurrency(expected)}
+                <button class="bf-total-edit" title="Editar total" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:.95rem">✎</button>
+              </div>
+              <span class="bf-total-edit-box" hidden style="display:inline-flex;align-items:center;gap:4px;margin-top:4px">
+                <input type="number" step="0.01" min="0" class="bf-total-input" value="${expected.toFixed(2)}" style="width:90px;padding:4px 6px;border:1px solid #0ea5e9;border-radius:6px" />
+                <button class="bf-total-save" style="background:none;border:none;color:#16a34a;cursor:pointer;font-weight:700;font-size:1.05rem">✓</button>
+                <button class="bf-total-cancel" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1.05rem">✕</button>
+              </span>
+            </div>
+            <div class="bf-kpi"><div class="l">Caduca</div><div class="v" style="font-size:1rem">${formatDate(bono.expires_at)}</div></div>
+          </div>
+          <div class="bf-bar"><div style="height:100%;width:${pct}%;background:${fullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
 
+          <div class="bf-actions">
+            ${canPay ? `<button class="bf-act primary" data-form="pay">Añadir pago</button>` : ''}
+            <button class="bf-act" data-form="extend">Ampliar bono</button>
+            <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
+          </div>
+
+          ${canPay ? `
+          <!-- Form: añadir pago (solo si el bono admite cobro) -->
+          <div class="bf-form" id="bf-form-pay" hidden>
+            <div class="row">
+              <div class="f"><label>Importe (€)</label><input type="number" id="bf-pay-amount" step="0.01" min="0.01" value="${pending > 0 ? pending.toFixed(2) : ''}" style="width:120px" /></div>
+              <div class="f"><label>Método</label><select id="bf-pay-method">${methodOpts}</select></div>
+              <button class="save" id="bf-pay-save">Registrar pago</button>
+            </div>
+          </div>` : ''}
+
+          <!-- Form: ampliar -->
+          <div class="bf-form" id="bf-form-extend" hidden>
+            <div class="row">
+              <div class="f"><label>Añadir clases</label><input type="number" id="bf-ext-credits" min="1" value="1" style="width:90px" /></div>
+              <div class="f"><label>Cobrar (€)</label><input type="number" id="bf-ext-charge" step="0.01" min="0" style="width:120px" /></div>
+              <div class="f"><label>Método</label><select id="bf-ext-method">${methodOpts}</select></div>
+              <button class="save" id="bf-ext-save">Ampliar</button>
+            </div>
+            <p style="font-size:.74rem;color:var(--color-muted);margin:0">El total del bono se ajusta y el cobro queda registrado como pago del bono.</p>
+          </div>
+
+          <!-- Form: nuevo bono de otro tipo -->
+          <div class="bf-form" id="bf-form-newbono" hidden>
+            <div class="row">
+              <div class="f"><label>Tipo de clase</label><select id="bf-nb-type">${typeOpts}</select></div>
+              <div class="f"><label>Nº clases</label><input type="number" id="bf-nb-credits" min="1" value="4" style="width:90px" /></div>
+              <div class="f"><label>Total (€)</label><input type="number" id="bf-nb-total" step="0.01" min="0" style="width:120px" /></div>
+            </div>
+            <div class="row">
+              <div class="f"><label>Cobrar ahora (€)</label><input type="number" id="bf-nb-paid" step="0.01" min="0" value="0" style="width:120px" /></div>
+              <div class="f"><label>Método</label><select id="bf-nb-method">${methodOpts}</select></div>
+              <button class="save" id="bf-nb-save">Crear bono</button>
+            </div>
+            <p style="font-size:.74rem;color:var(--color-muted);margin:0">Crea un bono nuevo del tipo elegido para <strong>${esc(cliName)}</strong> y abre su ficha.</p>
+          </div>
+
+          ${hasFamily ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--color-line,#e5e7eb)">
+            <div class="bf-section-title">Participantes · Responsable: ${esc(cliName)}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${breakdown.map(m => `<span class="bf-chip">${esc(m.name)}: ${m.n} clase${m.n === 1 ? '' : 's'}</span>`).join('')}
+            </div>
+          </div>` : ''}
+        </div>
+
+        <!-- Histórico + Pagos (2 columnas) -->
+        <div class="bf-cols">
+          <div>
+            <div class="bf-section-title">Histórico de clases (${enrollSorted.length})</div>
+            <div class="table-wrap"><table><thead><tr><th>Día</th><th>Hora</th><th>Asistente</th><th>Clase</th><th style="text-align:center">Crédito</th><th>Estado</th></tr></thead><tbody>${enrollHtml}</tbody></table></div>
+          </div>
+          <div>
             <div class="bf-section-title">Pagos (${payments.length})</div>
             <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Importe</th><th>Método</th><th>Origen</th><th></th></tr></thead><tbody>${payHtml}</tbody></table></div>
           </div>

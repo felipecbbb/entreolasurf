@@ -2093,6 +2093,25 @@ a.admin-nav-item-external .nav-icon svg {
   color: #0f2f39;
   border-color: #cbd5e1;
 }
+/* "Dejar pendiente": libera el crédito del bono para otro día */
+.cal-pending-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  background: #fffbeb;
+  cursor: pointer;
+  color: #a16207;
+  padding: 0;
+  flex-shrink: 0;
+}
+.cal-pending-btn:hover {
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
 
 /* Drop outside hint */
 .cal-day-content.drop-outside-active {
