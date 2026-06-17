@@ -6,6 +6,7 @@ import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeM
 import { supabase } from '/lib/supabase.js';
 import { getPackPrice, bonoExpected, classPrice } from '/lib/domain/pricing.js';
 import { recalcPaidState as recalcPaymentState, recalcBonoPaid } from '/lib/domain/payments.js';
+import { openBonoFicha } from '../components/bono-ficha.js';
 import { wetsuitOptionsHtml } from '/lib/shared-constants.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 
@@ -1408,19 +1409,7 @@ export async function renderClientes(container) {
               <div class="cli-bono-bar-fill" style="width:${pct}%;background:${isFullyPaid ? '#22c55e' : '#f59e0b'}"></div>
             </div>
             <div class="cli-bono-meta">
-              <span class="cli-bono-total-row">
-                Pagado: ${formatCurrency(paid)} de
-                <span class="cli-bono-total-display">
-                  <strong class="cli-bono-total-amount">${formatCurrency(expectedPrice)}</strong>
-                  <button class="cli-bono-total-edit" title="Editar total de la reserva">✎</button>
-                </span>
-                <span class="cli-bono-total-editing" hidden>
-                  <input type="number" step="0.01" min="0" class="cli-bono-total-input" value="${expectedPrice.toFixed(2)}" />
-                  <button class="cli-bono-total-save" data-bono-id="${b.id}" title="Guardar">✓</button>
-                  <button class="cli-bono-total-cancel" title="Cancelar">✕</button>
-                  ${canScopeAll ? `<label class="cli-bono-total-scope"><input type="checkbox" class="cli-bono-scope-all"> a todos los ${typeLabel}</label>` : ''}
-                </span>
-              </span>
+              <span>Pagado: ${formatCurrency(paid)} de ${formatCurrency(expectedPrice)}</span>
               <span class="cli-bono-caduca">Caduca: ${formatDate(b.expires_at)}</span>
             </div>
             ${b.order_id != null ? '<div class="cli-bono-online-note">Bono comprado online</div>' : ''}
@@ -1432,8 +1421,7 @@ export async function renderClientes(container) {
               </div>
             </div>` : ''}
             <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-              ${!isFullyPaid && (b.status === 'active' || b.status === 'exhausted') ? `<button class="btn cli-bono-pay-btn" data-bono-id="${b.id}" data-pending="${pending.toFixed(2)}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">Añadir pago</button>` : ''}
-              <button class="btn cli-bono-expand-btn" data-bono-id="${b.id}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#fff;color:#0ea5e9;border:1px solid #0ea5e9;border-radius:6px;cursor:pointer;font-weight:600">+ Ampliar</button>
+              <button class="btn cli-bono-ficha-btn" data-bono-id="${b.id}" style="flex:1;min-width:140px;font-size:.78rem;padding:6px 14px;background:#0f2f39;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">Ver / gestionar ficha</button>
             </div>
           </div>`;
       }).join('');
@@ -1444,65 +1432,13 @@ export async function renderClientes(container) {
 
       el.querySelector('#cli-create-bono-btn')?.addEventListener('click', () => openCreateBonoModal(c));
 
-      // --- Editor de total in-place ---
-      el.querySelectorAll('.cli-bono-total-edit').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+      // La gestión del bono (pagar, ampliar, editar total) vive en la FICHA ÚNICA:
+      // tarjeta y botón abren el mismo componente que reserva-clases y calendario.
+      el.querySelectorAll('.cli-bono-card, .cli-bono-ficha-btn').forEach(node => {
+        node.addEventListener('click', (e) => {
           e.stopPropagation();
-          const card = btn.closest('.cli-bono-card');
-          card.querySelector('.cli-bono-total-display').hidden = true;
-          const editing = card.querySelector('.cli-bono-total-editing');
-          editing.hidden = false;
-          editing.querySelector('.cli-bono-total-input')?.focus();
-        });
-      });
-      el.querySelectorAll('.cli-bono-total-cancel').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const card = btn.closest('.cli-bono-card');
-          card.querySelector('.cli-bono-total-editing').hidden = true;
-          card.querySelector('.cli-bono-total-display').hidden = false;
-        });
-      });
-      el.querySelectorAll('.cli-bono-total-save').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const bonoId = btn.dataset.bonoId;
-          const card = btn.closest('.cli-bono-card');
-          const input = card.querySelector('.cli-bono-total-input');
-          const newTotal = parseFloat(input.value);
-          if (isNaN(newTotal) || newTotal < 0) { showToast('Total inválido', 'error'); return; }
-          const b = bonos.find(x => x.id === bonoId);
-          const scopeAll = card.querySelector('.cli-bono-scope-all')?.checked;
-          btn.disabled = true;
-          try {
-            let q = supabase.from('bonos').update({ custom_total: Math.round(newTotal * 100) / 100, updated_at: new Date().toISOString() });
-            if (scopeAll && b) q = q.eq('user_id', c.id).eq('class_type', b.class_type).in('status', ['active', 'exhausted']);
-            else q = q.eq('id', bonoId);
-            const { error } = await q;
-            if (error) throw error;
-            showToast(scopeAll ? 'Total actualizado en todos los bonos del tipo' : 'Total actualizado', 'success');
-            refreshMoneySections(c);
-          } catch (err) {
-            showToast('Error: ' + (err.message || ''), 'error');
-            btn.disabled = false;
-          }
-        });
-      });
-
-      // Bind add payment to bono
-      el.querySelectorAll('.cli-bono-pay-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          openAddPaymentModal(c, 'bono', btn.dataset.bonoId, Number(btn.dataset.pending));
-        });
-      });
-
-      // Bind expand bono
-      el.querySelectorAll('.cli-bono-expand-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const bono = bonos.find(b => b.id === btn.dataset.bonoId);
-          if (bono) openExpandBonoModal(c, bono);
+          const id = node.dataset.bonoId || node.closest('.cli-bono-card')?.dataset.bonoId;
+          if (id) openBonoFicha(id, { onChange: () => refreshMoneySections(c) });
         });
       });
     } catch (err) {
