@@ -129,6 +129,32 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   const methodOpts = METHODS.map(m => `<option value="${m}">${m.charAt(0).toUpperCase() + m.slice(1)}</option>`).join('');
   const typeOpts = Object.entries(TYPE_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
 
+  // Datos para ASIGNAR una clase pendiente (solo si quedan créditos sin asignar):
+  // familiares del responsable + clases futuras del mismo tipo con su disponibilidad.
+  const canAssign = remaining > 0 && !!bono.user_id;
+  let familyMembers = [], assignClasses = [];
+  if (canAssign) {
+    const t = new Date();
+    const todayStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    const [fmRes, clsRes] = await Promise.all([
+      supabase.from('family_members').select('id, full_name, last_name').eq('user_id', bono.user_id),
+      supabase.from('surf_classes').select('id, date, time_start, max_students, enrolled_count')
+        .eq('type', bono.class_type).neq('status', 'cancelled').gte('date', todayStr)
+        .order('date', { ascending: true }).order('time_start', { ascending: true }),
+    ]);
+    familyMembers = fmRes.data || [];
+    assignClasses = clsRes.data || [];
+  }
+  const assignWhoOpts = `<option value="">Titular · ${esc(cliName)}</option>` +
+    familyMembers.map(f => `<option value="${f.id}">${esc((f.full_name || '') + (f.last_name ? ' ' + f.last_name : ''))}</option>`).join('');
+  const assignClassOpts = assignClasses.length
+    ? assignClasses.map(c => {
+        const full = Number(c.enrolled_count || 0) >= Number(c.max_students || 0);
+        const hhmm = c.time_start ? c.time_start.slice(0, 5) : '';
+        return `<option value="${c.id}">${formatDate(c.date)} ${hhmm} (${c.enrolled_count || 0}/${c.max_students || 0})${full ? ' · COMPLETA' : ''}</option>`;
+      }).join('')
+    : '<option value="">No hay clases futuras de este tipo</option>';
+
   // ---- Overlay a pantalla completa (ns-overlay/ns-panel) ----
   document.getElementById('bf-overlay')?.remove();
   const overlay = document.createElement('div');
@@ -151,6 +177,8 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
       #bf-overlay .bf-act:hover { background:#f1f5f9; }
       #bf-overlay .bf-act.primary { background:#22c55e; color:#fff; border-color:#22c55e; }
       #bf-overlay .bf-act.primary:hover { background:#16a34a; }
+      #bf-overlay .bf-act.assign { background:#f59e0b; color:#fff; border-color:#f59e0b; }
+      #bf-overlay .bf-act.assign:hover { background:#d97706; }
       #bf-overlay .bf-form { background:#f8fafc; border:1px solid var(--color-line,#e5e7eb); border-radius:10px; padding:14px 16px; margin-top:10px; display:grid; gap:10px; }
       #bf-overlay .bf-form[hidden] { display:none; }
       #bf-overlay .bf-form .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
@@ -209,10 +237,22 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
           <div class="bf-bar"><div style="height:100%;width:${pct}%;background:${fullyPaid ? '#22c55e' : '#f59e0b'}"></div></div>
 
           <div class="bf-actions">
+            ${canAssign ? `<button class="bf-act assign" data-form="assign">Asignar clase pendiente (${remaining})</button>` : ''}
             ${canPay ? `<button class="bf-act primary" data-form="pay">Añadir pago</button>` : ''}
             <button class="bf-act" data-form="extend">Ampliar bono</button>
             <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
           </div>
+
+          ${canAssign ? `
+          <!-- Form: asignar una clase pendiente (gasta un crédito ya pagado) -->
+          <div class="bf-form" id="bf-form-assign" hidden>
+            <div class="row">
+              <div class="f"><label>Participante</label><select id="bf-as-who">${assignWhoOpts}</select></div>
+              <div class="f" style="flex:1;min-width:220px"><label>Clase</label><select id="bf-as-class">${assignClassOpts}</select></div>
+              <button class="save" id="bf-as-save">Asignar clase</button>
+            </div>
+            <p style="font-size:.74rem;color:var(--color-muted);margin:0">Gasta uno de los ${remaining} crédito(s) pendiente(s) en la clase elegida. No genera cobro (ya está pagado en el bono).</p>
+          </div>` : ''}
 
           ${canPay ? `
           <!-- Form: añadir pago (solo si el bono admite cobro) -->
@@ -281,11 +321,35 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   // Toggle de formularios de acción (uno visible a la vez)
   overlay.querySelectorAll('.bf-act[data-form]').forEach(btn => btn.addEventListener('click', () => {
     const target = btn.dataset.form;
-    ['pay', 'extend', 'newbono'].forEach(k => {
+    ['pay', 'extend', 'newbono', 'assign'].forEach(k => {
       const el = overlay.querySelector(`#bf-form-${k}`);
       if (el) el.hidden = (k !== target) ? true : !el.hidden;
     });
   }));
+
+  // Asignar una clase pendiente: crea la inscripción con este bono (gasta un crédito
+  // ya pagado). El trigger update_bono_credits descuenta el crédito y ocupa la plaza.
+  overlay.querySelector('#bf-as-save')?.addEventListener('click', async () => {
+    const classId = overlay.querySelector('#bf-as-class')?.value;
+    if (!classId) { showToast('Elige una clase', 'error'); return; }
+    const whoId = overlay.querySelector('#bf-as-who')?.value || '';
+    const cls = assignClasses.find(c => c.id === classId);
+    if (cls && Number(cls.enrolled_count || 0) >= Number(cls.max_students || 0)) {
+      if (!confirm('Esa clase está completa. ¿Asignar igualmente (sobrecupo)?')) return;
+    }
+    const enrollData = { class_id: classId, bono_id: bonoId, status: 'confirmed', user_id: bono.user_id, created_at: new Date().toISOString() };
+    if (whoId) {
+      const fm = familyMembers.find(f => f.id === whoId);
+      enrollData.family_member_id = whoId;
+      enrollData.guest_name = fm ? ((fm.full_name || '') + (fm.last_name ? ' ' + fm.last_name : '')).trim() : null;
+    }
+    try {
+      const { error } = await supabase.from('class_enrollments').insert(enrollData);
+      if (error) throw error;
+      showToast('Clase asignada · crédito gastado', 'success');
+      await reload();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+  });
 
   // Editar total in-place
   overlay.querySelector('.bf-total-edit')?.addEventListener('click', () => {
