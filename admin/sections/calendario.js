@@ -13,8 +13,9 @@ import {
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
-import { PACK_PRICING, getPackPrice, bonoExpected } from '/lib/domain/pricing.js';
+import { PACK_PRICING, getPackPrice, bonoExpected, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
+import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry } from '/lib/domain/bonos.js';
 import { supabase } from '/lib/supabase.js';
 import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry } from '/lib/shared-constants.js';
 
@@ -2743,16 +2744,8 @@ export async function renderCalendario(container) {
             for (const ownerId of ownerIds) {
               const need = ownerSessions[ownerId];
               let bono = null;
-              try {
-                const { data: rows } = await supabase.from('bonos')
-                  .select('*').eq('user_id', ownerId).eq('class_type', cls.type)
-                  .in('status', ['active', 'exhausted']).gt('expires_at', _now)
-                  .order('created_at', { ascending: false });
-                const list = rows || [];
-                // Prefiere un bono con créditos libres (no malgastar prepago) antes que el más reciente
-                bono = list.find(b => (b.total_credits || 0) - (b.used_credits || 0) > 0) || list[0] || null;
-              } catch {}
-              const avail = bono ? Math.max(0, (bono.total_credits || 0) - (bono.used_credits || 0)) : 0;
+              try { bono = await findOwnerBono(ownerId, cls.type); } catch {}
+              const avail = bonoAvailable(bono);
               const deficit = Math.max(0, need - avail);
               const rawDeficit = deficit > 0 ? getPackPrice(cls.type, deficit, Number(cls.price) || 0) : 0;
               const charge = Math.round(rawDeficit * (1 - discRate) * 100) / 100;
@@ -2777,7 +2770,6 @@ export async function renderCalendario(container) {
             });
 
             // 4) Crear/ampliar el bono de cada dueño, registrar el pago y fijar total_paid = SUM(payments)
-            const _expiry = new Date(); _expiry.setMonth(_expiry.getMonth() + 12);
             const bonoByOwner = {}; // userId → { id, status }
             for (let oi = 0; oi < ownerIds.length; oi++) {
               const ownerId = ownerIds[oi];
@@ -2787,25 +2779,14 @@ export async function renderCalendario(container) {
               let bId = bono?.id || null;
               let finalExpected;
               if (bono) {
-                const curExpected = bono.custom_total != null ? Number(bono.custom_total) : getPackPrice(cls.type, bono.total_credits || 0, Number(cls.price) || 0);
-                finalExpected = Math.round((curExpected + (deficit > 0 ? charge : 0)) * 100) / 100;
+                const curExpected = bonoExpected(bono);
+                finalExpected = round2(curExpected + (deficit > 0 ? charge : 0));
                 if (deficit > 0) {
-                  await supabase.from('bonos').update({
-                    total_credits: (bono.total_credits || 0) + deficit,
-                    custom_total: finalExpected,
-                    updated_at: _now,
-                  }).eq('id', bId);
+                  await extendBono(bId, { newTotalCredits: (bono.total_credits || 0) + deficit, newCustomTotal: finalExpected });
                 }
               } else {
                 finalExpected = charge;
-                const { data: created, error: cErr } = await supabase.from('bonos').insert({
-                  user_id: ownerId, class_type: cls.type,
-                  total_credits: Math.max(1, deficit), used_credits: 0,
-                  status: 'active', total_paid: 0, custom_total: charge,
-                  expires_at: _expiry.toISOString(),
-                }).select('id').single();
-                if (cErr) throw cErr;
-                bId = created?.id || null;
+                bId = await createBono({ user_id: ownerId, class_type: cls.type, total_credits: deficit, custom_total: charge });
               }
 
               // Registrar el pago; total_paid se deriva DESPUÉS de la suma real de payments
@@ -4364,22 +4345,10 @@ export async function renderCalendario(container) {
 
         try {
           const newTotalCredits = currentCredits + extra;
-          const newExpiresAt = new Date();
-          newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
-
-          const bonoUpdates = {
-            total_credits: newTotalCredits,
-            status: 'active',
-            expires_at: newExpiresAt.toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          // Si el bono tiene precio a medida, el total esperado debe crecer con la
-          // ampliación (igual que en la ficha de Cliente), para no descuadrar pendiente/KPIs.
-          if (bono.custom_total != null) {
-            bonoUpdates.custom_total = Math.round((Number(bono.custom_total) + amount) * 100) / 100;
-          }
-          const { error: bErr } = await supabase.from('bonos').update(bonoUpdates).eq('id', bonoId);
-          if (bErr) throw bErr;
+          // Si el bono tiene precio a medida, el total esperado crece con la ampliación
+          // (igual que en la ficha de Cliente) para no descuadrar pendiente/KPIs.
+          const newCustomTotal = bono.custom_total != null ? round2(Number(bono.custom_total) + amount) : null;
+          await extendBono(bonoId, { newTotalCredits, newCustomTotal, status: 'active', expires_at: defaultBonoExpiry() });
 
           // Deduct from saldo if applicable
           if (method === 'saldo' && amount > 0) {
