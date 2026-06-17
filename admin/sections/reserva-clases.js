@@ -5,6 +5,7 @@ import { supabase } from '/lib/supabase.js';
 import { formatDate, formatCurrency, showToast, openModal, closeModal } from '../modules/ui.js';
 import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
 import { bonoExpected } from '/lib/domain/pricing.js';
+import { openBonoFicha as openBonoFichaUnica } from '../components/bono-ficha.js';
 
 const BONO_STATUSES = {
   active: 'Activo',
@@ -261,8 +262,7 @@ export async function renderReservaClases(container) {
         // Don't trigger on filter select
         if (e.target.closest('.admin-filter')) return;
         const bonoId = el.dataset.bonoId;
-        const bono = bonos.find(b => b.id === bonoId);
-        if (bono) await openBonoFicha(bono);
+        if (bonoId) await openBonoFichaUnica(bonoId, { onChange: render });
       };
       if (el.tagName === 'TR') {
         el.addEventListener('click', handler);
