@@ -5214,7 +5214,9 @@ export async function renderCalendario(container) {
       overlay.querySelector('#be-list').innerHTML = '<p style="text-align:center;color:#9ca3af;padding:20px;font-size:.85rem">Cargando…</p>';
       try {
         const all = await fetchClassesInRange(from, to);
-        classes = all.filter(c => !type || c.type === type);
+        // Excluir canceladas: editarlas/propagarles cambios en bloque no tiene sentido
+        // (fetchClassesInRange no filtra status; aquí sí, como hace loadApplyCandidates).
+        classes = all.filter(c => c.status !== 'cancelled' && (!type || c.type === type));
         renderList();
       } catch (err) { showToast('Error: ' + err.message, 'error'); }
     };
@@ -6498,21 +6500,27 @@ export async function renderCalendario(container) {
       try {
         await upsertClass(obj);
 
-        // Propagar los detalles a otras clases del mismo tipo (la fecha de cada
-        // una se respeta; solo se aplican los campos de detalle).
+        // Propaga SOLO los campos que el admin CAMBIÓ respecto a esta clase (la fecha
+        // de cada una se respeta). Antes copiaba TODOS los campos a todas las clases
+        // del tipo: cambiar solo la capacidad reescribía también la hora/instructor de
+        // las 105 y descuadraba el horario entero.
         let propagated = 0, propFailed = 0;
         if (applyScope !== 'this') {
           await loadApplyCandidates();
           const targetIds = applyScope === 'type'
             ? applyCandidates.map(c => c.id)
             : [...overlay.querySelectorAll('.es-apply-cb:checked')].map(cb => cb.value);
-          const propagate = {
-            type: obj.type, time_start: obj.time_start, time_end: obj.time_end,
-            title: obj.title, max_students: Number(obj.max_students) || cls.max_students || 8,
-            audience: obj.audience, instructor: obj.instructor,
-            published: obj.published, updated_at: new Date().toISOString(),
-          };
-          for (const id of targetIds) {
+          const propagate = { updated_at: new Date().toISOString() };
+          if (newTimeStart !== oldTimeStart || newTimeEnd !== oldTimeEnd) {
+            propagate.time_start = obj.time_start; propagate.time_end = obj.time_end;
+          }
+          if (obj.type !== cls.type) { propagate.type = obj.type; propagate.title = obj.title; }
+          if (Number(obj.max_students) !== Number(cls.max_students || 0)) propagate.max_students = Number(obj.max_students) || cls.max_students || 8;
+          if ((obj.audience || null) !== (cls.audience || null)) propagate.audience = obj.audience;
+          if ((obj.instructor || null) !== (cls.instructor || null)) propagate.instructor = obj.instructor;
+          if (Boolean(obj.published) !== Boolean(cls.published)) propagate.published = obj.published;
+          const hasChanges = Object.keys(propagate).length > 1; // algo más que updated_at
+          for (const id of (hasChanges ? targetIds : [])) {
             const { error } = await supabase.from('surf_classes').update(propagate).eq('id', id);
             if (error) { console.error('propagar clase', id, error.message); propFailed++; }
             else propagated++;

@@ -78,6 +78,14 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   const cliName = (cli.full_name || 'Cliente') + (cli.last_name ? ' ' + cli.last_name : '');
   const canPay = !fullyPaid && (bono.status === 'active' || bono.status === 'exhausted');
   const ord = creditOrdinals(enrollments);
+  // Histórico en orden cronológico (igual que los créditos 1→N). loadBono carga DESC
+  // por created_at; sin reordenar, la tabla salía al revés (4/4 arriba, 1/4 abajo).
+  const enrollSorted = enrollments.slice().sort((a, b) => {
+    const ka = `${a.surf_classes?.date || ''} ${a.surf_classes?.time_start || ''}`;
+    const kb = `${b.surf_classes?.date || ''} ${b.surf_classes?.time_start || ''}`;
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    return new Date(a.created_at) - new Date(b.created_at);
+  });
 
   // Desglose de reserva conjunta (qué persona usó cuántas clases)
   const byMember = new Map();
@@ -89,7 +97,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   const breakdown = [...byMember.values()];
   const hasFamily = breakdown.some(m => m.name !== 'Titular');
 
-  const enrollHtml = enrollments.length ? enrollments.map(e => {
+  const enrollHtml = enrollSorted.length ? enrollSorted.map(e => {
     const c = e.surf_classes || {};
     const estado = e.status === 'cancelled' ? statusBadge('cancelled')
       : e.attendance === true ? '<span style="color:#16a34a;font-weight:600">Asistió</span>'
@@ -200,14 +208,15 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
                 <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
               </div>
 
-              <!-- Form: añadir pago -->
+              ${canPay ? `
+              <!-- Form: añadir pago (solo si el bono admite cobro) -->
               <div class="bf-form" id="bf-form-pay" hidden>
                 <div class="row">
                   <div class="f"><label>Importe (€)</label><input type="number" id="bf-pay-amount" step="0.01" min="0.01" value="${pending > 0 ? pending.toFixed(2) : ''}" style="width:120px" /></div>
                   <div class="f"><label>Método</label><select id="bf-pay-method">${methodOpts}</select></div>
                   <button class="save" id="bf-pay-save">Registrar pago</button>
                 </div>
-              </div>
+              </div>` : ''}
 
               <!-- Form: ampliar -->
               <div class="bf-form" id="bf-form-extend" hidden>
