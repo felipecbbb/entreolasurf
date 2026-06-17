@@ -4,6 +4,7 @@
 import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
+import { recalcPaidState } from '/lib/domain/payments.js';
 import { supabase } from '/lib/supabase.js';
 
 const STATUSES = ['pending', 'deposit_paid', 'fully_paid', 'cancelled', 'refunded'];
@@ -511,16 +512,11 @@ export async function renderReservas(container) {
         if (!confirm('¿Eliminar este pago? El estado de la reserva se recalculará según los pagos restantes.')) return;
         try {
           await deletePayment(id);
-          // Recalcular estado desde los pagos restantes (payments = única verdad)
-          const { data: pays } = await supabase.from('payments')
-            .select('amount').eq('reservation_type', 'booking').eq('reference_id', booking.id);
-          const totalPaid = (pays || []).reduce((s, p) => s + Number(p.amount || 0), 0);
-          const total = Number(booking.total_amount || 0);
-          const newStatus = totalPaid <= 0 ? 'pending' : (total > 0 && totalPaid >= total ? 'fully_paid' : 'deposit_paid');
-          await supabase.from('bookings').update({
-            deposit_amount: totalPaid, status: newStatus, updated_at: new Date().toISOString(),
-          }).eq('id', booking.id);
-          booking.deposit_amount = totalPaid; booking.status = newStatus;
+          // Estado/importe derivados de la suma real de pagos (dominio = única verdad)
+          await recalcPaidState('booking', booking.id);
+          const { data: bk } = await supabase.from('bookings')
+            .select('deposit_amount, status').eq('id', booking.id).single();
+          if (bk) { booking.deposit_amount = bk.deposit_amount; booking.status = bk.status; }
           showToast('Pago eliminado · estado recalculado', 'success');
           await renderBookingPayments(overlay, booking);
         } catch (err) {
@@ -630,17 +626,8 @@ export async function renderReservas(container) {
           concept: `Resto surf camp ${booking.surf_camps?.title || ''}`.trim(),
         });
 
-        // Estado derivado de la suma real de pagos (payments = única verdad)
-        const { data: pays } = await supabase.from('payments')
-          .select('amount').eq('reservation_type', 'booking').eq('reference_id', booking.id);
-        const totalPaid = (pays || []).reduce((s, p) => s + Number(p.amount || 0), 0);
-        const total = Number(booking.total_amount || 0);
-        const fullyPaid = total > 0 && totalPaid >= total;
-        await supabase.from('bookings').update({
-          deposit_amount: totalPaid,
-          status: fullyPaid ? 'fully_paid' : 'deposit_paid',
-          updated_at: new Date().toISOString(),
-        }).eq('id', booking.id);
+        // Estado/importe derivados de la suma real de pagos (dominio = única verdad)
+        await recalcPaidState('booking', booking.id);
 
         close();
         closeFicha();
