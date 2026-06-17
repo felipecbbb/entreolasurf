@@ -14,7 +14,7 @@ import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
 import { PACK_PRICING, getPackPrice, bonoExpected, bonoFullyPaid, round2 } from '/lib/domain/pricing.js';
-import { recalcBonoPaid } from '/lib/domain/payments.js';
+import { recalcBonoPaid, recalcPaidState } from '/lib/domain/payments.js';
 import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry } from '/lib/domain/bonos.js';
 import { openBonoFicha } from '../components/bono-ficha.js';
 import { supabase } from '/lib/supabase.js';
@@ -5841,7 +5841,7 @@ export async function renderCalendario(container) {
     const clientPhone = r.guest_phone || '—';
     let currentStatus = r.status || 'pending';
     const durationLabel = DURATION_KEY_LABELS[r.duration_key] || r.duration_key || '—';
-    const totalAmount = Number(r.total_amount || 0);
+    let totalAmount = Number(r.total_amount || 0);
     let currentDepositPaid = Number(r.deposit_paid || 0);
     const idShort = (r.id || '').slice(0, 24);
     const createdAt = r.created_at ? new Date(r.created_at).toLocaleString('es-ES') : '—';
@@ -5932,7 +5932,15 @@ export async function renderCalendario(container) {
                 <div style="font-size:.82rem;color:var(--color-muted);margin-top:2px">Creada el ${createdAt} · Por Admin</div>
               </div>
               <div class="rv-info-top-right">
-                <div class="rv-info-stat"><label>Total</label><span class="rv-info-amount">${totalAmount.toFixed(2)}€</span></div>
+                <div class="rv-info-stat"><label>Total</label>
+                  <span class="rd-total-show" style="display:inline-flex;align-items:center;gap:6px"><span class="rv-info-amount">${totalAmount.toFixed(2)}€</span>
+                    <button class="rd-total-edit" title="Editar precio" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:.95rem">✎</button></span>
+                  <span class="rd-total-edit-box" style="display:none;align-items:center;gap:4px">
+                    <input type="number" step="0.01" min="0" class="rd-total-input" value="${totalAmount.toFixed(2)}" style="width:90px;padding:3px 6px;border:1px solid #0ea5e9;border-radius:6px" />
+                    <button class="rd-total-save" style="background:none;border:none;color:#16a34a;cursor:pointer;font-weight:700;font-size:1.05rem">✓</button>
+                    <button class="rd-total-cancel" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1.05rem">✕</button>
+                  </span>
+                </div>
                 <div class="rv-info-stat"><label>Pendiente</label><span class="rv-info-amount" style="color:${pendingColor}">${pending.toFixed(2)}€</span></div>
                 ${pending > 0 ? `<button class="btn rd-add-payment-btn" style="padding:6px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:.82rem;cursor:pointer;font-weight:600;color:#0f2f39">Añadir pago</button>` : ''}
               </div>
@@ -6030,7 +6038,9 @@ export async function renderCalendario(container) {
                   <td style="padding:10px 16px;text-transform:capitalize">${p.payment_method}</td>
                   <td style="padding:10px 16px">${new Date(p.payment_date).toLocaleString('es-ES')}</td>
                   <td style="padding:10px 16px;text-align:right;font-weight:600">${Number(p.amount).toFixed(2)}€</td>
-                  <td style="padding:10px 16px;text-align:right"><button class="rd-delete-payment" data-pid="${p.id}" style="background:none;border:none;cursor:pointer;color:#b91c1c" title="Eliminar pago"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></td>
+                  <td style="padding:10px 16px;text-align:right;white-space:nowrap">${p.channel === 'web' ? '' : `
+                    <button class="rd-edit-payment" data-pid="${p.id}" style="background:none;border:none;cursor:pointer;color:#0ea5e9;margin-right:8px" title="Editar pago"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                    <button class="rd-delete-payment" data-pid="${p.id}" style="background:none;border:none;cursor:pointer;color:#b91c1c" title="Eliminar pago"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>`}</td>
                 </tr>`).join('')}
               </tbody>
             </table>` : `<div style="padding:24px;text-align:center;color:var(--color-muted)">No hay pagos registrados</div>`}
@@ -6144,8 +6154,18 @@ export async function renderCalendario(container) {
     async function loadPayments() {
       try {
         payments = await fetchPayments('rental', r.id);
+        // Pagado del alquiler = SUM(payments) (única verdad).
+        currentDepositPaid = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
         renderRdPanel();
       } catch (err) { console.warn('Error loading payments:', err); }
+    }
+
+    // Recalcula deposit_paid = SUM(payments) en BD y sincroniza el estado en memoria
+    // (cualquier pestaña). Lo usan alta/edición/borrado de pagos.
+    async function refreshRentalPaid() {
+      await recalcPaidState('rental', r.id);
+      payments = await fetchPayments('rental', r.id);
+      currentDepositPaid = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
     }
 
     function openAddPaymentModal() {
@@ -6213,10 +6233,8 @@ export async function renderCalendario(container) {
             concept: fd.get('concept')?.trim() || null,
             payment_date: fd.get('payment_date') ? new Date(fd.get('payment_date')).toISOString() : new Date().toISOString(),
           });
-          // Update deposit_paid on the reservation
-          currentDepositPaid = Math.min(currentDepositPaid + amount, totalAmount);
-          await markEquipmentReservationPaid(r.id, currentDepositPaid);
-          payments = null; // force reload
+          // deposit_paid = SUM(payments) (payments = única verdad), no math manual
+          await refreshRentalPaid();
           modal.remove();
           showToast('Pago registrado', 'success');
           renderRdPanel();
@@ -6239,6 +6257,28 @@ export async function renderCalendario(container) {
           const tab = item.dataset.tab;
           if (tab) { rdActiveTab = tab; renderRdPanel(); }
         });
+      });
+
+      // Editar el precio (total_amount) in-place
+      overlay.querySelector('.rd-total-edit')?.addEventListener('click', () => {
+        overlay.querySelector('.rd-total-show').style.display = 'none';
+        const box = overlay.querySelector('.rd-total-edit-box');
+        box.style.display = 'inline-flex';
+        box.querySelector('.rd-total-input')?.focus();
+      });
+      overlay.querySelector('.rd-total-cancel')?.addEventListener('click', () => {
+        overlay.querySelector('.rd-total-edit-box').style.display = 'none';
+        overlay.querySelector('.rd-total-show').style.display = 'inline-flex';
+      });
+      overlay.querySelector('.rd-total-save')?.addEventListener('click', async () => {
+        const v = parseFloat(overlay.querySelector('.rd-total-input').value);
+        if (isNaN(v) || v < 0) { showToast('Precio inválido', 'error'); return; }
+        try {
+          await updateEquipmentReservation(r.id, { total_amount: v });
+          totalAmount = v; r.total_amount = v;
+          showToast('Precio actualizado', 'success');
+          renderRdPanel();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
       });
 
       // Cancel
@@ -6277,19 +6317,21 @@ export async function renderCalendario(container) {
         btn.addEventListener('click', (e) => { e.preventDefault(); openAddPaymentModal(); });
       });
 
-      // Delete payment
+      // Edit payment (mismo editor que el resto de fichas)
+      overlay.querySelectorAll('.rd-edit-payment').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const p = payments?.find(x => x.id === btn.dataset.pid);
+          if (p) openPaymentEditModal(p, { onSaved: async () => { await refreshRentalPaid(); renderRdPanel(); } });
+        });
+      });
+
+      // Delete payment (deposit_paid se recalcula desde SUM(payments))
       overlay.querySelectorAll('.rd-delete-payment').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (!confirm('¿Eliminar este pago?')) return;
           try {
-            const pid = btn.dataset.pid;
-            const payment = payments?.find(p => p.id === pid);
-            await deletePayment(pid);
-            if (payment) {
-              currentDepositPaid = Math.max(0, currentDepositPaid - Number(payment.amount || 0));
-              await markEquipmentReservationPaid(r.id, currentDepositPaid);
-            }
-            payments = null;
+            await deletePayment(btn.dataset.pid);
+            await refreshRentalPaid();
             showToast('Pago eliminado', 'success');
             renderRdPanel();
           } catch (err) { showToast('Error: ' + err.message, 'error'); }
@@ -6354,6 +6396,7 @@ export async function renderCalendario(container) {
     }
 
     renderRdPanel();
+    loadPayments(); // deriva el pagado real (SUM payments) ya en el resumen
   }
 
 
