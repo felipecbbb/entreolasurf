@@ -5289,7 +5289,8 @@ export async function renderCalendario(container) {
           scheduleChanged = (c.time_start?.slice(0,5) || '') !== newTime;
         }
         try {
-          const { error } = await supabase.from('surf_classes').update({ ...upd, updated_at: new Date().toISOString() }).eq('id', c.id);
+          // OJO: surf_classes NO tiene columna updated_at → incluirla da 400 en cada update.
+          const { error } = await supabase.from('surf_classes').update(upd).eq('id', c.id);
           if (error) throw error;
           if (scheduleChanged && (c.enrolled_count || 0) > 0) {
             const r = await notifyEnrolledClients(c.id, 'rescheduled', {
@@ -6538,7 +6539,8 @@ export async function renderCalendario(container) {
           const targetIds = applyScope === 'type'
             ? applyCandidates.map(c => c.id)
             : [...overlay.querySelectorAll('.es-apply-cb:checked')].map(cb => cb.value);
-          const propagate = { updated_at: new Date().toISOString() };
+          // OJO: surf_classes NO tiene columna updated_at → no incluirla (daría 400).
+          const propagate = {};
           if (newTimeStart !== oldTimeStart || newTimeEnd !== oldTimeEnd) {
             propagate.time_start = obj.time_start; propagate.time_end = obj.time_end;
           }
@@ -6547,7 +6549,7 @@ export async function renderCalendario(container) {
           if ((obj.audience || null) !== (cls.audience || null)) propagate.audience = obj.audience;
           if ((obj.instructor || null) !== (cls.instructor || null)) propagate.instructor = obj.instructor;
           if (Boolean(obj.published) !== Boolean(cls.published)) propagate.published = obj.published;
-          const hasChanges = Object.keys(propagate).length > 1; // algo más que updated_at
+          const hasChanges = Object.keys(propagate).length > 0;
           for (const id of (hasChanges ? targetIds : [])) {
             const { error } = await supabase.from('surf_classes').update(propagate).eq('id', id);
             if (error) { console.error('propagar clase', id, error.message); propFailed++; }
