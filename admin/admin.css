@@ -8862,6 +8862,9 @@ select.inv-cell { cursor: pointer; }
      horizontal dentro de .table-wrap, en vez de aplastarse por el override
      global de tablas (style.css). */
   .inv-sheet { min-width: 640px; }
+  /* Celdas e inputs del inventario más cómodos para el dedo en móvil */
+  .inv-cell { min-width: 80px; padding: 9px 10px; font-size: .82rem; }
+  .inv-sheet td { padding: 5px 6px; }
 }
 
 @media (max-width: 430px) {
