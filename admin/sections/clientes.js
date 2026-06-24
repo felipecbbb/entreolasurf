@@ -1,7 +1,7 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, fetchClientsPending } from '../modules/api.js';
+import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { getPackPrice, bonoExpected, classPrice } from '/lib/domain/pricing.js';
@@ -602,7 +602,12 @@ export async function renderClientes(container) {
         const created = await createClientFromAdmin({ ...clientObj, family: familyRows });
         const famCount = created.family_created || 0;
         closeModal();
-        showToast(famCount > 0 ? `Cliente creado · ${famCount} familiar(es) añadido(s)` : 'Cliente creado', 'success');
+        if (created.already_existed) {
+          showToast('Ese email ya tenía cuenta · se ha vinculado, sin duplicar ni enviar correo', 'info');
+        } else {
+          const base = famCount > 0 ? `Cliente creado · ${famCount} familiar(es) añadido(s)` : 'Cliente creado';
+          showToast(base + (created.email_sent ? ' · correo de acceso enviado' : ''), 'success');
+        }
         renderList();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
@@ -1878,9 +1883,24 @@ export async function renderClientes(container) {
     document.getElementById('cli-rt-close')?.addEventListener('click', () => closeModal());
 
     document.getElementById('cli-rt-status')?.addEventListener('change', async (e) => {
+      const val = e.target.value;
+      // Cancelar = corrección de error → cancelado + importe a 0 (pagos fuera, unidad liberada)
+      if (val === 'cancelled') {
+        if (!confirm('¿Cancelar este alquiler? Quedará como CANCELADO y su importe pasará a 0 € (se eliminan los pagos y se libera la unidad). Úsalo para corregir un alquiler creado por error.')) {
+          e.target.value = r.status; // revertir el desplegable
+          return;
+        }
+        try {
+          await cancelEquipmentReservation(r.id);
+          r.status = 'cancelled'; r.total_amount = 0;
+          showToast('Alquiler cancelado · importe a 0', 'success');
+          closeModal();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); e.target.value = r.status; }
+        return;
+      }
       try {
-        await updateEquipmentReservationStatus(r.id, e.target.value);
-        r.status = e.target.value;
+        await updateEquipmentReservationStatus(r.id, val);
+        r.status = val;
         showToast('Estado actualizado', 'success');
       } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });

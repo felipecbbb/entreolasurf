@@ -292,6 +292,17 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
       ].join(""), false),
     };
 
+    case "new_account": return {
+      subject: "Tu acceso a Entre Olas Surf",
+      html: emailWrap(logoDefault(), [
+        heading(`Bienvenido, ${name || "surfista"}!`),
+        sub("Te hemos creado una cuenta para gestionar tus reservas. Estos son tus datos de acceso:"),
+        sandBox(`<strong>Usuario:</strong> ${esc(d.email)}<br><strong>Contrase&ntilde;a:</strong> <span style="font-family:monospace;font-size:15px;letter-spacing:1px;color:#0f2f39">${esc(d.password)}</span>`),
+        sub("Por seguridad, al entrar por primera vez deber&aacute;s cambiar la contrase&ntilde;a."),
+        btnYellow("ACCEDER A MI CUENTA", d.loginUrl || "https://entreolasurf.com/mi-cuenta/"),
+      ].join(""), false),
+    };
+
     case "welcome": return {
       subject: "Bienvenido a Entre Olas!",
       html: emailWrap(logoDefault(), [

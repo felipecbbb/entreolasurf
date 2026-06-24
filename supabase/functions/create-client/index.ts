@@ -36,6 +36,34 @@ function clean(v: unknown): string | null {
   return s || null;
 }
 
+// Contraseña aleatoria legible (sin caracteres ambiguos) con may/min/díg/símbolo
+function genPassword(len = 12): string {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnpqrstuvwxyz";
+  const digit = "23456789";
+  const sym = "!@#$%*?";
+  const all = upper + lower + digit + sym;
+  const rnd = (n: number) => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+  const pick = (set: string) => set[rnd(set.length)];
+  const chars = [pick(upper), pick(lower), pick(digit), pick(sym)];
+  while (chars.length < len) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) { const j = rnd(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]]; }
+  return chars.join("");
+}
+
+// Busca un usuario de auth por email paginando (listUsers trae 50/página por defecto)
+async function findAuthUserByEmail(supabase: any, email: string) {
+  const target = email.toLowerCase();
+  for (let page = 1; page <= 40; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
+    if (error || !data?.users?.length) return null;
+    const found = data.users.find((u: any) => (u.email || "").toLowerCase() === target);
+    if (found) return found;
+    if (data.users.length < 200) return null;
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -57,31 +85,41 @@ Deno.serve(async (req) => {
 
     // 2) Datos del cliente
     const body = await req.json();
-    const email = clean(body.email);
+    const emailRaw = clean(body.email);
+    const email = emailRaw ? emailRaw.toLowerCase() : null;
     const full_name = clean(body.full_name);
     if (!email) return json({ error: "El email es obligatorio" }, 400);
     if (!full_name) return json({ error: "El nombre es obligatorio" }, 400);
 
-    // 3) Crear la cuenta del cliente Y enviarle la invitación por email para que
-    //    fije su contraseña y active su cuenta. NO toca la sesión de quien llama.
     const siteUrl = Deno.env.get("SITE_URL") || "https://entreolasurf.com";
+
+    // 3) ¿El email ya tiene cuenta? → reutilizar SIN duplicar ni enviar correo.
+    //    ilike = insensible a mayúsculas (cubre datos antiguos guardados con may.).
+    const { data: existingRows } = await supabase
+      .from("profiles").select("id").ilike("email", email).limit(1);
+    if (existingRows?.[0]) {
+      return json({ ok: true, user_id: existingRows[0].id, already_existed: true, email_sent: false });
+    }
+
+    // 4) Crear la cuenta con una contraseña ALEATORIA (se enviará por correo).
+    const password = genPassword(12);
     let created: any = null, createErr: any = null;
-    ({ data: created, error: createErr } = await supabase.auth.admin.inviteUserByEmail(email, {
-      data: { full_name },
-      redirectTo: `${siteUrl}/mi-cuenta/`,
+    ({ data: created, error: createErr } = await supabase.auth.admin.createUser({
+      email, password, email_confirm: true, user_metadata: { full_name },
     }));
-    // Si el correo de invitación falla (SMTP), no bloqueamos: creamos igualmente la
-    // cuenta para que la reserva quede vinculada (el cliente podrá usar "olvidé contraseña").
     if (createErr || !created?.user) {
-      const tempPassword = crypto.randomUUID() + "Aa1!";
-      ({ data: created, error: createErr } = await supabase.auth.admin.createUser({
-        email, password: tempPassword, email_confirm: true, user_metadata: { full_name },
-      }));
-      if (createErr || !created?.user) return json({ error: translateAuthError(createErr?.message) }, 400);
+      // Puede existir en auth sin fila en profiles (cuenta huérfana): buscar paginando y reutilizar sin correo.
+      const m = (createErr?.message || "").toLowerCase();
+      if (m.includes("already") || m.includes("regist") || m.includes("exist")) {
+        const found = await findAuthUserByEmail(supabase, email);
+        if (found) return json({ ok: true, user_id: found.id, already_existed: true, email_sent: false });
+      }
+      return json({ error: translateAuthError(createErr?.message) }, 400);
     }
     const userId = created.user.id;
 
-    // 4) Perfil completo (la fila puede existir por trigger → upsert)
+    // 5) Perfil completo (la fila puede existir por trigger → upsert). must_change_password
+    //    fuerza el cambio de contraseña en el primer acceso del cliente.
     const { error: profErr } = await supabase.from("profiles").upsert({
       id: userId,
       full_name,
@@ -105,7 +143,11 @@ Deno.serve(async (req) => {
       return json({ error: `Perfil: ${profErr.message}` }, 500);
     }
 
-    // 5) Familiares (opcional)
+    // Forzar cambio de contraseña en el primer acceso. UPDATE aparte y tolerante:
+    // si la columna aún no existe (migración sin aplicar) el error se ignora y el alta no se bloquea.
+    await supabase.from("profiles").update({ must_change_password: true }).eq("id", userId);
+
+    // 6) Familiares (opcional)
     let familyCreated = 0;
     const family = Array.isArray(body.family) ? body.family : [];
     for (const f of family) {
@@ -125,7 +167,21 @@ Deno.serve(async (req) => {
       if (!fErr) familyCreated++;
     }
 
-    return json({ ok: true, user_id: userId, family_created: familyCreated });
+    // 7) Enviar el correo con usuario + contraseña (no bloqueante).
+    let emailSent = false;
+    try {
+      const resp = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseServiceKey}` },
+        body: JSON.stringify({
+          to: email, type: "new_account",
+          data: { customerName: full_name, email, password, loginUrl: `${siteUrl}/mi-cuenta/` },
+        }),
+      });
+      emailSent = resp.ok;
+    } catch (_) { emailSent = false; }
+
+    return json({ ok: true, user_id: userId, family_created: familyCreated, already_existed: false, email_sent: emailSent });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return json({ error: msg }, 500);

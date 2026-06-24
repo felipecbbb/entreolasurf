@@ -203,6 +203,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
           <h2>Reserva de ${esc(typeLbl)}</h2>
           <p>${esc(cliName)}${cli.phone ? ' · ' + esc(cli.phone) : ''}${cli.email ? ' · ' + esc(cli.email) : ''}</p>
         </div>
+        ${cli.id ? `<button id="bf-open-client" title="Ver ficha del cliente" style="margin-left:auto;margin-right:8px;font-size:.78rem;font-weight:600;padding:7px 14px;color:#0ea5e9;background:#fff;border:1px solid #bae6fd;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap">Ver ficha del cliente<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button>` : ''}
         <button class="ns-close" id="bf-close" title="Cerrar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </header>
       <div class="ns-body" style="padding:24px 32px">
@@ -317,6 +318,17 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   const reload = async () => { close(); if (onChange) await onChange(); await openBonoFicha(bonoId, { onChange }); };
   overlay.querySelector('#bf-close').onclick = close;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  // Ver ficha del cliente (titular del bono) → abre la sección Clientes
+  overlay.querySelector('#bf-open-client')?.addEventListener('click', () => {
+    if (!cli.id) { showToast('Este bono no tiene cliente con cuenta', 'error'); return; }
+    window.__openClientId = cli.id;
+    overlay.remove();
+    // La ficha de bono puede abrirse ESTANDO ya en #clientes; ahí el hash no
+    // cambia y no se re-renderiza, así que forzamos el evento.
+    if (location.hash === '#clientes') window.dispatchEvent(new Event('hashchange'));
+    else location.hash = '#clientes';
+  });
 
   // Toggle de formularios de acción (uno visible a la vez)
   overlay.querySelectorAll('.bf-act[data-form]').forEach(btn => btn.addEventListener('click', () => {

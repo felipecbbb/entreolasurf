@@ -22,6 +22,7 @@ export const sectionTitles = {
   'reserva-clases': 'Reserva Clases',
   cupones: 'Cupones',
   equipo: 'Equipo',
+  'control-horario': 'Control Horario',
 };
 
 // Secciones restringidas: solo role='admin' puede acceder (nunca un encargado)
