@@ -47,21 +47,23 @@ async function fetchEquipmentReservations(equipmentId) {
 }
 
 // ---- Inventario por unidad (inventory_units) ----
+// Orden natural por número: numérico primero (1,2,3…), texto (Invento, Quillas) al final
+function cmpUnitNumber(a, b) {
+  const na = parseFloat(a.number), nb = parseFloat(b.number);
+  const aNum = !Number.isNaN(na), bNum = !Number.isNaN(nb);
+  if (aNum && bNum) return na - nb || String(a.number).localeCompare(String(b.number));
+  if (aNum) return -1;
+  if (bNum) return 1;
+  return String(a.number || '').localeCompare(String(b.number || ''), 'es');
+}
+
 async function fetchUnits(category) {
   const { data, error } = await supabase
     .from('inventory_units')
     .select('*')
     .eq('category', category);
   if (error) throw error;
-  // Orden natural por número: numérico primero (1,2,3…), texto (Invento, Quillas) al final
-  return (data || []).sort((a, b) => {
-    const na = parseFloat(a.number), nb = parseFloat(b.number);
-    const aNum = !Number.isNaN(na), bNum = !Number.isNaN(nb);
-    if (aNum && bNum) return na - nb || String(a.number).localeCompare(String(b.number));
-    if (aNum) return -1;
-    if (bNum) return 1;
-    return String(a.number || '').localeCompare(String(b.number || ''), 'es');
-  });
+  return (data || []).sort(cmpUnitNumber);
 }
 
 async function upsertUnit(unit) {
@@ -444,6 +446,16 @@ export async function renderMaterial(container) {
           tr.dataset.id = saved.id;
           tr.querySelectorAll('.inv-cell').forEach(c => { c.dataset.id = saved.id; });
           units.push(saved);
+          // Colocar la fila en su sitio según el número (no dejarla arriba del todo):
+          // se inserta antes de la primera unidad cuyo número va después del nuevo.
+          const sibs = Array.from(tbody.querySelectorAll('tr.inv-row')).filter(r => r !== tr && r.dataset.id);
+          let ref = null;
+          for (const r of sibs) {
+            const u = units.find(x => x.id === r.dataset.id);
+            if (u && cmpUnitNumber(saved, u) < 0) { ref = r; break; }
+          }
+          tbody.insertBefore(tr, ref); // ref null → va al final
+          tr.scrollIntoView({ block: 'nearest' });
           flashRow(tr, true);
           showToast('Unidad creada', 'success');
         } catch (err) { delete tr.dataset.saving; showToast('Error: ' + err.message, 'error'); flashRow(tr, false); }
