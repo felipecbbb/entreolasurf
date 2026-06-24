@@ -5493,6 +5493,11 @@ export async function renderCalendario(container) {
                   <label>Talla</label>
                   <select name="size" id="nr-size"></select>
                 </div>
+                <div class="ns-field" id="nr-unit-wrap" style="display:none">
+                  <label>Neopreno / unidad concreta <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
+                  <select name="assigned_unit_id" id="nr-unit"><option value="">— Sin asignar —</option></select>
+                  <p id="nr-unit-hint" style="margin:4px 0 0;font-size:.78rem;color:#64748b"></p>
+                </div>
                 <div class="ns-field-2col">
                   <div class="ns-field">
                     <label>Tarifa</label>
@@ -5672,6 +5677,7 @@ export async function renderCalendario(container) {
       }
 
       updateRentalPriceSummary(deposit);
+      loadRentalUnits();
     });
 
     // Duration change — show/hide custom price
@@ -5686,6 +5692,63 @@ export async function renderCalendario(container) {
     document.getElementById('nr-custom-price')?.addEventListener('input', () => {
       const eqId = document.getElementById('nr-equipment')?.value;
       updateRentalPriceSummary(Number(equipmentMap[eqId]?.deposit) || 0);
+    });
+
+    // ---- Unidad concreta (neopreno físico) disponible para el material + fechas ----
+    const unitSizeOf = (u) => (u.category === 'tabla' && u.pies != null)
+      ? `${Math.trunc(u.pies)}'${Math.round((u.pies - Math.trunc(u.pies)) * 10)}`
+      : (u.talla || null);
+
+    async function loadRentalUnits() {
+      const wrap = document.getElementById('nr-unit-wrap');
+      const sel = document.getElementById('nr-unit');
+      const hint = document.getElementById('nr-unit-hint');
+      if (!wrap || !sel) return;
+      const eqId = document.getElementById('nr-equipment')?.value;
+      const form = document.getElementById('new-rental-form');
+      const ds = form?.querySelector('[name="date_start"]')?.value;
+      const de = form?.querySelector('[name="date_end"]')?.value || ds;
+      if (!eqId || !ds) { wrap.style.display = 'none'; return; }
+      try {
+        const [unitsRes, busyRes] = await Promise.all([
+          supabase.from('inventory_units')
+            .select('id,number,talla,pies,category,descripcion,marca,estado,equipment_id')
+            .eq('equipment_id', eqId),
+          // Reservas que ya ocupan una unidad y solapan en fecha con la nueva
+          supabase.from('equipment_reservations')
+            .select('assigned_unit_id')
+            .eq('equipment_id', eqId)
+            .not('assigned_unit_id', 'is', null)
+            .in('status', ['pending', 'confirmed', 'active'])
+            .lte('date_start', de)
+            .gte('date_end', ds),
+        ]);
+        const units = unitsRes.data || [];
+        if (!units.length) { wrap.style.display = 'none'; return; } // material sin inventario por unidad
+        const occupied = new Set((busyRes.data || []).map(b => b.assigned_unit_id));
+        const fuera = new Set(['reparacion', 'perdido', 'baja']);
+        const sizeWrap = document.getElementById('nr-size-wrap');
+        const wantSize = (sizeWrap && sizeWrap.style.display !== 'none') ? document.getElementById('nr-size')?.value : null;
+        const avail = units.filter(u => !occupied.has(u.id) && !fuera.has(u.estado) && (!wantSize || unitSizeOf(u) === wantSize));
+        wrap.style.display = '';
+        sel.innerHTML = '<option value="">— Sin asignar —</option>' + avail.map(u => {
+          const desc = [u.number ? `Nº ${u.number}` : null, unitSizeOf(u), u.marca, u.descripcion].filter(Boolean).join(' · ');
+          return `<option value="${u.id}" data-size="${escapeHtml(unitSizeOf(u) || '')}">${escapeHtml(desc)}</option>`;
+        }).join('');
+        if (hint) hint.textContent = avail.length
+          ? `${avail.length} unidad(es) libre(s) en esas fechas — elige el neopreno concreto o déjalo sin asignar.`
+          : 'No hay unidades libres en esas fechas; puedes crear el alquiler sin asignar.';
+      } catch (err) { console.warn('loadRentalUnits:', err); wrap.style.display = 'none'; }
+    }
+
+    // Recargar candidatas al cambiar talla o fechas; al elegir unidad, fijar su talla
+    document.getElementById('nr-size')?.addEventListener('change', loadRentalUnits);
+    document.querySelector('#new-rental-form [name="date_start"]')?.addEventListener('change', loadRentalUnits);
+    document.querySelector('#new-rental-form [name="date_end"]')?.addEventListener('change', loadRentalUnits);
+    document.getElementById('nr-unit')?.addEventListener('change', (e) => {
+      const sz = e.target.selectedOptions[0]?.dataset.size;
+      const sizeSel = document.getElementById('nr-size');
+      if (sz && sizeSel && [...sizeSel.options].some(o => o.value === sz)) sizeSel.value = sz;
     });
 
     function updateRentalPriceSummary(deposit) {
@@ -5861,6 +5924,7 @@ export async function renderCalendario(container) {
           date_end: fd.get('date_end'),
           duration_key: durKey === 'custom' ? 'custom' : durKey,
           size: fd.get('size') || null,
+          assigned_unit_id: fd.get('assigned_unit_id') || null,
           quantity: qty,
           total_amount: totalPrice,
           // Nace SIN cobrar: deposit_paid lo sincroniza el icono de pago (que crea el
