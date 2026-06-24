@@ -901,7 +901,14 @@ export async function createClientFromAdmin(fields) {
   }
   if (data?.error) throw new Error(data.error);
   invalidateCache('profiles');
-  return { id: data.user_id, full_name: f.full_name, email: f.email, family_created: data.family_created || 0 };
+  return {
+    id: data.user_id,
+    full_name: f.full_name,
+    email: f.email,
+    family_created: data.family_created || 0,
+    already_existed: data.already_existed === true,
+    email_sent: data.email_sent === true,
+  };
 }
 
 export const fetchProfiles = cached('profiles', 30000, async (search) => {
@@ -1279,6 +1286,20 @@ export async function updateEquipmentReservation(id, fields) {
   const { error } = await supabase
     .from('equipment_reservations')
     .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// Cancela un alquiler como CORRECCIÓN DE ERROR: lo deja en estado 'cancelled',
+// con el importe a 0 (total y pagado), sin pagos registrados y liberando la
+// unidad física asignada. NO borra el registro (queda visible como cancelado).
+export async function cancelEquipmentReservation(id) {
+  // 1) pagos del alquiler fuera (no hay FK; el importe vuelve a 0 de verdad)
+  await supabase.from('payments').delete().eq('reservation_type', 'rental').eq('reference_id', id);
+  // 2) marcar cancelado, importe a 0 y liberar la unidad
+  const { error } = await supabase
+    .from('equipment_reservations')
+    .update({ status: 'cancelled', total_amount: 0, deposit_paid: 0, assigned_unit_id: null, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) throw error;
 }

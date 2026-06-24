@@ -7,7 +7,7 @@ import {
   searchProfiles, moveEnrollment, updateEnrollmentStatus, updateEnrollmentAttendance,
   createClientFromAdmin, fetchEquipment, createEquipmentReservation,
   fetchEquipmentReservationsOverlapping, updateEquipmentReservationStatus,
-  updateEquipmentReservation,
+  updateEquipmentReservation, cancelEquipmentReservation,
   fetchPayments, createPayment, deletePayment,
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
@@ -1079,6 +1079,12 @@ export async function renderCalendario(container) {
                   const { data: fm } = await supabase.from('family_members').select('*').eq('id', enrollment.family_member_id).single();
                   familyMember = fm;
                 }
+                // Hermanos / niños del tutor (para mostrar tutor + niños en la ficha)
+                let siblings = [];
+                if (userId) {
+                  const { data: fams } = await supabase.from('family_members').select('*').eq('user_id', userId).order('created_at', { ascending: true });
+                  siblings = fams || [];
+                }
                 // Histórico de pagos de la reserva: si va con bono, los pagos
                 // están en el bono (web o playa); si es suelta, en la inscripción.
                 const _bonoId = enrollment?.bono_id || null;
@@ -1139,6 +1145,7 @@ export async function renderCalendario(container) {
                   contact: { nombre: clientName.split(' ')[0] || '', apellidos: clientName.split(' ').slice(1).join(' ') || '', email: profile?.email || '', telefono: profile?.phone || '', pais: '', idioma: '' },
                   profile: profile,
                   familyMember: familyMember,
+                  siblings: siblings,
                   activityColor: TYPE_COLORS[cls.type] || '#0f2f39',
                   activityLabel: TYPE_LABELS[cls.type] || cls.title,
                   activityType: cls.type,
@@ -2697,7 +2704,7 @@ export async function renderCalendario(container) {
             if (!responsableId && respEmail) {
               try {
                 const { data: rows } = await supabase.from('profiles').select('id').eq('email', respEmail).limit(1);
-                if (rows?.[0]) responsableId = rows[0].id;
+                if (rows?.[0]) { responsableId = rows[0].id; showToast('Usuario existente: se vincula la reserva a su ficha (no se envía correo)', 'info'); }
               } catch {}
             }
             if (!responsableId && respEmail) {
@@ -2708,6 +2715,9 @@ export async function renderCalendario(container) {
                   phone: contactData.telefono || null,
                 });
                 responsableId = nc?.id || null;
+                if (nc?.already_existed) showToast('Usuario existente: se vincula la reserva a su ficha (no se envía correo)', 'info');
+                else if (nc?.email_sent) showToast('Cuenta creada · correo de acceso enviado al cliente', 'success');
+                else if (nc?.id) showToast('Cuenta creada (no se pudo enviar el correo de acceso)', 'info');
               } catch (e) { console.warn('No se pudo crear responsable:', e.message); }
             }
 
@@ -2748,10 +2758,14 @@ export async function renderCalendario(container) {
             async function ensureAccountByEmail(p) {
               const email = (p.email || '').trim().toLowerCase();
               if (!email) return null;
+              const who = `${p.nombre} ${p.apellidos}`.trim() || email;
               try {
                 const { data: rows } = await supabase.from('profiles').select('id').eq('email', email).limit(1);
-                if (rows?.[0]) return rows[0].id;
+                if (rows?.[0]) { showToast(`Usuario existente vinculado: ${who} (sin correo)`, 'info'); return rows[0].id; }
                 const nc = await createClientFromAdmin({ full_name: `${p.nombre} ${p.apellidos}`.trim(), email });
+                if (nc?.already_existed) showToast(`Usuario existente vinculado: ${who} (sin correo)`, 'info');
+                else if (nc?.email_sent) showToast(`Cuenta creada para ${who} · correo de acceso enviado`, 'success');
+                else if (nc?.id) showToast(`Cuenta creada para ${who} (no se pudo enviar el correo)`, 'info');
                 return nc?.id || null;
               } catch (e) { console.warn('ensureAccountByEmail', e.message); return null; }
             }
@@ -3306,6 +3320,38 @@ export async function renderCalendario(container) {
         // del asistente (personsHtml), sin duplicar.
         const beneficiarioHtml = '';
 
+        // Familia: titular (tutor) + niños asociados. Cada uno enlaza a la ficha
+        // del tutor (mismo deep-link que "Ver ficha completa"); pinchando en
+        // cualquier hijo se llega al tutor, que lista a todos los hermanos.
+        let familiaHtml = '';
+        if (res.profile && ((res.siblings && res.siblings.length) || res.familyMember)) {
+          const tut = res.profile;
+          const tutName = `${tut.full_name || ''} ${tut.last_name || ''}`.trim() || 'Titular';
+          const kids = res.siblings || [];
+          const kidsCells = kids.length
+            ? kids.map(k => {
+                const kn = `${k.full_name || ''} ${k.last_name || ''}`.trim() || 'Familiar';
+                const isThis = res.familyMember && k.id === res.familyMember.id;
+                return `<div class="rv-open-client" data-uid="${tut.id}" style="cursor:pointer;margin-bottom:8px">
+                  <span class="rv-who-tag rv-who-tag-child">${isThis ? 'En esta clase' : 'Familiar'}</span>
+                  <div class="rv-who-name">${escapeHtml(kn)}</div>
+                </div>`;
+              }).join('')
+            : `<div style="font-size:.84rem;color:var(--color-muted,#64748b)">Sin familiares registrados</div>`;
+          familiaHtml = `
+            <div class="rv-info-card" style="margin-top:16px">
+              <div style="padding:18px 24px 4px"><h3 style="margin:0;font-family:'Space Grotesk',sans-serif;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#64748b">Familia · pincha para abrir la ficha del tutor</h3></div>
+              <div class="rv-who-grid">
+                <div class="rv-open-client" data-uid="${tut.id}" style="cursor:pointer">
+                  <span class="rv-who-tag rv-who-tag-holder">Titular / tutor</span>
+                  <div class="rv-who-name">${escapeHtml(tutName)}</div>
+                  <div class="rv-who-meta">${tut.phone ? `<span>${escapeHtml(tut.phone)}</span>` : ''}${tut.email ? `<span>${escapeHtml(tut.email)}</span>` : ''}</div>
+                </div>
+                <div>${kidsCells}</div>
+              </div>
+            </div>`;
+        }
+
         tabContent = `
           <div class="rv-summary-header">
             <h2 class="rv-title">Resumen de la reserva <span class="rv-status-badge" style="background:${statusColor}15;color:${statusColor}">${statusLabel}</span></h2>
@@ -3360,7 +3406,8 @@ export async function renderCalendario(container) {
           </div>
           ${beneficiarioHtml}
           ${bonosHtml}
-          ${personsHtml}`;
+          ${personsHtml}
+          ${familiaHtml}`;
       } else if (activeTab === 'datos_comprador') {
         const prof = res.profile;
         const fm = res.familyMember;
@@ -3892,7 +3939,9 @@ export async function renderCalendario(container) {
           if (!uid) { showToast('Este asistente no tiene cuenta de cliente', 'error'); return; }
           window.__openClientId = uid;
           overlay.remove();
-          location.hash = '#clientes';
+          // Si ya estamos en #clientes, el hash no cambia → forzar el re-render
+          if (location.hash === '#clientes') window.dispatchEvent(new Event('hashchange'));
+          else location.hash = '#clientes';
         });
       });
 
@@ -4281,8 +4330,7 @@ export async function renderCalendario(container) {
 
           modal.remove();
           showToast(`${amount.toFixed(2)}€ de saldo aplicados a la reserva`, 'success');
-          renderDetail();
-          if (overlayRef) bindDetailEvents(overlayRef, res);
+          renderDetail(); // ya re-engancha los eventos vía bindDetailEvents
         } catch (err) {
           showToast('Error: ' + err.message, 'error');
           btn.disabled = false; btn.textContent = 'Aplicar Saldo';
@@ -5858,15 +5906,48 @@ export async function renderCalendario(container) {
       return u.talla || null;
     }
 
+    // Duración en minutos de las franjas por horas (el resto = día completo)
+    const DUR_MIN = { '1h': 60, '2h': 120, '4h': 240 }; // resto (1d/1w/2w/1m/custom) = día completo
+    function franjaMin(res) {
+      const m = DUR_MIN[res.duration_key];
+      if (!m || !res.time_start) return null; // null = ocupa el día entero
+      const [h, mm] = String(res.time_start).slice(0, 5).split(':').map(Number);
+      const start = h * 60 + (mm || 0);
+      return [start, start + m];
+    }
+    // ¿Dos alquileres solapan en la franja horaria? (la fecha ya viene solapada por la query)
+    function overlapsFranja(a, b) {
+      const fa = franjaMin(a), fb = franjaMin(b);
+      if (!fa || !fb) return true; // alguno es de día completo → ocupa todo el día
+      return fa[0] < fb[1] && fb[0] < fa[1];
+    }
+
     async function loadUnits() {
       try {
         if (!r.equipment_id) { unitChoices = []; renderRdPanel(); return; }
-        const { data } = await supabase.from('inventory_units')
-          .select('id,number,talla,pies,category,descripcion,marca,estado,equipment_id')
-          .eq('equipment_id', r.equipment_id);
-        unitChoices = (data || []).filter(u =>
-          (u.estado === 'disponible' || u.id === r.assigned_unit_id) &&
-          (!r.size || unitRentalSize(u) === r.size || u.id === r.assigned_unit_id)
+        const ds = String(r.date_start || '').slice(0, 10);
+        const de = String(r.date_end || r.date_start || '').slice(0, 10);
+        const [unitsRes, busyRes] = await Promise.all([
+          supabase.from('inventory_units')
+            .select('id,number,talla,pies,category,descripcion,marca,estado,equipment_id')
+            .eq('equipment_id', r.equipment_id),
+          // Reservas que ocupan una unidad y solapan en FECHA con esta (excluida ella misma)
+          supabase.from('equipment_reservations')
+            .select('id,assigned_unit_id,date_start,date_end,time_start,duration_key')
+            .eq('equipment_id', r.equipment_id)
+            .not('assigned_unit_id', 'is', null)
+            .neq('id', r.id)
+            .in('status', ['pending', 'confirmed', 'active'])
+            .lte('date_start', de)
+            .gte('date_end', ds),
+        ]);
+        // Unidades ocupadas en ESTA franja (fecha + hora)
+        const occupied = new Set((busyRes.data || []).filter(b => overlapsFranja(b, r)).map(b => b.assigned_unit_id));
+        const noAsignable = new Set(['reparacion', 'perdido', 'baja']); // físicamente fuera de juego
+        unitChoices = (unitsRes.data || []).filter(u =>
+          (u.id === r.assigned_unit_id) || // la ya asignada siempre visible
+          (!occupied.has(u.id) && !noAsignable.has(u.estado)
+            && (!r.size || unitRentalSize(u) === r.size))
         );
         renderRdPanel();
       } catch (err) { console.warn('loadUnits:', err); unitChoices = []; }
@@ -6119,10 +6200,11 @@ export async function renderCalendario(container) {
               </nav>
               <main class="rv-main" id="rd-main">${tabContent}</main>
               <aside class="rv-actions">
+                ${currentStatus !== 'cancelled' ? `
                 <button class="rv-action-link danger" id="rd-cancel">
-                  <span>Cancelar</span>
+                  <span>Cancelar alquiler</span>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                </button>
+                </button>` : ''}
                 ${currentStatus === 'pending' ? `
                 <button class="rv-action-link" id="rd-confirm">
                   <span>Confirmar reserva</span>
@@ -6282,13 +6364,19 @@ export async function renderCalendario(container) {
         } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }
       });
 
-      // Cancel
+      // Cancelar alquiler: corrección de error → cancelado + importe a 0
+      // (se eliminan los pagos y se libera la unidad). No borra el registro.
       overlay.querySelector('#rd-cancel')?.addEventListener('click', async () => {
-        if (!confirm('¿Cancelar esta reserva de alquiler?')) return;
+        if (!confirm('¿Cancelar este alquiler? Quedará marcado como CANCELADO y su importe pasará a 0 € (se eliminan los pagos registrados y se libera la unidad). Úsalo para corregir un alquiler creado por error.')) return;
         try {
-          await updateEquipmentReservationStatus(r.id, 'cancelled');
+          await cancelEquipmentReservation(r.id);
           currentStatus = 'cancelled';
-          showToast('Reserva cancelada', 'success');
+          totalAmount = 0; r.total_amount = 0;
+          currentDepositPaid = 0; r.deposit_paid = 0;
+          r.assigned_unit_id = null;
+          payments = [];
+          unitChoices = null;
+          showToast('Alquiler cancelado · importe a 0', 'success');
           renderRdPanel();
         } catch (err) { showToast('Error: ' + err.message, 'error'); }
       });
@@ -6361,6 +6449,7 @@ export async function renderCalendario(container) {
         try {
           await updateEquipmentReservation(r.id, { time_start: newTime });
           r.time_start = newTime;
+          unitChoices = null; // la franja cambió → recalcular unidades disponibles
           showToast('Hora actualizada', 'success');
           renderRdPanel();
         } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }
@@ -6376,6 +6465,7 @@ export async function renderCalendario(container) {
           await updateEquipmentReservation(r.id, updates);
           r.date_start = newStart;
           if (updates.date_end) r.date_end = newStart;
+          unitChoices = null; // la franja cambió → recalcular unidades disponibles
           showToast('Fecha actualizada', 'success');
           renderRdPanel();
         } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }
@@ -6390,6 +6480,7 @@ export async function renderCalendario(container) {
         try {
           await updateEquipmentReservation(r.id, { date_end: newEnd });
           r.date_end = newEnd;
+          unitChoices = null; // la franja cambió → recalcular unidades disponibles
           showToast('Fecha actualizada', 'success');
           renderRdPanel();
         } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }

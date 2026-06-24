@@ -308,18 +308,38 @@ export async function renderMaterial(container) {
       `<button class="mat-estado-chip" data-estado="${e}" style="border:1px solid ${invFilter === e ? INV_ESTADOS[e].color : '#e2e8f0'};background:${invFilter === e ? INV_ESTADOS[e].bg : '#fff'};color:${INV_ESTADOS[e].color};border-radius:999px;padding:4px 12px;font-size:.8rem;font-weight:600;cursor:pointer">${INV_ESTADOS[e].label} ${counts[e]}</button>`
     ).join('');
 
-    const catName = {};
-    (catalogList || []).forEach(c => { catName[c.id] = c.name; });
     const showCat = !cfg.internal;   // accesorios: internos, sin catálogo web
-    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('') + (showCat ? '<th>Catálogo</th>' : '');
-    const rows = filtered.map(u => {
-      const tds = cfg.cols.map(c => `<td>${c === 'number' ? `<strong>${esc(u[c])}</strong>` : esc(u[c]) || '—'}</td>`).join('');
-      const catCell = showCat
-        ? `<td>${u.equipment_id ? esc(catName[u.equipment_id] || '—') : '<span style="color:#cbd5e1">sin asignar</span>'}</td>`
-        : '';
-      return `<tr class="mat-unit-row" data-id="${u.id}" style="cursor:pointer">${tds}${catCell}<td>${invEstadoBadge(u.estado)}</td></tr>`;
-    }).join('');
-    const colCount = cfg.cols.length + 1 + (showCat ? 1 : 0);
+    // Celda editable (input/select) según el tipo del campo — hoja tipo Excel
+    const cellInput = (u, field) => {
+      const meta = INV_FIELDS[field];
+      const val = u[field] == null ? '' : u[field];
+      const attrs = `class="inv-cell" data-id="${u.id || ''}" data-field="${field}"`;
+      if (meta && meta.type === 'select') {
+        return `<select ${attrs}>${meta.options.map(o => {
+          const label = field === 'estado' ? (INV_ESTADOS[o]?.label || o) : (o || '—');
+          return `<option value="${esc(o)}" ${String(val) === String(o) ? 'selected' : ''}>${esc(label)}</option>`;
+        }).join('')}</select>`;
+      }
+      const t = meta && meta.type === 'number' ? 'number' : 'text';
+      const step = meta && meta.step ? ` step="${meta.step}"` : '';
+      return `<input type="${t}"${step} ${attrs} value="${esc(val)}" />`;
+    };
+    const catCellInput = (u) => `<select class="inv-cell" data-id="${u.id || ''}" data-field="equipment_id">
+        <option value="">— sin asignar —</option>
+        ${(catalogList || []).map(c => `<option value="${c.id}" ${u.equipment_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+      </select>`;
+    const rowInner = (u) => {
+      const tds = cfg.cols.map(c => `<td>${cellInput(u, c)}</td>`).join('');
+      const notesCell = `<td>${cellInput(u, 'notes')}</td>`;
+      const catCell = showCat ? `<td>${catCellInput(u)}</td>` : '';
+      const estadoCell = `<td>${cellInput(u, 'estado')}</td>`;
+      const delCell = `<td style="text-align:center"><button class="inv-del-row" title="Eliminar unidad" style="background:none;border:none;color:#b91c1c;cursor:pointer;padding:4px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></td>`;
+      return `${tds}${notesCell}${catCell}${estadoCell}${delCell}`;
+    };
+    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('')
+      + '<th>Notas</th>' + (showCat ? '<th>Catálogo</th>' : '') + '<th>Estado</th><th></th>';
+    const rows = filtered.map(u => `<tr class="inv-row" data-id="${u.id}">${rowInner(u)}</tr>`).join('');
+    const colCount = cfg.cols.length + 3 + (showCat ? 1 : 0);
 
     container.innerHTML = `
       <div class="act-list-page">
@@ -351,13 +371,13 @@ export async function renderMaterial(container) {
 
         <div class="act-form-card" style="padding:0;overflow:hidden">
           <div class="table-wrap">
-            <table>
-              <thead><tr>${headCells}<th>Estado</th></tr></thead>
-              <tbody>${rows || `<tr><td colspan="${colCount}" style="padding:30px;text-align:center;color:var(--color-muted,#888)">Sin resultados</td></tr>`}</tbody>
+            <table class="inv-sheet">
+              <thead><tr>${headCells}</tr></thead>
+              <tbody id="inv-tbody">${rows || `<tr><td colspan="${colCount}" style="padding:30px;text-align:center;color:var(--color-muted,#888)">Sin unidades</td></tr>`}</tbody>
             </table>
           </div>
         </div>
-        <p style="margin-top:10px;font-size:.82rem;color:var(--color-muted,#888)">${filtered.length} de ${units.length} unidades · Clic en una fila para editar</p>
+        <p style="margin-top:10px;font-size:.82rem;color:var(--color-muted,#888)">${filtered.length} de ${units.length} unidades · Edita las celdas directamente (se guarda al salir de la celda) · El botón "+" añade una fila · Orden por número al recargar</p>
       </div>`;
 
     wireViewSwitcher();
@@ -377,16 +397,89 @@ export async function renderMaterial(container) {
         if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
       });
     });
-    container.querySelector('#inv-add')?.addEventListener('click', () => openUnitModal(null));
-    container.querySelectorAll('.mat-unit-row').forEach(row => {
-      row.addEventListener('click', () => {
-        const u = units.find(x => x.id === row.dataset.id);
-        if (u) openUnitModal(u);
-      });
+    // ---- Edición en línea (hoja tipo Excel) ----
+    const tbody = container.querySelector('#inv-tbody');
+    const flashRow = (tr, ok) => {
+      tr.style.transition = 'background-color .25s';
+      tr.style.backgroundColor = ok ? '#dcfce7' : '#fee2e2';
+      setTimeout(() => { tr.style.backgroundColor = ''; }, 600);
+    };
+    const normalize = (field, raw) => {
+      let v = typeof raw === 'string' ? raw.trim() : raw;
+      if (field === 'pies') return (v === '' || v == null) ? null : parseFloat(v);
+      return v === '' ? null : v;
+    };
+
+    // Añadir unidad → fila nueva editable arriba (se guarda al rellenar el número)
+    container.querySelector('#inv-add')?.addEventListener('click', () => {
+      if (!tbody) return;
+      tbody.querySelector('td[colspan]')?.closest('tr')?.remove();
+      const tr = document.createElement('tr');
+      tr.className = 'inv-row';
+      tr.dataset.draft = '1';
+      tr.innerHTML = rowInner({ category: invCategory, estado: 'disponible' });
+      tbody.prepend(tr);
+      tr.querySelector('[data-field="number"]')?.focus();
+    });
+
+    // Guardar al cambiar/salir de una celda
+    tbody?.addEventListener('change', async (e) => {
+      const el = e.target.closest('.inv-cell');
+      if (!el) return;
+      const tr = el.closest('tr');
+      const field = el.dataset.field;
+
+      // Fila nueva: se crea al tener número (recoge todas sus celdas)
+      if (tr.dataset.draft) {
+        const numEl = tr.querySelector('[data-field="number"]');
+        if (!(numEl && numEl.value.trim())) return;
+        if (tr.dataset.saving) return;
+        tr.dataset.saving = '1';
+        const obj = { category: invCategory };
+        tr.querySelectorAll('.inv-cell').forEach(c => { obj[c.dataset.field] = normalize(c.dataset.field, c.value); });
+        if (!obj.estado) obj.estado = 'disponible';
+        try {
+          const saved = await upsertUnit(obj);
+          delete tr.dataset.draft; delete tr.dataset.saving;
+          tr.dataset.id = saved.id;
+          tr.querySelectorAll('.inv-cell').forEach(c => { c.dataset.id = saved.id; });
+          units.push(saved);
+          flashRow(tr, true);
+          showToast('Unidad creada', 'success');
+        } catch (err) { delete tr.dataset.saving; showToast('Error: ' + err.message, 'error'); flashRow(tr, false); }
+        return;
+      }
+
+      // Fila existente: actualiza solo ese campo
+      const id = tr.dataset.id;
+      const unit = units.find(x => x.id === id);
+      const val = normalize(field, el.value);
+      if (field === 'number' && val == null) { showToast('El número no puede quedar vacío', 'error'); el.value = unit?.number || ''; return; }
+      try {
+        await upsertUnit({ id, category: invCategory, [field]: val });
+        if (unit) unit[field] = val;
+        flashRow(tr, true);
+      } catch (err) { showToast('Error: ' + err.message, 'error'); flashRow(tr, false); }
+    });
+
+    // Borrar fila
+    tbody?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.inv-del-row');
+      if (!btn) return;
+      const tr = btn.closest('tr');
+      if (tr.dataset.draft || !tr.dataset.id) { tr.remove(); return; }
+      const unit = units.find(x => x.id === tr.dataset.id);
+      if (!confirm(`¿Eliminar la unidad ${unit?.number || ''}? No se puede deshacer.`)) return;
+      try {
+        await deleteUnit(tr.dataset.id);
+        const i = units.findIndex(x => x.id === tr.dataset.id); if (i >= 0) units.splice(i, 1);
+        tr.remove();
+        showToast('Unidad eliminada', 'success');
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });
   }
 
-  // ---- Modal crear/editar unidad ----
+  // ---- Modal crear/editar unidad (NO USADO tras P5: el inventario se edita en línea; se conserva por referencia) ----
   function openUnitModal(unit) {
     const isNew = !unit;
     const cfg = INV_CATEGORIES[invCategory];

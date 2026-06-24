@@ -1,4 +1,4 @@
-import { getSession, getProfile, signIn, signUp, signOut, updateProfile } from '/lib/auth-client.js';
+import { getSession, getProfile, signIn, signUp, signOut, updateProfile, changePassword } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
 import { langSelectorHtml, wireLangSelector, initI18n } from '/lib/i18n.js';
 import { esc, formatDate, formatPrice } from '/lib/utils.js';
@@ -203,6 +203,7 @@ function renderAuth() {
       await signIn(e.target.email.value, e.target.password.value);
       const profile = await getProfile();
       if (redirectIfStaff(profile)) return;
+      if (profile?.must_change_password) { renderChangePassword(profile); return; }
       renderDashboard();
     } catch (err) {
       errEl.textContent = err.message;
@@ -337,6 +338,53 @@ async function checkOnboardingOrDashboard() {
   } else {
     renderDashboard();
   }
+}
+
+// ---- Cambio de contraseña obligatorio (primer acceso de cuentas creadas por el admin) ----
+function renderChangePassword(profile) {
+  hideFooter();
+  mainEl.innerHTML = `
+    <div class="auth-page">
+      <div class="auth-page-left">
+        <div class="auth-page-form">
+          <h1 class="auth-title">Cambia tu contraseña</h1>
+          <p class="auth-subtitle">Por seguridad, elige una contraseña nueva para tu primer acceso.</p>
+          <form id="change-pass-form" class="auth-form">
+            <div class="auth-field">
+              <label for="cp-pass">Nueva contraseña</label>
+              <input type="password" id="cp-pass" name="password" minlength="8" required autocomplete="new-password" />
+            </div>
+            <div class="auth-field">
+              <label for="cp-pass2">Repite la contraseña</label>
+              <input type="password" id="cp-pass2" name="password2" minlength="8" required autocomplete="new-password" />
+            </div>
+            <div id="cp-error" style="color:#dc2626;font-size:.85rem;margin:6px 0;min-height:1em"></div>
+            <button type="submit" class="btn red" style="width:100%">Guardar y entrar</button>
+          </form>
+        </div>
+      </div>
+    </div>`;
+  const form = document.getElementById('change-pass-form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('cp-error');
+    const btn = form.querySelector('button[type="submit"]');
+    errEl.textContent = '';
+    const p1 = form.password.value, p2 = form.password2.value;
+    if (p1.length < 8) { errEl.textContent = 'La contraseña debe tener al menos 8 caracteres.'; return; }
+    if (p1 !== p2) { errEl.textContent = 'Las contraseñas no coinciden.'; return; }
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      await changePassword(p1);
+    } catch (err) {
+      errEl.textContent = err.message || 'No se pudo cambiar la contraseña.';
+      btn.disabled = false; btn.textContent = 'Guardar y entrar';
+      return;
+    }
+    // Contraseña ya cambiada: bajar el flag (es UX; si falla, no bloqueamos el acceso)
+    try { await updateProfile({ must_change_password: false }); } catch (_) {}
+    renderDashboard();
+  });
 }
 
 function renderOnboarding(profile) {
@@ -752,6 +800,7 @@ async function init() {
     if (session) {
       const profile = await getProfile();
       if (redirectIfStaff(profile)) return;
+      if (profile?.must_change_password) { renderChangePassword(profile); return; }
       if (profile && profile.can_swim == null) {
         renderOnboarding(profile);
       } else {

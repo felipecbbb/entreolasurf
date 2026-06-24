@@ -21,6 +21,7 @@ import { renderEstadisticas } from './sections/estadisticas.js';
 import { renderReservaClases } from './sections/reserva-clases.js';
 import { renderCupones } from './sections/cupones.js';
 import { renderEquipo } from './sections/equipo.js';
+import { renderControlHorario } from './sections/control-horario.js';
 
 // DOM refs
 const loginView = document.getElementById('login-view');
@@ -67,6 +68,7 @@ register('estadisticas', renderEstadisticas);
 register('reserva-clases', renderReservaClases);
 register('cupones', renderCupones);
 register('equipo', renderEquipo);
+register('control-horario', renderControlHorario);
 
 // ---- Login form ----
 loginForm.addEventListener('submit', async (e) => {

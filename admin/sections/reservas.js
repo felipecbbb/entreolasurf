@@ -414,13 +414,14 @@ export async function renderReservas(container) {
     // Link to client ficha
     overlay.querySelector('.rv-goto-client')?.addEventListener('click', (e) => {
       e.preventDefault();
-      const clientId = e.target.dataset.clientId;
+      const clientId = e.currentTarget.dataset.clientId;
       closeFicha();
-      location.hash = '#clientes';
-      setTimeout(() => {
-        const card = document.querySelector(`.cli-list-card[data-id="${clientId}"]`);
-        if (card) card.click();
-      }, 400);
+      if (clientId) {
+        // mismo deep-link robusto que usa el calendario (sin setTimeout frágil)
+        window.__openClientId = clientId;
+        if (location.hash === '#clientes') window.dispatchEvent(new Event('hashchange'));
+        else location.hash = '#clientes';
+      }
     });
 
     // Status change from ficha
