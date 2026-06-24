@@ -1135,6 +1135,14 @@ table {
   min-width: 520px;
 }
 
+/* En móvil las tablas dejan de forzar 520px de ancho: la ficha del CRM
+   (historial de clases, pagos, alquileres…) y demás listados dejan de
+   cortarse. Las tablas que de verdad son anchas mantienen su ancho vía
+   su propia clase (p. ej. .inv-sheet) y hacen scroll dentro de .table-wrap. */
+@media (max-width: 640px) {
+  table { min-width: 0; }
+}
+
 th,
 td {
   padding: 11px 13px;

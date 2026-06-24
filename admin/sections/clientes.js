@@ -1500,7 +1500,7 @@ export async function renderClientes(container) {
     newExpiresAt.setMonth(newExpiresAt.getMonth() + 12);
 
     openModal('Nuevo bono', `
-      <form id="cli-new-bono-form" class="trip-form" style="min-width:340px">
+      <form id="cli-new-bono-form" class="trip-form" style="min-width:min(340px,100%)">
         <label>Tipo de clase</label>
         <select id="cli-nb-type" class="act-form-input" required style="margin-bottom:10px">${typeOptions}</select>
 
@@ -1684,7 +1684,7 @@ export async function renderClientes(container) {
       .map(o => `<option value="${o.v}" ${o.v === enr.status ? 'selected' : ''}>${o.l}</option>`).join('');
 
     openModal('Inscripción a clase', `
-      <div style="min-width:340px">
+      <div style="min-width:min(340px,100%)">
         <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:14px">
           <div style="font-weight:700;color:#0f2f39">${typeLbl}${cls.title ? ' · ' + esc(cls.title) : ''}</div>
           <div style="font-size:.82rem;color:#6b7280;margin-top:2px">${formatDate(cls.date)} · ${cls.time_start?.slice(0,5) || ''} — ${cls.time_end?.slice(0,5) || ''}</div>
@@ -1776,7 +1776,7 @@ export async function renderClientes(container) {
     const pending = Math.max(0, Math.round((Number(bk.total_amount || 0) - totalPaid) * 100) / 100);
 
     openModal('Reserva surf camp', `
-      <div style="min-width:340px">
+      <div style="min-width:min(340px,100%)">
         <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px;margin-bottom:14px">
           <div style="font-weight:700;color:#0369a1">${esc(bk.camp_title) || 'Surf Camp'}</div>
           <div style="font-size:.78rem;color:#0369a1;margin-top:4px">Reservada: ${formatDate(bk.created_at)}</div>
@@ -1845,7 +1845,7 @@ export async function renderClientes(container) {
       .map(o => `<option value="${o.v}" ${o.v === r.status ? 'selected' : ''}>${o.l}</option>`).join('');
 
     openModal('Alquiler de material', `
-      <div style="min-width:340px">
+      <div style="min-width:min(340px,100%)">
         <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px">
           <div style="font-weight:700;color:#6d28d9">${esc(equipName)}</div>
           <div style="font-size:.82rem;color:#6d28d9;margin-top:4px">${formatDate(r.date_start)} → ${formatDate(r.date_end)}</div>
@@ -2325,7 +2325,7 @@ export async function renderClientes(container) {
     const defaultAmount = suggestedAmount || '';
 
     openModal('Añadir pago', `
-      <form id="add-payment-form" class="trip-form" style="min-width:340px">
+      <form id="add-payment-form" class="trip-form" style="min-width:min(340px,100%)">
         <label style="font-weight:600;margin-bottom:4px">Tipo de pago</label>
         <div id="pay-type-tabs" style="display:flex;gap:6px;margin-bottom:16px">
           <button type="button" class="btn pay-type-tab ${selectedType === 'bono' ? 'red' : 'line'}" data-type="bono" style="flex:1;font-size:.78rem;padding:8px 6px">Pago bono</button>
