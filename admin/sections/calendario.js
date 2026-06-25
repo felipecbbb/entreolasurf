@@ -5535,6 +5535,13 @@ export async function renderCalendario(container) {
 
               <section class="ns-section">
                 <h3>Cliente</h3>
+                <div class="ns-field" id="nr-client-search-wrap" style="position:relative">
+                  <label>Buscar cliente existente <span style="font-weight:400;color:#94a3b8">(opcional — o rellena los datos abajo)</span></label>
+                  <input type="text" id="nr-client-search" placeholder="Nombre o teléfono…" autocomplete="off" />
+                  <input type="hidden" name="user_id" id="nr-user-id" />
+                  <div id="nr-client-results" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(15,47,57,.12);max-height:220px;overflow:auto"></div>
+                  <div id="nr-client-chip" style="display:none;margin-top:8px;padding:8px 12px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;font-size:.85rem;color:#065f46"></div>
+                </div>
                 <div class="ns-field-2col">
                   <div class="ns-field">
                     <label>Nombre</label>
@@ -5751,6 +5758,52 @@ export async function renderCalendario(container) {
       if (sz && sizeSel && [...sizeSel.options].some(o => o.value === sz)) sizeSel.value = sz;
     });
 
+    // ---- Buscar y enlazar un cliente existente (opcional) ----
+    // Si se enlaza, la reserva guarda user_id → aparece en la ficha del cliente
+    // y en su "DEBE €X" automáticamente (ambos ya leen por user_id).
+    {
+      const csearch = document.getElementById('nr-client-search');
+      const cresults = document.getElementById('nr-client-results');
+      const cuser = document.getElementById('nr-user-id');
+      const cchip = document.getElementById('nr-client-chip');
+      const rform = document.getElementById('new-rental-form');
+      const setField = (n, v) => { const el = rform?.querySelector(`[name="${n}"]`); if (el) el.value = v || ''; };
+      let ctimer = null;
+      csearch?.addEventListener('input', () => {
+        clearTimeout(ctimer);
+        const term = csearch.value.trim();
+        if (term.length < 2) { cresults.style.display = 'none'; return; }
+        ctimer = setTimeout(async () => {
+          const res = await searchProfiles(term);
+          cresults.innerHTML = res.length
+            ? res.map(p => `<div class="nr-client-opt" data-id="${p.id}" data-name="${escapeHtml(p.full_name || '')}" data-phone="${escapeHtml(p.phone || '')}" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.88rem">${escapeHtml(p.full_name || 'Sin nombre')}${p.phone ? ` · <span style="color:#64748b">${escapeHtml(p.phone)}</span>` : ''}</div>`).join('')
+            : '<div style="padding:10px;color:#94a3b8;font-size:.85rem">Sin resultados</div>';
+          cresults.style.display = '';
+        }, 250);
+      });
+      cresults?.addEventListener('click', (e) => {
+        const opt = e.target.closest('.nr-client-opt');
+        if (!opt) return;
+        cuser.value = opt.dataset.id;
+        setField('guest_name', opt.dataset.name);
+        setField('guest_last_name', '');
+        setField('guest_phone', opt.dataset.phone);
+        cresults.style.display = 'none';
+        csearch.value = '';
+        cchip.innerHTML = `✓ Enlazado a <strong>${escapeHtml(opt.dataset.name)}</strong> — saldrá en su ficha. <button type="button" id="nr-client-clear" style="background:none;border:none;color:#065f46;text-decoration:underline;cursor:pointer;font-size:.85rem;padding:0;margin-left:6px">quitar</button>`;
+        cchip.style.display = '';
+      });
+      cchip?.addEventListener('click', (e) => {
+        if (e.target.id !== 'nr-client-clear') return;
+        cuser.value = '';
+        cchip.style.display = 'none';
+        setField('guest_name', ''); setField('guest_phone', '');
+      });
+      document.addEventListener('click', (e) => {
+        if (cresults && cresults.style.display !== 'none' && !cresults.contains(e.target) && e.target !== csearch) cresults.style.display = 'none';
+      });
+    }
+
     function updateRentalPriceSummary(deposit) {
       const durSel = document.getElementById('nr-duration');
       const summary = document.getElementById('nr-price-summary');
@@ -5917,6 +5970,7 @@ export async function renderCalendario(container) {
       try {
         await createEquipmentReservation({
           equipment_id: equipmentId,
+          user_id: fd.get('user_id') || null,
           guest_name: fullName,
           guest_email: fd.get('guest_email')?.trim() || null,
           guest_phone: fd.get('guest_phone')?.trim() || null,
