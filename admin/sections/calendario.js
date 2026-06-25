@@ -18,12 +18,17 @@ import { recalcBonoPaid, recalcPaidState } from '/lib/domain/payments.js';
 import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry } from '/lib/domain/bonos.js';
 import { openBonoFicha } from '../components/bono-ficha.js';
 import { supabase } from '/lib/supabase.js';
-import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry } from '/lib/shared-constants.js';
+import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry, compareSizes } from '/lib/shared-constants.js';
 
 // getPackPrice / bonoExpected viven en /lib/domain/pricing.js (fuente única).
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+// Normaliza una talla para comparar: "8 años" ≡ "8", sin distinguir mayúsculas.
+function normSize(s) {
+  return String(s == null ? '' : s).trim().toLowerCase().replace(/\s*años?$/, '');
 }
 
 // Duración por tipo (min) — la hora de fin se calcula sola desde inicio + duración.
@@ -5684,7 +5689,7 @@ export async function renderCalendario(container) {
       }
 
       updateRentalPriceSummary(deposit);
-      loadRentalUnits();
+      loadRentalUnits(true);
     });
 
     // Duration change — show/hide custom price
@@ -5706,7 +5711,7 @@ export async function renderCalendario(container) {
       ? `${Math.trunc(u.pies)}'${Math.round((u.pies - Math.trunc(u.pies)) * 10)}`
       : (u.talla || null);
 
-    async function loadRentalUnits() {
+    async function loadRentalUnits(rebuildSizes = false) {
       const wrap = document.getElementById('nr-unit-wrap');
       const sel = document.getElementById('nr-unit');
       const hint = document.getElementById('nr-unit-hint');
@@ -5732,11 +5737,26 @@ export async function renderCalendario(container) {
         ]);
         const units = unitsRes.data || [];
         if (!units.length) { wrap.style.display = 'none'; return; } // material sin inventario por unidad
+
+        // Talla: el desplegable sale de las tallas REALES del inventario (no de la lista
+        // manual del catálogo, que está desfasada). Así "8" casa con la unidad "8".
+        const sizeWrap = document.getElementById('nr-size-wrap');
+        const sizeSel = document.getElementById('nr-size');
+        if (rebuildSizes && sizeSel) {
+          const realSizes = [...new Set(units.map(u => unitSizeOf(u)).filter(Boolean))].sort(compareSizes);
+          if (realSizes.length) {
+            const prev = sizeSel.value;
+            sizeSel.innerHTML = realSizes.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+            const keep = realSizes.find(s => normSize(s) === normSize(prev));
+            sizeSel.value = keep || realSizes[0];
+            if (sizeWrap) sizeWrap.style.display = '';
+          }
+        }
+
         const occupied = new Set((busyRes.data || []).map(b => b.assigned_unit_id));
         const fuera = new Set(['reparacion', 'perdido', 'baja']);
-        const sizeWrap = document.getElementById('nr-size-wrap');
-        const wantSize = (sizeWrap && sizeWrap.style.display !== 'none') ? document.getElementById('nr-size')?.value : null;
-        const avail = units.filter(u => !occupied.has(u.id) && !fuera.has(u.estado) && (!wantSize || unitSizeOf(u) === wantSize));
+        const wantSize = (sizeWrap && sizeWrap.style.display !== 'none') ? sizeSel?.value : null;
+        const avail = units.filter(u => !occupied.has(u.id) && !fuera.has(u.estado) && (!wantSize || normSize(unitSizeOf(u)) === normSize(wantSize)));
         wrap.style.display = '';
         sel.innerHTML = '<option value="">— Sin asignar —</option>' + avail.map(u => {
           const desc = [u.number ? `Nº ${u.number}` : null, unitSizeOf(u), u.marca, u.descripcion].filter(Boolean).join(' · ');
@@ -5748,10 +5768,10 @@ export async function renderCalendario(container) {
       } catch (err) { console.warn('loadRentalUnits:', err); wrap.style.display = 'none'; }
     }
 
-    // Recargar candidatas al cambiar talla o fechas; al elegir unidad, fijar su talla
-    document.getElementById('nr-size')?.addEventListener('change', loadRentalUnits);
-    document.querySelector('#new-rental-form [name="date_start"]')?.addEventListener('change', loadRentalUnits);
-    document.querySelector('#new-rental-form [name="date_end"]')?.addEventListener('change', loadRentalUnits);
+    // Al cambiar talla: solo re-filtrar. Al cambiar fechas: rehacer tallas (cambia el stock).
+    document.getElementById('nr-size')?.addEventListener('change', () => loadRentalUnits(false));
+    document.querySelector('#new-rental-form [name="date_start"]')?.addEventListener('change', () => loadRentalUnits(true));
+    document.querySelector('#new-rental-form [name="date_end"]')?.addEventListener('change', () => loadRentalUnits(true));
     document.getElementById('nr-unit')?.addEventListener('change', (e) => {
       const sz = e.target.selectedOptions[0]?.dataset.size;
       const sizeSel = document.getElementById('nr-size');
@@ -6065,7 +6085,7 @@ export async function renderCalendario(container) {
         unitChoices = (unitsRes.data || []).filter(u =>
           (u.id === r.assigned_unit_id) || // la ya asignada siempre visible
           (!occupied.has(u.id) && !noAsignable.has(u.estado)
-            && (!r.size || unitRentalSize(u) === r.size))
+            && (!r.size || normSize(unitRentalSize(u)) === normSize(r.size)))
         );
         renderRdPanel();
       } catch (err) { console.warn('loadUnits:', err); unitChoices = []; }
