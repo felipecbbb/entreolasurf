@@ -63,7 +63,14 @@ async function fetchUnits(category) {
     .select('*')
     .eq('category', category);
   if (error) throw error;
-  return (data || []).sort(cmpUnitNumber);
+  // Orden de pantalla por sort_order (manual, arrastrable); fallback a número.
+  return (data || []).sort((a, b) => {
+    const sa = a.sort_order, sb = b.sort_order;
+    if (sa != null && sb != null) return sa - sb;
+    if (sa != null) return -1;
+    if (sb != null) return 1;
+    return cmpUnitNumber(a, b);
+  });
 }
 
 async function upsertUnit(unit) {
@@ -331,17 +338,18 @@ export async function renderMaterial(container) {
         ${(catalogList || []).map(c => `<option value="${c.id}" ${u.equipment_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
       </select>`;
     const rowInner = (u) => {
+      const handleCell = `<td class="inv-handle-cell"><span class="inv-grip" draggable="true" title="Arrastrar para reordenar">⠿</span><button type="button" class="inv-insert-below" title="Insertar unidad debajo">+</button></td>`;
       const tds = cfg.cols.map(c => `<td>${cellInput(u, c)}</td>`).join('');
       const notesCell = `<td>${cellInput(u, 'notes')}</td>`;
       const catCell = showCat ? `<td>${catCellInput(u)}</td>` : '';
       const estadoCell = `<td>${cellInput(u, 'estado')}</td>`;
       const delCell = `<td style="text-align:center"><button class="inv-del-row" title="Eliminar unidad" style="background:none;border:none;color:#b91c1c;cursor:pointer;padding:4px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></td>`;
-      return `${tds}${notesCell}${catCell}${estadoCell}${delCell}`;
+      return `${handleCell}${tds}${notesCell}${catCell}${estadoCell}${delCell}`;
     };
-    const headCells = cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('')
+    const headCells = '<th class="inv-handle-cell"></th>' + cfg.cols.map(c => `<th>${INV_FIELDS[c].label}</th>`).join('')
       + '<th>Notas</th>' + (showCat ? '<th>Catálogo</th>' : '') + '<th>Estado</th><th></th>';
     const rows = filtered.map(u => `<tr class="inv-row" data-id="${u.id}">${rowInner(u)}</tr>`).join('');
-    const colCount = cfg.cols.length + 3 + (showCat ? 1 : 0);
+    const colCount = cfg.cols.length + 4 + (showCat ? 1 : 0);
 
     container.innerHTML = `
       <div class="act-list-page">
@@ -434,6 +442,63 @@ export async function renderMaterial(container) {
       tr.querySelector('[data-field="number"]')?.focus();
     });
 
+    // sort_order de una fila según sus vecinas en el DOM (punto medio → permite insertar entre dos)
+    const sortOrderForRow = (tr) => {
+      const soOf = (el) => { if (!el) return null; const u = units.find(x => x.id === el.dataset.id); return (u && u.sort_order != null) ? u.sort_order : null; };
+      const p = soOf(tr.previousElementSibling), n = soOf(tr.nextElementSibling);
+      if (p == null && n == null) return 100;
+      if (p == null) return n - 50;
+      if (n == null) return p + 100;
+      return (p + n) / 2;
+    };
+    async function persistRowOrder(tr) {
+      if (!tr.dataset.id || tr.dataset.draft) return;
+      const so = sortOrderForRow(tr);
+      try {
+        await upsertUnit({ id: tr.dataset.id, sort_order: so });
+        const u = units.find(x => x.id === tr.dataset.id); if (u) u.sort_order = so;
+        flashRow(tr, true);
+      } catch (err) { showToast('Error al reordenar: ' + err.message, 'error'); }
+    }
+
+    // "+" entre filas: inserta una unidad nueva justo debajo de esa fila
+    tbody?.addEventListener('click', (e) => {
+      const ins = e.target.closest('.inv-insert-below');
+      if (!ins) return;
+      e.preventDefault();
+      const refTr = ins.closest('tr');
+      const tr = makeDraftRow();
+      refTr.after(tr);
+      tr.querySelector('[data-field="number"]')?.focus();
+    });
+
+    // Arrastrar por el "agarrador" para reordenar
+    let dragRow = null;
+    tbody?.addEventListener('dragstart', (e) => {
+      const grip = e.target.closest('.inv-grip');
+      if (!grip) { e.preventDefault(); return; }
+      dragRow = grip.closest('tr');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragRow.dataset.id || ''); } catch (_) {}
+      dragRow.classList.add('inv-dragging');
+    });
+    tbody?.addEventListener('dragover', (e) => {
+      if (!dragRow) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const over = e.target.closest('tr.inv-row');
+      if (!over || over === dragRow) return;
+      const rect = over.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      tbody.insertBefore(dragRow, after ? over.nextElementSibling : over);
+    });
+    tbody?.addEventListener('dragend', async () => {
+      if (!dragRow) return;
+      const moved = dragRow; dragRow = null;
+      moved.classList.remove('inv-dragging');
+      await persistRowOrder(moved);
+    });
+
     // Guardar al cambiar/salir de una celda
     tbody?.addEventListener('change', async (e) => {
       const el = e.target.closest('.inv-cell');
@@ -450,22 +515,13 @@ export async function renderMaterial(container) {
         const obj = { category: invCategory };
         tr.querySelectorAll('.inv-cell').forEach(c => { obj[c.dataset.field] = normalize(c.dataset.field, c.value); });
         if (!obj.estado) obj.estado = 'disponible';
+        obj.sort_order = sortOrderForRow(tr); // se queda donde se insertó/arrastró
         try {
           const saved = await upsertUnit(obj);
           delete tr.dataset.draft; delete tr.dataset.saving;
           tr.dataset.id = saved.id;
           tr.querySelectorAll('.inv-cell').forEach(c => { c.dataset.id = saved.id; });
           units.push(saved);
-          // Colocar la fila en su sitio según el número (no dejarla arriba del todo):
-          // se inserta antes de la primera unidad cuyo número va después del nuevo.
-          const sibs = Array.from(tbody.querySelectorAll('tr.inv-row')).filter(r => r !== tr && r.dataset.id);
-          let ref = null;
-          for (const r of sibs) {
-            const u = units.find(x => x.id === r.dataset.id);
-            if (u && cmpUnitNumber(saved, u) < 0) { ref = r; break; }
-          }
-          tbody.insertBefore(tr, ref); // ref null → va al final
-          tr.scrollIntoView({ block: 'nearest' });
           flashRow(tr, true);
           showToast('Unidad creada', 'success');
         } catch (err) { delete tr.dataset.saving; showToast('Error: ' + err.message, 'error'); flashRow(tr, false); }
