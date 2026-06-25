@@ -18,9 +18,8 @@ export const TYPE_COLORS = {
   surfskate: '#c2410c',
 };
 
-// Pack pricing: fuente única en /lib/domain/pricing.js. Se re-exporta aquí por
-// compatibilidad con los imports existentes (PACK_PRICING desde ../modules/constants.js).
-export { PACK_PRICING } from '/lib/domain/pricing.js';
+// Pack pricing: fuente única en /lib/domain/pricing.js (getPackPrice). No se
+// re-exporta ningún catálogo de precios: los precios viven solo en la BD.
 
 export const PACK_VALIDITY = {
   grupal: 180,
