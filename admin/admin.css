@@ -8854,6 +8854,21 @@ a.admin-nav-item-external .nav-icon svg {
 select.inv-cell { cursor: pointer; }
 .inv-del-row:hover { opacity: .7; }
 
+/* Reordenar inventario: agarrador para arrastrar + "+" para insertar entre filas */
+.inv-handle-cell { width: 30px; text-align: center; white-space: nowrap; position: relative; }
+.inv-grip { cursor: grab; color: #cbd5e1; user-select: none; font-size: 1rem; line-height: 1; padding: 4px; display: inline-block; }
+.inv-grip:active { cursor: grabbing; }
+.inv-grip:hover { color: #64748b; }
+.inv-row.inv-dragging { opacity: .45; background: #eff6ff; }
+.inv-insert-below {
+  position: absolute; left: 50%; bottom: -10px; transform: translateX(-50%);
+  width: 20px; height: 20px; padding: 0; border: none; border-radius: 50%;
+  background: var(--color-navy, #0f172a); color: #fff; font-size: 15px; line-height: 18px;
+  cursor: pointer; display: none; z-index: 6;
+}
+.inv-row:hover .inv-insert-below { display: block; }
+.inv-insert-below:hover { background: #2563eb; }
+
 /* ============================================================
    Adaptación a móvil — ficha CRM, KPIs y modales
    ============================================================ */
