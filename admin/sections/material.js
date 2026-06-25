@@ -412,14 +412,24 @@ export async function renderMaterial(container) {
       return v === '' ? null : v;
     };
 
+    // Catálogo al que se auto-enlaza una unidad nueva según su categoría
+    // (así sale en el selector de alquiler sin tener que ponerlo a mano).
+    const CAT_TO_SLUG = { neopreno: 'neopreno', licra: 'licra', bodyboard: 'body-board' };
+    const makeDraftRow = () => {
+      const slug = CAT_TO_SLUG[invCategory];
+      const eq = slug ? (catalogList || []).find(c => c.slug === slug) : null;
+      const tr = document.createElement('tr');
+      tr.className = 'inv-row';
+      tr.dataset.draft = '1';
+      tr.innerHTML = rowInner({ category: invCategory, estado: 'disponible', equipment_id: eq ? eq.id : null });
+      return tr;
+    };
+
     // Añadir unidad → fila nueva editable arriba (se guarda al rellenar el número)
     container.querySelector('#inv-add')?.addEventListener('click', () => {
       if (!tbody) return;
       tbody.querySelector('td[colspan]')?.closest('tr')?.remove();
-      const tr = document.createElement('tr');
-      tr.className = 'inv-row';
-      tr.dataset.draft = '1';
-      tr.innerHTML = rowInner({ category: invCategory, estado: 'disponible' });
+      const tr = makeDraftRow();
       tbody.prepend(tr);
       tr.querySelector('[data-field="number"]')?.focus();
     });
