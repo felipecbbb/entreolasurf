@@ -13,7 +13,7 @@ import {
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { TYPE_LABELS, TYPE_COLORS } from '../modules/constants.js';
-import { PACK_PRICING, getPackPrice, bonoExpected, bonoFullyPaid, round2 } from '/lib/domain/pricing.js';
+import { getPackPrice, bonoExpected, bonoFullyPaid, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid, recalcPaidState } from '/lib/domain/payments.js';
 import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry } from '/lib/domain/bonos.js';
 import { openBonoFicha } from '../components/bono-ficha.js';
@@ -398,8 +398,7 @@ export async function renderCalendario(container) {
     const max = c.max_students || 0;
 
     // Build enrolled clients list
-    let clientsHtml = '';
-    enrollments.forEach(e => {
+    const buildRowHtml = (e) => {
       const name = e.guest_name || e.family_members?.full_name || e.profiles?.full_name || 'Sin nombre';
       const birthDate = e.family_members?.birth_date || e.profiles?.birth_date || null;
       let ageLabel = '';
@@ -436,8 +435,8 @@ export async function renderCalendario(container) {
       const attendClass = isAttended ? 'attended' : isNoShow ? 'noshow' : '';
       const statusClass = `${payClass} ${attendClass}`.trim();
 
-      clientsHtml += `
-        <div class="cal-client-row ${statusClass}" draggable="true" data-enrollment-id="${e.id}" data-class-id="${c.id}" data-client-name="${name}" data-item-type="enrollment">
+      return `
+        <div class="cal-client-row ${statusClass}" draggable="true" data-enrollment-id="${e.id}" data-class-id="${c.id}" data-client-name="${name}" data-item-type="enrollment" data-move-mode="single">
           <div class="cal-client-drag">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
           </div>
@@ -459,7 +458,30 @@ export async function renderCalendario(container) {
             </button>
           </span>
         </div>`;
+    };
+
+    // Agrupar inscripciones por titular (user_id): los miembros de una misma familia
+    // van juntos en un subgrupo. Se mantiene el orden de aparición. Titular solo = fila normal.
+    const famGroups = new Map();
+    enrollments.forEach(e => {
+      const key = e.user_id || `solo:${e.id}`;
+      if (!famGroups.has(key)) famGroups.set(key, []);
+      famGroups.get(key).push(e);
     });
+    const famGripSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/></svg>';
+    let clientsHtml = '';
+    for (const [, list] of famGroups) {
+      if (list.length <= 1) { clientsHtml += buildRowHtml(list[0]); continue; }
+      const titular = list[0].profiles?.full_name || list[0].guest_name || 'Familia';
+      clientsHtml += `
+        <div class="cal-family-group" data-user-id="${list[0].user_id}">
+          <div class="cal-family-header" draggable="true" data-move-mode="group" data-user-id="${list[0].user_id}" data-class-id="${c.id}" data-client-name="${titular}" data-item-type="enrollment" title="Arrastra para mover a toda la familia">
+            <span class="cal-family-drag">${famGripSvg}</span>
+            <span class="cal-family-title">${titular} · ${list.length}</span>
+          </div>
+          <div class="cal-family-rows">${list.map(buildRowHtml).join('')}</div>
+        </div>`;
+    }
 
     return `
       <div class="cal-session-card" data-id="${c.id}" data-type="${c.type}">
@@ -627,6 +649,23 @@ export async function renderCalendario(container) {
     else doMove([srcEid]);
   }
 
+  // Mueve un conjunto concreto de inscripciones a otra clase, SIN modal. Lo usa el drag:
+  // arrastrar una fila = [esa]; arrastrar la cabecera de familia = todas las del titular.
+  async function moveEnrollmentsDirect({ fromClassId, eids, toClassId, toEnrolled, toMax, label, onDone }) {
+    const free = (Number(toMax) || 0) - (Number(toEnrolled) || 0);
+    if (Number(toMax) && eids.length > Math.max(0, free)) {
+      showToast(`La sesión destino solo tiene ${Math.max(0, free)} hueco(s)`, 'error');
+      return;
+    }
+    try {
+      for (const id of eids) await moveEnrollment(id, toClassId);
+      showToast(eids.length > 1 ? `${eids.length} personas movidas` : `${label || 'Alumno'} movido`, 'success');
+      onDone && onDone();
+    } catch (err) {
+      showToast('Error al mover: ' + err.message, 'error');
+    }
+  }
+
   // Crear bono para un cliente desde el calendario (mismo flujo que el CRM:
   // precio total editable + "cobrar ahora" con 0 = todo pendiente).
   function openCreateBonoModalCal(userId, defaultType, onDone) {
@@ -723,17 +762,20 @@ export async function renderCalendario(container) {
   }
 
   function initDragAndDrop(container, classes) {
-    const clientRows = container.querySelectorAll('.cal-client-row[draggable]');
+    const clientRows = container.querySelectorAll('.cal-client-row[draggable], .cal-family-header[draggable]');
     const dropZones = container.querySelectorAll('.cal-clients-list');
 
     clientRows.forEach(row => {
       row.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
         const dragData = {
           itemType: row.dataset.itemType, // 'enrollment' or 'rental'
           enrollmentId: row.dataset.enrollmentId || null,
           rentalId: row.dataset.rentalId || null,
           fromClassId: row.dataset.classId || null,
           clientName: row.dataset.clientName,
+          moveMode: row.dataset.moveMode || 'single', // 'single' (una fila) | 'group' (familia)
+          userId: row.dataset.userId || null,
         };
         e.dataTransfer.setData('text/plain', JSON.stringify(dragData));
         row.classList.add('dragging');
@@ -773,17 +815,28 @@ export async function renderCalendario(container) {
 
         // Only enrollments can be moved between classes
         if (data.itemType === 'enrollment' && toClassId) {
-          if (!data.enrollmentId || toClassId === data.fromClassId) return;
+          if (toClassId === data.fromClassId) return;
           const toClass = classes.find(c => c.id === toClassId);
           // El aforo del destino solo cuenta inscripciones no canceladas (como el picker)
           const toEnrollments = (enrollmentsCache[toClassId] || []).filter(e => e.status !== 'cancelled');
-          await moveEnrollmentWithGroup({
+          // Qué se mueve: cabecera de familia → toda la familia (mismo user_id); fila → solo esa.
+          let eids;
+          if (data.moveMode === 'group' && data.userId) {
+            let srcList = enrollmentsCache[data.fromClassId];
+            if (!srcList) { try { srcList = await fetchClassEnrollments(data.fromClassId); } catch { srcList = []; } }
+            eids = (srcList || []).filter(en => en.user_id === data.userId && en.status !== 'cancelled').map(en => en.id);
+          } else {
+            if (!data.enrollmentId) return;
+            eids = [data.enrollmentId];
+          }
+          if (!eids.length) return;
+          await moveEnrollmentsDirect({
             fromClassId: data.fromClassId,
-            srcEid: data.enrollmentId,
-            srcName: data.clientName,
+            eids,
             toClassId,
             toEnrolled: toEnrollments.length,
             toMax: toClass?.max_students || 0,
+            label: data.clientName,
             onDone: () => { delete enrollmentsCache[data.fromClassId]; delete enrollmentsCache[toClassId]; render(); },
           });
         }
@@ -1025,10 +1078,13 @@ export async function renderCalendario(container) {
               const classId = row?.dataset.classId;
               const cls = classes.find(c => c.id === classId);
               if (cls) {
+                // Ventana de "pasar lista": desde 30 min antes de la clase en adelante
+                // (durante y después ya está permitido; no hay límite superior).
                 const classStart = new Date(`${cls.date}T${cls.time_start || '00:00'}`);
-                if (classStart > new Date()) {
+                const windowOpen = new Date(classStart.getTime() - 30 * 60 * 1000);
+                if (new Date() < windowOpen) {
                   cb.checked = false;
-                  showToast('No puedes marcar asistencia antes de que empiece la clase', 'error');
+                  showToast('Solo puedes pasar lista desde 30 min antes de la clase', 'error');
                   return;
                 }
               }
@@ -1592,8 +1648,8 @@ export async function renderCalendario(container) {
     // Get unit price label for display
     function getUnitPriceLabel() {
       if (Number(cls.price) > 0) return `${Number(cls.price)}€`;
-      const tiers = PACK_PRICING[cls.type];
-      return tiers ? `${tiers[1]}€` : `${price}€`;
+      const unit = getPackPrice(cls.type, 1, price);
+      return `${unit || price}€`;
     }
 
     function renderPanel() {

@@ -1993,6 +1993,34 @@ a.admin-nav-item-external .nav-icon svg {
 .cal-client-drag:active { cursor: grabbing; }
 .cal-client-drag:hover { color: #666; }
 
+/* Subgrupo familiar: inscritos de la misma familia (mismo titular) van juntos.
+   Cabecera = arrastra a toda la familia · cada fila = arrastra solo a esa persona. */
+.cal-family-group {
+  border-left: 3px solid var(--color-navy, #0f2f39);
+  border-radius: 8px;
+  background: rgba(15, 47, 57, .035);
+  margin: 3px 0;
+  overflow: hidden;
+}
+.cal-family-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: grab;
+  background: rgba(15, 47, 57, .07);
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--color-navy, #0f2f39);
+  user-select: none;
+}
+.cal-family-header:active { cursor: grabbing; }
+.cal-family-header:hover { background: rgba(15, 47, 57, .12); }
+.cal-family-drag { display: flex; align-items: center; color: #94a3b8; flex-shrink: 0; }
+.cal-family-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-family-header.dragging,
+.cal-family-group .cal-client-row.dragging { opacity: .5; }
+
 /* Attendance checkbox */
 .cal-client-attendance {
   display: flex;
