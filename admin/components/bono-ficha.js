@@ -240,7 +240,8 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
           <div class="bf-actions">
             ${canAssign ? `<button class="bf-act assign" data-form="assign">Asignar clase pendiente (${remaining})</button>` : ''}
             ${canPay ? `<button class="bf-act primary" data-form="pay">Añadir pago</button>` : ''}
-            <button class="bf-act" data-form="extend">Ampliar bono</button>
+            <button class="bf-act" id="bf-extend-assign">Ampliar y asignar ahora</button>
+            <button class="bf-act" data-form="extend">Solo sumar créditos</button>
             <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
           </div>
 
@@ -265,15 +266,15 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
             </div>
           </div>` : ''}
 
-          <!-- Form: ampliar -->
+          <!-- Form: ampliar (solo créditos) -->
           <div class="bf-form" id="bf-form-extend" hidden>
             <div class="row">
               <div class="f"><label>Añadir clases</label><input type="number" id="bf-ext-credits" min="1" value="1" style="width:90px" /></div>
-              <div class="f"><label>Cobrar (€)</label><input type="number" id="bf-ext-charge" step="0.01" min="0" style="width:120px" /></div>
+              <div class="f"><label>Cobrar ahora (€)</label><input type="number" id="bf-ext-charge" step="0.01" min="0" style="width:120px" /></div>
               <div class="f"><label>Método</label><select id="bf-ext-method">${methodOpts}</select></div>
               <button class="save" id="bf-ext-save">Ampliar</button>
             </div>
-            <p style="font-size:.74rem;color:var(--color-muted);margin:0">El total del bono se ajusta y el cobro queda registrado como pago del bono.</p>
+            <p style="font-size:.74rem;color:var(--color-muted);margin:0">El valor del bono sube por el precio de las clases añadidas. <a href="#" id="bf-ext-pending" style="color:#d97706;font-weight:600;text-decoration:underline">Dejar pendiente</a> si no cobras ahora (pone Cobrar = 0 y aparece como deuda del cliente).</p>
           </div>
 
           <!-- Form: nuevo bono de otro tipo -->
@@ -363,6 +364,23 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
   });
 
+  // "Ampliar y asignar ahora": abre el asistente de reserva pre-rellenado con el titular y
+  // fijado al tipo del bono. Reusa TODO el flujo del panel (déficit → extendBono → inscripciones
+  // → triggers). El panel vive en la sección Calendario; se expone vía window.__openBonoExtendAssist.
+  overlay.querySelector('#bf-extend-assign')?.addEventListener('click', async () => {
+    if (typeof window.__openBonoExtendAssist !== 'function') {
+      showToast('Abre la sección Calendario una vez y reintenta', 'error'); return;
+    }
+    const prof = bono.profiles || {};
+    const prefill = {
+      nombre: prof.full_name || '', apellidos: prof.last_name || '',
+      profileId: bono.user_id || null, profileName: cliName || prof.full_name || null,
+      familyMemberId: null, email: prof.email || '',
+    };
+    close();
+    await window.__openBonoExtendAssist(bono, prefill);
+  });
+
   // Editar total in-place
   overlay.querySelector('.bf-total-edit')?.addEventListener('click', () => {
     overlay.querySelector('.bf-total-show').hidden = true;
@@ -403,6 +421,8 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   }
   extCredits?.addEventListener('input', suggestExtCharge);
   if (extCredits) suggestExtCharge();
+  // "Dejar pendiente": cobra 0 ahora (el valor del bono sube igual; queda como deuda).
+  overlay.querySelector('#bf-ext-pending')?.addEventListener('click', (e) => { e.preventDefault(); if (extCharge) extCharge.value = '0'; });
   overlay.querySelector('#bf-ext-save')?.addEventListener('click', async () => {
     const extra = parseInt(overlay.querySelector('#bf-ext-credits').value, 10);
     if (!extra || extra <= 0) { showToast('Indica cuántas clases añadir', 'error'); return; }
@@ -411,7 +431,10 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     const method = overlay.querySelector('#bf-ext-method').value;
     const newTotal = (bono.total_credits || 0) + extra;
     try {
-      const newCustomTotal = bono.custom_total != null ? round2(Number(bono.custom_total) + charge) : null;
+      // El valor del bono sube por el PRECIO del pack de las clases añadidas, NO por lo
+      // que se cobre ahora. Cobrar es independiente (0 = dejar pendiente → queda como deuda).
+      const valueAdded = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - expected));
+      const newCustomTotal = bono.custom_total != null ? round2(Number(bono.custom_total) + valueAdded) : null;
       await extendBono(bonoId, { newTotalCredits: newTotal, newCustomTotal, status: 'active', expires_at: defaultBonoExpiry() });
       if (charge > 0) {
         await createPayment({ reservation_type: 'bono', reference_id: bonoId, amount: charge, payment_method: method, concept: `Ampliación bono ${typeLbl} (+${extra})` });
