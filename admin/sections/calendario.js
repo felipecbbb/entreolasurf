@@ -1635,6 +1635,9 @@ export async function renderCalendario(container) {
       familyMemberId: prefill.familyMemberId || null, email: prefill.email || '',
     });
     let persons = [firstPerson];
+    // Modo "ampliar este bono": las personas añadidas solo pueden ser familiares del titular
+    // (sin vincular terceros ni email de cuenta propia) → un único dueño = este bono familiar.
+    const extendMode = !!(prefill && prefill.extendBonoId);
 
     function getTotalQuantity() {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
@@ -1736,9 +1739,9 @@ export async function renderCalendario(container) {
             <div class="bk-person-header">
               <span class="bk-person-number">Persona ${idx + 1}</span>
               <div class="bk-person-header-actions">
-                <button class="bk-link-client-btn" data-pid="${p.id}" title="Vincular cliente existente">
+                ${extendMode ? '' : `<button class="bk-link-client-btn" data-pid="${p.id}" title="Vincular cliente existente">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-                </button>
+                </button>`}
                 <button class="bk-remove-person-btn" data-pid="${p.id}" title="Eliminar persona">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                 </button>
@@ -1797,6 +1800,10 @@ export async function renderCalendario(container) {
                       <option value="avanzado" ${p.nivelSurf === 'avanzado' ? 'selected' : ''}>Avanzado (+15 clases)</option>
                     </select>
                   </div>
+                  ${extendMode ? `
+                  <div class="bk-field bk-field-full">
+                    <p style="margin:0;font-size:.78rem;color:#0369a1;background:#e0f2fe;border-radius:6px;padding:7px 10px">Se asigna como familiar del titular del bono (mismo bono).</p>
+                  </div>` : `
                   <div class="bk-field bk-field-full">
                     <label class="bk-familiar-check">
                       <input type="checkbox" class="bk-is-familiar" data-pid="${p.id}" ${p.isFamilyOfResponsable ? 'checked' : ''} />
@@ -1806,7 +1813,7 @@ export async function renderCalendario(container) {
                   <div class="bk-field bk-field-full bk-email-wrap" data-pid="${p.id}" style="display:${p.isFamilyOfResponsable ? 'none' : ''}">
                     <label class="bk-field-label">Email <small style="font-weight:400;color:#94a3b8;text-transform:none">· solo si es un adulto con cuenta propia (se le invita)</small></label>
                     <input type="email" class="bk-field-input bk-person-email" data-pid="${p.id}" value="${p.email || ''}" placeholder="email@ejemplo.com" />
-                  </div>
+                  </div>`}
                 </div>`
             }
             <div class="bk-person-sessions">
