@@ -1465,6 +1465,7 @@ export async function renderCalendario(container) {
     }
     // Expone el picker para reusarlo desde la ficha de reserva
     _openMovePicker = openMovePicker;
+    window.__openBonoExtendAssist = openBonoExtendAssist;
 
     // Book session (manual reservation)
     container.querySelectorAll('.book-session-btn').forEach(btn => {
@@ -1595,6 +1596,20 @@ export async function renderCalendario(container) {
   }
 
   // ======== BOOKING PANEL (MANUAL RESERVATION) ========
+  // Puente para la ficha del bono ("Ampliar y asignar ahora"): abre el panel de reserva
+  // pre-rellenado con el titular y fijado al tipo del bono. Reusa todo el flujo del panel
+  // (déficit → extendBono/inscripciones → triggers). Se expone en window (ver bindEvents).
+  async function openBonoExtendAssist(bono, prefill) {
+    if (!bono?.class_type) { showToast('Bono sin tipo de clase', 'error'); return; }
+    const todayStr = getDateStr(new Date());
+    const { data: seeds } = await supabase.from('surf_classes')
+      .select('*').eq('type', bono.class_type).gte('date', todayStr)
+      .order('date', { ascending: true }).order('time_start', { ascending: true }).limit(1);
+    const seed = seeds && seeds[0];
+    if (!seed) { showToast('No hay clases futuras de este tipo para asignar', 'error'); return; }
+    openBookingPanel(seed, { ...(prefill || {}), extendBonoId: bono.id });
+  }
+
   async function openBookingPanel(cls, prefill = null) {
     const color = TYPE_COLORS[cls.type] || '#0f2f39';
     const label = TYPE_LABELS[cls.type] || cls.title;
