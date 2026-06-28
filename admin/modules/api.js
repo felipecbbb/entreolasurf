@@ -193,14 +193,27 @@ export async function deleteReservationFully(entity, id) {
   if (!table) throw new Error(`Entidad desconocida: ${entity}`);
 
   // 1) borrar payments asociados (no hay FK, hay que hacerlo a mano)
-  const types = ENTITY_PAYMENT_TYPE[entity];
-  if (Array.isArray(types)) {
-    await supabase.from('payments').delete().in('reservation_type', types).eq('reference_id', id);
+  if (entity === 'bono') {
+    // Pagos del propio bono (reservation_type='bono', reference_id=bono_id)
+    await supabase.from('payments').delete().eq('reservation_type', 'bono').eq('reference_id', id);
+    // Pagos de inscripción de este bono: su reference_id es el enrollment_id (no el bono_id),
+    // así que hay que resolver los enrollment_id ANTES de que el ON DELETE CASCADE borre las
+    // inscripciones; si no, esos pagos quedarían huérfanos.
+    const { data: enrolls } = await supabase.from('class_enrollments').select('id').eq('bono_id', id);
+    const eids = (enrolls || []).map(e => e.id);
+    if (eids.length) {
+      await supabase.from('payments').delete().eq('reservation_type', 'enrollment').in('reference_id', eids);
+    }
   } else {
-    await supabase.from('payments').delete().eq('reservation_type', types).eq('reference_id', id);
+    const types = ENTITY_PAYMENT_TYPE[entity];
+    if (Array.isArray(types)) {
+      await supabase.from('payments').delete().in('reservation_type', types).eq('reference_id', id);
+    } else {
+      await supabase.from('payments').delete().eq('reservation_type', types).eq('reference_id', id);
+    }
   }
 
-  // 2) borrar la reserva en sí
+  // 2) borrar la reserva en sí (las inscripciones del bono caen por FK on delete cascade)
   const { error } = await supabase.from(table).delete().eq('id', id);
   if (error) throw error;
 }

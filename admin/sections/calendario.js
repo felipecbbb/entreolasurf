@@ -553,6 +553,52 @@ export async function renderCalendario(container) {
     return rentals.length > 1 ? renderGroupedRentalCard(rentals) : renderSingleRentalCard(rentals[0]);
   }
 
+  // Estado de pago/devolución de una reserva de material (compartido por tarjeta y fila).
+  function rentalRowState(r) {
+    const isAttended = (r.status || 'pending') === 'returned';
+    const amount = Number(r.total_amount || 0);
+    const depositPaid = Number(r.deposit_paid || 0);
+    const isPaid = amount > 0 ? depositPaid >= amount : depositPaid > 0;
+    const isPartial = !isPaid && depositPaid > 0;
+    const statusClass = `${isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid'} ${isAttended ? 'attended' : ''}`.trim();
+    return { isAttended, amount, isPaid, isPartial, statusClass };
+  }
+
+  // Fila de UN material (drag + devuelto + nombre + talla + precio + pago). La usan tanto
+  // la tarjeta de un material (nombre = cliente) como la agrupada (nombre = material).
+  // `nameHtml` ya viene escapado/compuesto por el llamador.
+  function renderRentalRow(r, nameHtml) {
+    const { isAttended, amount, isPaid, isPartial, statusClass } = rentalRowState(r);
+    return `
+      <div class="cal-client-row ${statusClass}" draggable="true" data-rental-id="${r.id}" data-client-name="${escapeHtml(r.guest_name || 'Sin nombre')}" data-item-type="rental" data-total-amount="${amount}">
+        <div class="cal-client-drag">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+        </div>
+        <label class="cal-client-attendance" title="${isAttended ? 'Devuelto' : 'Marcar devuelto'}">
+          <input type="checkbox" class="cal-attendance-check" data-rid="${r.id}" data-type="rental" ${isAttended ? 'checked' : ''} />
+          <span class="cal-attendance-icon"></span>
+        </label>
+        <span class="cal-client-name">${nameHtml}</span>
+        ${r.size ? `<span class="cal-client-badge blue">Talla: ${escapeHtml(String(r.size))}</span>` : ''}
+        <span class="cal-client-price">${amount.toFixed(2)}€</span>
+        <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </span>
+      </div>`;
+  }
+
+  // Envoltura común de la tarjeta de alquiler: cabecera azul (izq/der libres) + filas.
+  function rentalCardShell(anchorId, headerLeftHtml, headerRightHtml, rowsHtml) {
+    return `
+      <div class="cal-session-card cal-rental-card" data-rental-id="${anchorId}">
+        <div class="cal-session-header" style="background:#0ea5e9;cursor:pointer">
+          <div class="cal-session-header-left">${headerLeftHtml}</div>
+          <div class="cal-session-header-right">${headerRightHtml}</div>
+        </div>
+        <div class="cal-clients-list">${rowsHtml}</div>
+      </div>`;
+  }
+
   // Tarjeta de un alquiler con VARIOS materiales (mismo cliente): cabecera = cliente,
   // una fila por material. Cada fila abre/arrastra su propia reserva (data-rental-id).
   function renderGroupedRentalCard(rentals) {
@@ -561,98 +607,24 @@ export async function renderCalendario(container) {
     const total = rentals.reduce((s, r) => s + Number(r.total_amount || 0), 0);
     const dates = `${first.time_start ? first.time_start.slice(0, 5) + ' · ' : ''}${first.date_start} → ${first.date_end}`;
     const rows = rentals.map(r => {
-      const equipName = r.rental_equipment?.name || 'Material';
-      const status = r.status || 'pending';
-      const isAttended = status === 'returned';
-      const amount = Number(r.total_amount || 0);
-      const depositPaid = Number(r.deposit_paid || 0);
-      const isPaid = amount > 0 ? depositPaid >= amount : depositPaid > 0;
-      const isPartial = !isPaid && depositPaid > 0;
-      const statusClass = `${isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid'} ${isAttended ? 'attended' : ''}`.trim();
       const durLbl = DURATION_KEY_LABELS[r.duration_key] || r.duration_key || '';
-      return `
-        <div class="cal-client-row ${statusClass}" draggable="true" data-rental-id="${r.id}" data-client-name="${clientName}" data-item-type="rental" data-total-amount="${amount}">
-          <div class="cal-client-drag">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
-          </div>
-          <label class="cal-client-attendance" title="${isAttended ? 'Devuelto' : 'Marcar devuelto'}">
-            <input type="checkbox" class="cal-attendance-check" data-rid="${r.id}" data-type="rental" ${isAttended ? 'checked' : ''} />
-            <span class="cal-attendance-icon"></span>
-          </label>
-          <span class="cal-client-name">${escapeHtml(equipName)}${durLbl ? ` <span style="color:#94a3b8;font-weight:400">· ${durLbl}</span>` : ''}</span>
-          ${r.size ? `<span class="cal-client-badge blue">Talla: ${r.size}</span>` : ''}
-          <span class="cal-client-price">${amount.toFixed(2)}€</span>
-          <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-          </span>
-        </div>`;
+      const nameHtml = `${escapeHtml(r.rental_equipment?.name || 'Material')}${durLbl ? ` <span style="color:#94a3b8;font-weight:400">· ${durLbl}</span>` : ''}`;
+      return renderRentalRow(r, nameHtml);
     }).join('');
-    return `
-      <div class="cal-session-card cal-rental-card" data-rental-id="${first.id}">
-        <div class="cal-session-header" style="background:#0ea5e9;cursor:pointer">
-          <div class="cal-session-header-left">
-            <span class="cal-session-time">${dates}</span>
-            <span class="cal-session-title">${escapeHtml(clientName)}</span>
-          </div>
-          <div class="cal-session-header-right">
-            <span class="cal-session-cap-label">${rentals.length} materiales</span>
-            <span class="cal-session-cap"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;background:#0369a1;color:#fff">${total.toFixed(2)}€</span></span>
-          </div>
-        </div>
-        <div class="cal-clients-list">
-          ${rows}
-        </div>
-      </div>`;
+    const left = `<span class="cal-session-time">${dates}</span><span class="cal-session-title">${escapeHtml(clientName)}</span>`;
+    const right = `<span class="cal-session-cap-label">${rentals.length} materiales</span><span class="cal-session-cap"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;background:#0369a1;color:#fff">${total.toFixed(2)}€</span></span>`;
+    return rentalCardShell(first.id, left, right, rows);
   }
 
   function renderSingleRentalCard(r) {
     const equipName = r.rental_equipment?.name || 'Material';
-    const clientName = r.guest_name || 'Sin nombre';
     const status = r.status || 'pending';
     const statusLabel = RENTAL_STATUS_LABELS[status] || status;
     const statusColor = RENTAL_STATUS_COLORS[status] || '#64748b';
     const durationLabel = DURATION_KEY_LABELS[r.duration_key] || r.duration_key || '';
-    const totalAmount = Number(r.total_amount || 0);
-    const depositPaid = Number(r.deposit_paid || 0);
-    const isAttended = status === 'returned';
-    const isPaid = totalAmount > 0 ? depositPaid >= totalAmount : depositPaid > 0;
-    const isPartial = !isPaid && depositPaid > 0;
-    const payClass = isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid';
-    const attendClass = isAttended ? 'attended' : '';
-    const statusClass = `${payClass} ${attendClass}`.trim();
-
-    return `
-      <div class="cal-session-card cal-rental-card" data-rental-id="${r.id}">
-        <div class="cal-session-header" style="background:#0ea5e9;cursor:pointer">
-          <div class="cal-session-header-left">
-            <span class="cal-session-time">${r.time_start ? r.time_start.slice(0, 5) + ' · ' : ''}${r.date_start} → ${r.date_end}</span>
-            <span class="cal-session-title">${equipName}</span>
-          </div>
-          <div class="cal-session-header-right">
-            <span class="cal-session-cap-label">${durationLabel}</span>
-            <span class="cal-session-cap">
-              <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;background:${statusColor};color:#fff">${statusLabel}</span>
-            </span>
-          </div>
-        </div>
-        <div class="cal-clients-list" data-rental-id="${r.id}">
-          <div class="cal-client-row ${statusClass}" draggable="true" data-rental-id="${r.id}" data-client-name="${clientName}" data-item-type="rental" data-total-amount="${totalAmount}">
-            <div class="cal-client-drag">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
-            </div>
-            <label class="cal-client-attendance" title="${isAttended ? 'Devuelto' : 'Marcar devuelto'}">
-              <input type="checkbox" class="cal-attendance-check" data-rid="${r.id}" data-type="rental" ${isAttended ? 'checked' : ''} />
-              <span class="cal-attendance-icon"></span>
-            </label>
-            <span class="cal-client-name">${clientName}</span>
-            ${r.size ? `<span class="cal-client-badge blue">Talla: ${r.size}</span>` : ''}
-            <span class="cal-client-price">${totalAmount.toFixed(2)}€</span>
-            <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-            </span>
-          </div>
-        </div>
-      </div>`;
+    const left = `<span class="cal-session-time">${r.time_start ? r.time_start.slice(0, 5) + ' · ' : ''}${r.date_start} → ${r.date_end}</span><span class="cal-session-title">${escapeHtml(equipName)}</span>`;
+    const right = `<span class="cal-session-cap-label">${durationLabel}</span><span class="cal-session-cap"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;background:${statusColor};color:#fff">${statusLabel}</span></span>`;
+    return rentalCardShell(r.id, left, right, renderRentalRow(r, escapeHtml(r.guest_name || 'Sin nombre')));
   }
 
   // ======== DRAG AND DROP ========
@@ -5963,7 +5935,7 @@ export async function renderCalendario(container) {
       const unitWrap = document.getElementById('nr-unit-wrap');
       const unitSel = document.getElementById('nr-unit');
       const assignedUnitId = (unitWrap && unitWrap.style.display !== 'none') ? (unitSel?.value || null) : null;
-      const unitLabel = assignedUnitId ? (unitSel.selectedOptions[0]?.textContent || null) : null;
+      const unitLabel = assignedUnitId ? (unitSel?.selectedOptions[0]?.textContent?.trim() || null) : null;
       const form = document.getElementById('new-rental-form');
       const dateStart = form.querySelector('[name="date_start"]').value;
       const timeStart = form.querySelector('[name="time_start"]').value || null;
@@ -5994,11 +5966,14 @@ export async function renderCalendario(container) {
         totalEl.style.display = rentalLines.length ? '' : 'none';
         totalEl.textContent = `Total reserva: ${total.toFixed(2)}€ · ${rentalLines.length} material(es)`;
       }
-      wrap.querySelectorAll('.nr-line-del').forEach(b => b.addEventListener('click', () => {
-        rentalLines.splice(Number(b.dataset.i), 1);
-        renderRentalLines();
-      }));
     }
+    // Delegación: un único listener para los botones "×" (no se re-engancha en cada render).
+    document.getElementById('nr-lines')?.addEventListener('click', (e) => {
+      const b = e.target.closest('.nr-line-del');
+      if (!b) return;
+      rentalLines.splice(Number(b.dataset.i), 1);
+      renderRentalLines();
+    });
     // Resetea el editor para añadir el siguiente material (mantiene fechas/horas).
     function resetMaterialEditor() {
       const eqSel = document.getElementById('nr-equipment');
