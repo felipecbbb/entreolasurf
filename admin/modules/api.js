@@ -1038,8 +1038,8 @@ export async function searchProfiles(term) {
   if (!safeTerm.trim()) return [];
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, phone')
-    .or(`full_name.ilike.%${safeTerm}%,phone.ilike.%${safeTerm}%`)
+    .select('id, full_name, last_name, phone, email')
+    .or(`full_name.ilike.%${safeTerm}%,phone.ilike.%${safeTerm}%,email.ilike.%${safeTerm}%`)
     .limit(10);
   if (error) { console.warn('searchProfiles:', error.message); return []; }
   return data || [];

@@ -1625,9 +1625,13 @@ export async function renderCalendario(container) {
     // State
     let bookingWeekOffset = 0;
     let personIdCounter = 1;
+    // En modo "ampliar este bono" NO preseleccionamos la clase semilla: 'cls' solo ancla
+    // la semana del calendario. Si se dejara marcada, sumaría un crédito (y una inscripción)
+    // que el usuario no pidió → "te añade clases de más".
+    const isExtend = !!(prefill && prefill.extendBonoId);
     let sessionQuantities = {}; // classId → quantity
-    sessionQuantities[cls.id] = 1;
-    const firstPerson = { id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: [cls.id] };
+    if (!isExtend) sessionQuantities[cls.id] = 1;
+    const firstPerson = { id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: isExtend ? [] : [cls.id] };
     // "Ampliar": pre-carga el cliente y su familiar; loadPersonCredits() cargará su bono
     if (prefill) Object.assign(firstPerson, {
       nombre: prefill.nombre || '', apellidos: prefill.apellidos || '',
@@ -1637,7 +1641,7 @@ export async function renderCalendario(container) {
     let persons = [firstPerson];
     // Modo "ampliar este bono": las personas añadidas solo pueden ser familiares del titular
     // (sin vincular terceros ni email de cuenta propia) → un único dueño = este bono familiar.
-    const extendMode = !!(prefill && prefill.extendBonoId);
+    const extendMode = isExtend;
 
     function getTotalQuantity() {
       return Object.values(sessionQuantities).reduce((s, v) => s + v, 0);
@@ -5874,7 +5878,7 @@ export async function renderCalendario(container) {
         ctimer = setTimeout(async () => {
           const res = await searchProfiles(term);
           cresults.innerHTML = res.length
-            ? res.map(p => `<div class="nr-client-opt" data-id="${p.id}" data-name="${escapeHtml(p.full_name || '')}" data-phone="${escapeHtml(p.phone || '')}" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.88rem">${escapeHtml(p.full_name || 'Sin nombre')}${p.phone ? ` · <span style="color:#64748b">${escapeHtml(p.phone)}</span>` : ''}</div>`).join('')
+            ? res.map(p => `<div class="nr-client-opt" data-id="${p.id}" data-name="${escapeHtml(p.full_name || '')}" data-lastname="${escapeHtml(p.last_name || '')}" data-phone="${escapeHtml(p.phone || '')}" data-email="${escapeHtml(p.email || '')}" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.88rem">${escapeHtml(p.full_name || 'Sin nombre')}${p.phone ? ` · <span style="color:#64748b">${escapeHtml(p.phone)}</span>` : ''}</div>`).join('')
             : '<div style="padding:10px;color:#94a3b8;font-size:.85rem">Sin resultados</div>';
           cresults.style.display = '';
         }, 250);
@@ -5884,8 +5888,9 @@ export async function renderCalendario(container) {
         if (!opt) return;
         cuser.value = opt.dataset.id;
         setField('guest_name', opt.dataset.name);
-        setField('guest_last_name', '');
+        setField('guest_last_name', opt.dataset.lastname);
         setField('guest_phone', opt.dataset.phone);
+        setField('guest_email', opt.dataset.email);
         cresults.style.display = 'none';
         csearch.value = '';
         cchip.innerHTML = `✓ Enlazado a <strong>${escapeHtml(opt.dataset.name)}</strong> — saldrá en su ficha. <button type="button" id="nr-client-clear" style="background:none;border:none;color:#065f46;text-decoration:underline;cursor:pointer;font-size:.85rem;padding:0;margin-left:6px">quitar</button>`;
@@ -5896,6 +5901,7 @@ export async function renderCalendario(container) {
         cuser.value = '';
         cchip.style.display = 'none';
         setField('guest_name', ''); setField('guest_phone', '');
+        setField('guest_last_name', ''); setField('guest_email', '');
       });
       document.addEventListener('click', (e) => {
         if (cresults && cresults.style.display !== 'none' && !cresults.contains(e.target) && e.target !== csearch) cresults.style.display = 'none';
