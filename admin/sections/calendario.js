@@ -335,7 +335,7 @@ export async function renderCalendario(container) {
     }
 
     const classCards = dayClasses.map(c => renderSessionCard(c)).join('');
-    const rentalCards = rentalReservations.map(r => renderRentalCard(r)).join('');
+    const rentalCards = groupRentals(rentalReservations).map(g => renderRentalCard(g)).join('');
 
     return `
       <div class="cal-day-content">
@@ -532,7 +532,80 @@ export async function renderCalendario(container) {
   const RENTAL_STATUS_COLORS = { pending: '#f59e0b', confirmed: '#0ea5e9', active: '#22c55e', returned: '#64748b', cancelled: '#ef4444' };
   const DURATION_KEY_LABELS = { '1h': '1 hora', '2h': '2 horas', '4h': '4 horas', '1d': '1 día', '1w': '1 semana', '2w': '2 semanas', '1m': '1 mes' };
 
-  function renderRentalCard(r) {
+  // Agrupa las reservas de material por group_id (alquiler multi-material de un cliente).
+  // Las que no tienen group_id quedan como grupos de 1 → se renderizan igual que siempre.
+  function groupRentals(list) {
+    const groups = [];
+    const byGid = {};
+    for (const r of list) {
+      if (r.group_id) {
+        if (!byGid[r.group_id]) { byGid[r.group_id] = []; groups.push(byGid[r.group_id]); }
+        byGid[r.group_id].push(r);
+      } else {
+        groups.push([r]);
+      }
+    }
+    return groups;
+  }
+
+  function renderRentalCard(group) {
+    const rentals = Array.isArray(group) ? group : [group];
+    return rentals.length > 1 ? renderGroupedRentalCard(rentals) : renderSingleRentalCard(rentals[0]);
+  }
+
+  // Tarjeta de un alquiler con VARIOS materiales (mismo cliente): cabecera = cliente,
+  // una fila por material. Cada fila abre/arrastra su propia reserva (data-rental-id).
+  function renderGroupedRentalCard(rentals) {
+    const first = rentals[0];
+    const clientName = first.guest_name || 'Sin nombre';
+    const total = rentals.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+    const dates = `${first.time_start ? first.time_start.slice(0, 5) + ' · ' : ''}${first.date_start} → ${first.date_end}`;
+    const rows = rentals.map(r => {
+      const equipName = r.rental_equipment?.name || 'Material';
+      const status = r.status || 'pending';
+      const isAttended = status === 'returned';
+      const amount = Number(r.total_amount || 0);
+      const depositPaid = Number(r.deposit_paid || 0);
+      const isPaid = amount > 0 ? depositPaid >= amount : depositPaid > 0;
+      const isPartial = !isPaid && depositPaid > 0;
+      const statusClass = `${isPaid ? 'paid' : isPartial ? 'partial' : 'unpaid'} ${isAttended ? 'attended' : ''}`.trim();
+      const durLbl = DURATION_KEY_LABELS[r.duration_key] || r.duration_key || '';
+      return `
+        <div class="cal-client-row ${statusClass}" draggable="true" data-rental-id="${r.id}" data-client-name="${clientName}" data-item-type="rental" data-total-amount="${amount}">
+          <div class="cal-client-drag">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>
+          </div>
+          <label class="cal-client-attendance" title="${isAttended ? 'Devuelto' : 'Marcar devuelto'}">
+            <input type="checkbox" class="cal-attendance-check" data-rid="${r.id}" data-type="rental" ${isAttended ? 'checked' : ''} />
+            <span class="cal-attendance-icon"></span>
+          </label>
+          <span class="cal-client-name">${escapeHtml(equipName)}${durLbl ? ` <span style="color:#94a3b8;font-weight:400">· ${durLbl}</span>` : ''}</span>
+          ${r.size ? `<span class="cal-client-badge blue">Talla: ${r.size}</span>` : ''}
+          <span class="cal-client-price">${amount.toFixed(2)}€</span>
+          <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          </span>
+        </div>`;
+    }).join('');
+    return `
+      <div class="cal-session-card cal-rental-card" data-rental-id="${first.id}">
+        <div class="cal-session-header" style="background:#0ea5e9;cursor:pointer">
+          <div class="cal-session-header-left">
+            <span class="cal-session-time">${dates}</span>
+            <span class="cal-session-title">${escapeHtml(clientName)}</span>
+          </div>
+          <div class="cal-session-header-right">
+            <span class="cal-session-cap-label">${rentals.length} materiales</span>
+            <span class="cal-session-cap"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;background:#0369a1;color:#fff">${total.toFixed(2)}€</span></span>
+          </div>
+        </div>
+        <div class="cal-clients-list">
+          ${rows}
+        </div>
+      </div>`;
+  }
+
+  function renderSingleRentalCard(r) {
     const equipName = r.rental_equipment?.name || 'Material';
     const clientName = r.guest_name || 'Sin nombre';
     const status = r.status || 'pending';
@@ -5618,6 +5691,9 @@ export async function renderCalendario(container) {
                   </div>
                 </div>
                 <div id="nr-price-summary" class="ns-price-summary" style="display:none"></div>
+                <button type="button" id="nr-add-line" style="margin-top:10px;width:100%;padding:10px;border:1px dashed #0ea5e9;background:#f0f9ff;color:#0369a1;border-radius:8px;font-size:.88rem;font-weight:600;cursor:pointer">+ Añadir este material a la reserva</button>
+                <div id="nr-lines" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
+                <div id="nr-lines-total" style="display:none;margin-top:8px;text-align:right;font-weight:700;color:#0f2f39"></div>
               </section>
 
               <section class="ns-section">
@@ -5860,6 +5936,93 @@ export async function renderCalendario(container) {
       if (sz && sizeSel && [...sizeSel.options].some(o => o.value === sz)) sizeSel.value = sz;
     });
 
+    // ---- Carrito de materiales: varios materiales en una misma reserva (un cliente) ----
+    // Los campos de arriba editan UNA línea; "+ Añadir" la guarda en esta lista. Al crear
+    // la reserva se insertan N filas equipment_reservations con un group_id compartido.
+    const rentalLines = [];
+    // Lee la línea que hay ahora mismo en el editor (o null si no hay material/tarifa).
+    function readMaterialEditor() {
+      const eqSel = document.getElementById('nr-equipment');
+      const eqId = eqSel?.value;
+      if (!eqId) return null;
+      const durSel = document.getElementById('nr-duration');
+      const durKey = durSel?.value;
+      if (!durKey) return null;
+      const eq = equipmentMap[eqId];
+      let unitPrice, durLabel;
+      if (durKey === 'custom') {
+        unitPrice = parseFloat(document.getElementById('nr-custom-price')?.value) || 0;
+        durLabel = 'Personalizado';
+      } else {
+        unitPrice = Number(durSel.selectedOptions[0]?.dataset.price) || 0;
+        durLabel = DURATION_LABELS[durKey] || durKey;
+      }
+      const qty = parseInt(document.querySelector('#new-rental-form [name="quantity"]')?.value) || 1;
+      const sizeWrap = document.getElementById('nr-size-wrap');
+      const size = (sizeWrap && sizeWrap.style.display !== 'none') ? (document.getElementById('nr-size')?.value || null) : null;
+      const unitWrap = document.getElementById('nr-unit-wrap');
+      const unitSel = document.getElementById('nr-unit');
+      const assignedUnitId = (unitWrap && unitWrap.style.display !== 'none') ? (unitSel?.value || null) : null;
+      const unitLabel = assignedUnitId ? (unitSel.selectedOptions[0]?.textContent || null) : null;
+      const form = document.getElementById('new-rental-form');
+      const dateStart = form.querySelector('[name="date_start"]').value;
+      const timeStart = form.querySelector('[name="time_start"]').value || null;
+      const dateEnd = form.querySelector('[name="date_end"]').value || dateStart;
+      return {
+        equipment_id: eqId, equipment_name: eq?.name || 'Material',
+        size, assigned_unit_id: assignedUnitId, unit_label: unitLabel,
+        duration_key: durKey, duration_label: durLabel,
+        quantity: qty, unit_price: unitPrice,
+        line_total: Math.round(unitPrice * qty * 100) / 100,
+        date_start: dateStart, time_start: timeStart, date_end: dateEnd,
+      };
+    }
+    function renderRentalLines() {
+      const wrap = document.getElementById('nr-lines');
+      const totalEl = document.getElementById('nr-lines-total');
+      if (!wrap) return;
+      wrap.innerHTML = rentalLines.map((ln, i) => {
+        const bits = [ln.duration_label, ln.size ? `talla ${ln.size}` : null, ln.quantity > 1 ? `×${ln.quantity}` : null, ln.unit_label].filter(Boolean).join(' · ');
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:.85rem">
+          <span style="flex:1"><strong>${escapeHtml(ln.equipment_name)}</strong>${bits ? ` <span style="color:#64748b">— ${escapeHtml(bits)}</span>` : ''}</span>
+          <span style="font-weight:700;color:#0f2f39">${ln.line_total.toFixed(2)}€</span>
+          <button type="button" class="nr-line-del" data-i="${i}" title="Quitar" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1.1rem;line-height:1;padding:0 2px">×</button>
+        </div>`;
+      }).join('');
+      if (totalEl) {
+        const total = rentalLines.reduce((s, l) => s + l.line_total, 0);
+        totalEl.style.display = rentalLines.length ? '' : 'none';
+        totalEl.textContent = `Total reserva: ${total.toFixed(2)}€ · ${rentalLines.length} material(es)`;
+      }
+      wrap.querySelectorAll('.nr-line-del').forEach(b => b.addEventListener('click', () => {
+        rentalLines.splice(Number(b.dataset.i), 1);
+        renderRentalLines();
+      }));
+    }
+    // Resetea el editor para añadir el siguiente material (mantiene fechas/horas).
+    function resetMaterialEditor() {
+      const eqSel = document.getElementById('nr-equipment');
+      if (eqSel) eqSel.value = '';
+      const durSel = document.getElementById('nr-duration');
+      if (durSel) durSel.innerHTML = '<option value="">Selecciona un material…</option>';
+      document.getElementById('nr-custom-price-wrap').style.display = 'none';
+      document.getElementById('nr-size-wrap').style.display = 'none';
+      document.getElementById('nr-unit-wrap').style.display = 'none';
+      const qtyEl = document.querySelector('#new-rental-form [name="quantity"]');
+      if (qtyEl) qtyEl.value = '1';
+      const summary = document.getElementById('nr-price-summary');
+      if (summary) summary.style.display = 'none';
+    }
+    document.getElementById('nr-add-line')?.addEventListener('click', () => {
+      const ln = readMaterialEditor();
+      if (!ln) { showToast('Elige material y tarifa antes de añadir', 'error'); return; }
+      if (!ln.date_start) { showToast('Indica la fecha de inicio', 'error'); return; }
+      rentalLines.push(ln);
+      renderRentalLines();
+      resetMaterialEditor();
+      document.getElementById('nr-equipment')?.focus();
+    });
+
     // ---- Buscar y enlazar un cliente existente (opcional) ----
     // Si se enlaza, la reserva guarda user_id → aparece en la ficha del cliente
     // y en su "DEBE €X" automáticamente (ambos ya leen por user_id).
@@ -6039,25 +6202,18 @@ export async function renderCalendario(container) {
     document.getElementById('new-rental-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
-      const equipmentId = fd.get('equipment_id');
-      if (!equipmentId) { showToast('Selecciona un material', 'error'); return; }
 
-      const durKey = fd.get('duration_key');
-      let totalPrice = 0;
-      if (durKey === 'custom') {
-        totalPrice = parseFloat(fd.get('custom_price')) || 0;
-      } else {
-        const durOpt = document.getElementById('nr-duration')?.selectedOptions[0];
-        totalPrice = Number(durOpt?.dataset.price) || 0;
-      }
-
-      const qty = parseInt(fd.get('quantity')) || 1;
-      totalPrice *= qty;
+      // Líneas a crear = las añadidas al carrito + la que esté ahora en el editor (si la hay
+      // y no se pulsó "+ Añadir"), para que el flujo de un solo material funcione sin añadir.
+      const lines = [...rentalLines];
+      const editorLine = readMaterialEditor();
+      if (editorLine) lines.push(editorLine);
+      if (!lines.length) { showToast('Añade al menos un material', 'error'); return; }
 
       const submitBtn = document.getElementById('ns-submit') || e.target.querySelector('button[type="submit"]');
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creando reserva…'; }
 
-      // Build notes JSON with extra client data
+      // Datos de cliente compartidos por todas las líneas
       const extraData = {};
       const wetsuitSize = fd.get('wetsuit_size')?.trim();
       const canSwim = fd.get('can_swim');
@@ -6068,33 +6224,46 @@ export async function renderCalendario(container) {
       if (canSwim) extraData.can_swim = canSwim;
       if (hasInjury === 'si') extraData.injury = injuryDetail || 'Sí';
       if (guestLastName) extraData.guest_last_name = guestLastName;
+      const notes = Object.keys(extraData).length ? JSON.stringify(extraData) : null;
 
       const fullName = [fd.get('guest_name')?.trim(), guestLastName].filter(Boolean).join(' ') || null;
+      const userId = fd.get('user_id') || null;
+      const guestEmail = fd.get('guest_email')?.trim() || null;
+      const guestPhone = fd.get('guest_phone')?.trim() || null;
+      // group_id: enlaza las líneas de una misma reserva multi-material. 1 sola línea → null
+      // (compatible con los alquileres antiguos, que se siguen mostrando individuales).
+      const groupId = lines.length > 1 ? crypto.randomUUID() : null;
 
       try {
-        await createEquipmentReservation({
-          equipment_id: equipmentId,
-          user_id: fd.get('user_id') || null,
-          guest_name: fullName,
-          guest_email: fd.get('guest_email')?.trim() || null,
-          guest_phone: fd.get('guest_phone')?.trim() || null,
-          date_start: fd.get('date_start'),
-          date_end: fd.get('date_end'),
-          duration_key: durKey === 'custom' ? 'custom' : durKey,
-          size: fd.get('size') || null,
-          assigned_unit_id: fd.get('assigned_unit_id') || null,
-          quantity: qty,
-          total_amount: totalPrice,
-          // Nace SIN cobrar: deposit_paid lo sincroniza el icono de pago (que crea el
-          // payment). Antes se metía aquí la fianza del material y salía siempre pagado.
-          deposit_paid: 0,
-          time_start: fd.get('time_start') || null,
-          status: 'confirmed',
-          notes: Object.keys(extraData).length ? JSON.stringify(extraData) : null,
-        });
+        for (const ln of lines) {
+          const payload = {
+            equipment_id: ln.equipment_id,
+            user_id: userId,
+            guest_name: fullName,
+            guest_email: guestEmail,
+            guest_phone: guestPhone,
+            date_start: ln.date_start,
+            date_end: ln.date_end,
+            duration_key: ln.duration_key === 'custom' ? 'custom' : ln.duration_key,
+            size: ln.size || null,
+            assigned_unit_id: ln.assigned_unit_id || null,
+            quantity: ln.quantity,
+            total_amount: ln.line_total,
+            // Nace SIN cobrar: deposit_paid lo sincroniza el icono de pago (que crea el
+            // payment). Antes se metía aquí la fianza del material y salía siempre pagado.
+            deposit_paid: 0,
+            time_start: ln.time_start || null,
+            status: 'confirmed',
+            notes,
+          };
+          // Solo añadimos group_id cuando hay varios materiales → los alquileres de 1
+          // material siguen funcionando aunque la columna group_id no exista todavía.
+          if (groupId) payload.group_id = groupId;
+          await createEquipmentReservation(payload);
+        }
         document.getElementById('ns-overlay')?.remove();
         closeModal();
-        showToast('Reserva de material creada', 'success');
+        showToast(lines.length > 1 ? `Reserva con ${lines.length} materiales creada` : 'Reserva de material creada', 'success');
         render();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
