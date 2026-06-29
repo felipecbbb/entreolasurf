@@ -637,6 +637,43 @@ export async function updateBookingStatus(id, status) {
   invalidateCache('bookings');
 }
 
+// Alta manual de una reserva de camp desde el admin. La tabla bookings admite
+// invitados (user_id nullable + guest_name/guest_email/guest_phone, ver
+// migration-guest-checkout). El trigger on_booking_status_change ajusta spots_taken
+// según el status, así que NO hay que tocar spots_taken a mano.
+export async function createBooking(payload) {
+  const { data, error } = await supabase
+    .from('bookings')
+    .insert(payload)
+    .select('*, surf_camps:camp_id(id, title, slug, date_start, date_end)')
+    .single();
+  if (error) throw error;
+  invalidateCache('bookings');
+  invalidateCache('camps'); // spots_taken pudo cambiar por el trigger
+  return data;
+}
+
+// Envía el email de confirmación de reserva de camp (reusa la edge function
+// send-email, tipo 'camp'). `to` es el correo del cliente (manual o de su perfil).
+export async function sendBookingConfirmationEmail({ to, customerName, booking }) {
+  if (!to) throw new Error('No hay email del cliente al que enviar la confirmación');
+  const total = Number(booking.total_amount || 0);
+  const campTitle = booking.surf_camps?.title || 'Surf Camp';
+  const { error } = await supabase.functions.invoke('send-email', {
+    body: {
+      to,
+      type: 'camp',
+      data: {
+        customerName: customerName || '',
+        orderId: booking.id,
+        items: [{ name: campTitle, quantity: 1, price: total }],
+        total,
+      },
+    },
+  });
+  if (error) throw error;
+}
+
 // ---- Surf Camps ----
 export const fetchCamps = cached('camps', 30000, async () => {
   const { data, error } = await supabase

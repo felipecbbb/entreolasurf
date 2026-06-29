@@ -1,7 +1,7 @@
 /* ============================================================
    Reservas Section — Camp bookings grouped by camp
    ============================================================ */
-import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully } from '../modules/api.js';
+import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully, createBooking, sendBookingConfirmationEmail, searchProfiles } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { recalcPaidState } from '/lib/domain/payments.js';
@@ -67,6 +67,7 @@ export async function renderReservas(container) {
         <div class="rv-toolbar-summary">
           <span class="rv-toolbar-count">${filtered.length} reserva${filtered.length !== 1 ? 's' : ''}</span>
           <span class="rv-toolbar-total">${formatCurrency(totalRevenue)}</span>
+          <button class="btn" id="rv-new-booking" style="background:#22c55e;color:#fff;border:0;padding:9px 18px;font-size:.85rem;font-weight:600;margin-left:12px">+ Nueva reserva</button>
         </div>
       </div>
 
@@ -109,8 +110,8 @@ export async function renderReservas(container) {
               ${group.bookings.map(b => `
                 <div class="rv-booking-row rv-booking-clickable" data-id="${b.id}" style="cursor:pointer">
                   <div class="rv-booking-client">
-                    <strong>${esc(b.profiles?.full_name || 'Sin nombre')}</strong>
-                    <span class="rv-booking-phone">${esc(b.profiles?.phone || '')}</span>
+                    <strong>${esc(b.profiles?.full_name || b.guest_name || 'Sin nombre')}</strong>
+                    <span class="rv-booking-phone">${esc(b.profiles?.phone || b.guest_phone || '')}</span>
                   </div>
                   <div class="rv-booking-amounts">
                     <span class="rv-booking-deposit">Señal: ${formatCurrency(b.deposit_amount)}</span>
@@ -120,7 +121,7 @@ export async function renderReservas(container) {
                   <div class="rv-booking-date">${formatDate(b.created_at)}</div>
                   <div class="rv-booking-actions">
                     <button class="admin-action-btn rv-status-btn" data-id="${b.id}">Estado</button>
-                    <button class="rv-icon-btn rv-icon-danger rv-delete-btn" data-id="${b.id}" data-name="${esc(b.profiles?.full_name || 'esta reserva')}" title="Eliminar reserva">
+                    <button class="rv-icon-btn rv-icon-danger rv-delete-btn" data-id="${b.id}" data-name="${esc(b.profiles?.full_name || b.guest_name || 'esta reserva')}" title="Eliminar reserva">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                     </button>
                   </div>
@@ -134,6 +135,7 @@ export async function renderReservas(container) {
     // Event handlers
     container.querySelector('#rv-camp-filter')?.addEventListener('change', e => { campFilter = e.target.value; render(); });
     container.querySelector('#rv-status-filter')?.addEventListener('change', e => { statusFilter = e.target.value; render(); });
+    container.querySelector('#rv-new-booking')?.addEventListener('click', () => openNewBookingModal(camps));
 
     container.querySelectorAll('.rv-status-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -184,22 +186,22 @@ export async function renderReservas(container) {
     const p = booking.profiles || {};
     const camp = booking.surf_camps || {};
 
-    // Name & surname separated
-    const firstName = esc(p.full_name || 'Sin nombre');
+    // Name & surname separated (con fallback a los datos de invitado de la reserva manual)
+    const firstName = esc(p.full_name || booking.guest_name || 'Sin nombre');
     const lastName = esc(p.last_name || '');
-    const clientPhone = esc(p.phone || '—');
+    const clientPhone = esc(p.phone || booking.guest_phone || '—');
     const clientAddress = [p.address, p.city, p.postal_code].filter(Boolean).join(', ');
 
     // Birth date & age
     const birthStr = p.birth_date ? formatDate(p.birth_date) : '';
     const age = calcAge(p.birth_date);
 
-    // Fetch email from auth.users via RPC
-    let email = '—';
+    // Email: de la cuenta (RPC) si está enlazada; si es invitado, el guest_email
+    let email = booking.guest_email || '—';
     if (booking.user_id) {
       try {
         const { data } = await supabase.rpc('get_user_email', { p_user_id: booking.user_id });
-        email = data || '—';
+        if (data) email = data;
       } catch {}
     }
     const safeEmail = esc(email);
@@ -682,14 +684,18 @@ export async function renderReservas(container) {
         // Fire-and-forget email notification
         if (newStatus === 'cancelled') {
           try {
-            const { data: emailData } = await supabase.rpc('get_user_email', { p_user_id: booking.user_id });
+            let emailData = booking.guest_email || null;
+            if (booking.user_id) {
+              const { data } = await supabase.rpc('get_user_email', { p_user_id: booking.user_id });
+              if (data) emailData = data;
+            }
             if (emailData) {
               supabase.functions.invoke('send-email', {
                 body: {
                   to: emailData,
                   type: 'camp_cancelled',
                   data: {
-                    customerName: booking.profiles?.full_name,
+                    customerName: booking.profiles?.full_name || booking.guest_name,
                     orderId: booking.id,
                   },
                 },
@@ -701,6 +707,139 @@ export async function renderReservas(container) {
         showToast('Estado actualizado', 'success');
         render();
       } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+  }
+
+  // ---- Alta manual de una reserva de camp (+ email de confirmación) ----
+  function openNewBookingModal(camps) {
+    const campOpts = camps.map(c => `<option value="${c.id}" data-deposit="${c.deposit || 0}" data-price="${c.price || 0}">${esc(c.title)}</option>`).join('');
+    const statusOpts = STATUSES.map(s => `<option value="${s}" ${s === 'deposit_paid' ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`).join('');
+    openModal('Nueva reserva de camp', `
+      <div class="trip-form" id="nb-form">
+        <label>Camp</label>
+        <select id="nb-camp">${campOpts}</select>
+
+        <label style="margin-top:10px">Buscar cliente existente <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
+        <div style="position:relative">
+          <input type="text" id="nb-client-search" placeholder="Nombre, teléfono o email…" autocomplete="off" />
+          <input type="hidden" id="nb-user-id" />
+          <div id="nb-client-results" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(15,47,57,.12);max-height:200px;overflow:auto"></div>
+        </div>
+        <div id="nb-client-chip" style="display:none;margin:8px 0;padding:8px 12px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;font-size:.85rem;color:#065f46"></div>
+
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><label>Nombre</label><input type="text" id="nb-name" placeholder="Nombre" /></div>
+          <div style="flex:1"><label>Apellidos</label><input type="text" id="nb-lastname" placeholder="Apellidos" /></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><label>Email</label><input type="email" id="nb-email" placeholder="email@ejemplo.com" /></div>
+          <div style="flex:1"><label>Teléfono</label><input type="tel" id="nb-phone" placeholder="+34 600 000 000" /></div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><label>Señal (€)</label><input type="number" id="nb-deposit" min="0" step="0.01" value="0" /></div>
+          <div style="flex:1"><label>Total (€)</label><input type="number" id="nb-total" min="0" step="0.01" value="0" /></div>
+        </div>
+        <label style="margin-top:8px">Estado</label>
+        <select id="nb-status">${statusOpts}</select>
+        <label style="margin-top:8px">Notas <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
+        <textarea id="nb-notes" rows="2" placeholder="Observaciones internas"></textarea>
+
+        <label class="ns-checkbox" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:.9rem">
+          <input type="checkbox" id="nb-send-email" checked /> Enviar email de confirmación al cliente
+        </label>
+        <button class="btn" id="nb-save" style="margin-top:12px;background:#22c55e;color:#fff;border:0">Crear reserva</button>
+      </div>
+    `);
+
+    const $ = id => document.getElementById(id);
+    const setVal = (id, v) => { const el = $(id); if (el) el.value = v ?? ''; };
+
+    // Prerrellena importes con los del camp seleccionado
+    function syncAmounts() {
+      const opt = $('nb-camp')?.selectedOptions[0];
+      if (!opt) return;
+      setVal('nb-deposit', Number(opt.dataset.deposit) || 0);
+      setVal('nb-total', Number(opt.dataset.price) || 0);
+    }
+    $('nb-camp')?.addEventListener('change', syncAmounts);
+    syncAmounts();
+
+    // Buscador de cliente existente → enlaza user_id y rellena los campos
+    let ctimer = null;
+    $('nb-client-search')?.addEventListener('input', () => {
+      clearTimeout(ctimer);
+      const term = $('nb-client-search').value.trim();
+      const box = $('nb-client-results');
+      if (term.length < 2) { box.style.display = 'none'; return; }
+      ctimer = setTimeout(async () => {
+        const res = await searchProfiles(term);
+        box.innerHTML = res.length
+          ? res.map(p => `<div class="nb-opt" data-id="${p.id}" data-name="${esc(p.full_name || '')}" data-lastname="${esc(p.last_name || '')}" data-phone="${esc(p.phone || '')}" data-email="${esc(p.email || '')}" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.88rem">${esc(p.full_name || 'Sin nombre')}${p.phone ? ` · <span style="color:#64748b">${esc(p.phone)}</span>` : ''}</div>`).join('')
+          : '<div style="padding:10px;color:#94a3b8;font-size:.85rem">Sin resultados</div>';
+        box.style.display = '';
+      }, 250);
+    });
+    $('nb-client-results')?.addEventListener('click', (e) => {
+      const opt = e.target.closest('.nb-opt');
+      if (!opt) return;
+      setVal('nb-user-id', opt.dataset.id);
+      setVal('nb-name', opt.dataset.name);
+      setVal('nb-lastname', opt.dataset.lastname);
+      setVal('nb-phone', opt.dataset.phone);
+      setVal('nb-email', opt.dataset.email);
+      $('nb-client-results').style.display = 'none';
+      $('nb-client-search').value = '';
+      const chip = $('nb-client-chip');
+      chip.innerHTML = `✓ Enlazado a <strong>${esc(opt.dataset.name)}</strong> — saldrá en su ficha. <button type="button" id="nb-client-clear" style="background:none;border:none;color:#065f46;text-decoration:underline;cursor:pointer;font-size:.85rem;padding:0;margin-left:6px">quitar</button>`;
+      chip.style.display = '';
+    });
+    $('nb-client-chip')?.addEventListener('click', (e) => {
+      if (e.target.id !== 'nb-client-clear') return;
+      setVal('nb-user-id', '');
+      $('nb-client-chip').style.display = 'none';
+      ['nb-name', 'nb-lastname', 'nb-phone', 'nb-email'].forEach(id => setVal(id, ''));
+    });
+
+    $('nb-save')?.addEventListener('click', async () => {
+      const campId = $('nb-camp')?.value;
+      if (!campId) { showToast('Selecciona un camp', 'error'); return; }
+      const fullName = [$('nb-name').value.trim(), $('nb-lastname').value.trim()].filter(Boolean).join(' ');
+      if (!fullName) { showToast('Indica el nombre del cliente', 'error'); return; }
+      const email = $('nb-email').value.trim();
+      const wantsEmail = $('nb-send-email').checked;
+      if (wantsEmail && !email) { showToast('Para enviar la confirmación necesitas el email del cliente', 'error'); return; }
+
+      const btn = $('nb-save');
+      btn.disabled = true; btn.textContent = 'Creando…';
+      try {
+        const booking = await createBooking({
+          camp_id: campId,
+          user_id: $('nb-user-id').value || null,
+          guest_name: fullName,
+          guest_email: email || null,
+          guest_phone: $('nb-phone').value.trim() || null,
+          deposit_amount: Number($('nb-deposit').value) || 0,
+          total_amount: Number($('nb-total').value) || 0,
+          status: $('nb-status').value,
+          notes: $('nb-notes').value.trim() || null,
+        });
+        if (wantsEmail && email) {
+          try {
+            await sendBookingConfirmationEmail({ to: email, customerName: fullName, booking });
+            showToast('Reserva creada y email enviado', 'success');
+          } catch (mailErr) {
+            showToast('Reserva creada, pero el email falló: ' + mailErr.message, 'error');
+          }
+        } else {
+          showToast('Reserva creada', 'success');
+        }
+        closeModal();
+        render();
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+        btn.disabled = false; btn.textContent = 'Crear reserva';
+      }
     });
   }
 
