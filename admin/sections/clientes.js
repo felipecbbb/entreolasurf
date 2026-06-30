@@ -1,7 +1,7 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending } from '../modules/api.js';
+import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles } from '../modules/api.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { getPackPrice, bonoExpected, classPrice } from '/lib/domain/pricing.js';
@@ -324,6 +324,7 @@ export async function renderClientes(container) {
         <input type="text" class="admin-search" id="clientes-search"
                placeholder="Buscar por nombre…" value="${searchTerm}" />
         <button class="btn red" id="new-client-btn">+ Nuevo Cliente</button>
+        <button class="btn" id="merge-clients-btn" style="background:#0ea5e9;color:#fff;border:0">Fusionar duplicados</button>
       </div>
       <div class="cli-filters">
         ${filterBtn('', 'Todos', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>')}
@@ -404,6 +405,7 @@ export async function renderClientes(container) {
 
     // New client
     container.querySelector('#new-client-btn').addEventListener('click', () => openNewClientModal());
+    container.querySelector('#merge-clients-btn')?.addEventListener('click', () => openMergeModal());
 
     // Family member tag click → open client detail then member ficha
     container.querySelectorAll('.cli-family-tag').forEach(tag => {
@@ -477,6 +479,60 @@ export async function renderClientes(container) {
   }
 
   // ===================== NEW CLIENT MODAL =====================
+  // Fusionar dos fichas duplicadas: una se queda (keep) y absorbe a la otra (drop).
+  function openMergeModal() {
+    const sel = { keep: null, drop: null };
+    openModal('Fusionar fichas duplicadas', `
+      <div class="trip-form">
+        <p style="font-size:.85rem;color:#64748b;margin:0 0 8px">Todo (reservas, bonos, clases, alquileres, familiares, pedidos) de la ficha duplicada se mueve a la ficha correcta, y la duplicada se elimina.</p>
+        <label>Ficha CORRECTA (se queda)</label>
+        <div style="position:relative"><input type="text" id="mg-keep" placeholder="Buscar cliente…" autocomplete="off" /><div id="mg-keep-res" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid #e2e8f0;border-radius:8px;max-height:180px;overflow:auto;box-shadow:0 8px 24px rgba(15,47,57,.12)"></div></div>
+        <div id="mg-keep-chip" style="display:none;margin:6px 0;font-size:.85rem;color:#065f46"></div>
+        <label style="margin-top:8px">Ficha DUPLICADA (se absorbe y borra)</label>
+        <div style="position:relative"><input type="text" id="mg-drop" placeholder="Buscar cliente…" autocomplete="off" /><div id="mg-drop-res" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid #e2e8f0;border-radius:8px;max-height:180px;overflow:auto;box-shadow:0 8px 24px rgba(15,47,57,.12)"></div></div>
+        <div id="mg-drop-chip" style="display:none;margin:6px 0;font-size:.85rem;color:#b91c1c"></div>
+        <button class="btn red" id="mg-go" style="margin-top:12px;width:100%">Fusionar</button>
+      </div>
+    `);
+    const wire = (key) => {
+      const input = document.getElementById(`mg-${key}`);
+      const res = document.getElementById(`mg-${key}-res`);
+      const chip = document.getElementById(`mg-${key}-chip`);
+      let t = null;
+      input.addEventListener('input', () => {
+        clearTimeout(t);
+        const term = input.value.trim();
+        if (term.length < 2) { res.style.display = 'none'; return; }
+        t = setTimeout(async () => {
+          const list = await searchProfiles(term);
+          res.innerHTML = list.length ? list.map(p => `<div class="mg-opt" data-id="${p.id}" data-name="${esc(p.full_name || '')}" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.86rem">${esc(p.full_name || 'Sin nombre')}${p.phone ? ` · <span style="color:#64748b">${esc(p.phone)}</span>` : ''}</div>`).join('') : '<div style="padding:9px;color:#94a3b8;font-size:.84rem">Sin resultados</div>';
+          res.style.display = '';
+        }, 250);
+      });
+      res.addEventListener('click', (e) => {
+        const opt = e.target.closest('.mg-opt'); if (!opt) return;
+        sel[key] = { id: opt.dataset.id, name: opt.dataset.name };
+        res.style.display = 'none'; input.value = '';
+        chip.textContent = `${key === 'keep' ? '✓ Se queda' : '🗑 Se borra'}: ${sel[key].name}`;
+        chip.style.display = '';
+      });
+    };
+    wire('keep'); wire('drop');
+    document.getElementById('mg-go').addEventListener('click', async () => {
+      if (!sel.keep || !sel.drop) { showToast('Elige las dos fichas', 'error'); return; }
+      if (sel.keep.id === sel.drop.id) { showToast('Son la misma ficha', 'error'); return; }
+      if (!confirm(`Fusionar: TODO lo de "${sel.drop.name}" pasará a "${sel.keep.name}" y se borrará la ficha duplicada. ¿Continuar?`)) return;
+      const btn = document.getElementById('mg-go'); btn.disabled = true; btn.textContent = 'Fusionando…';
+      try {
+        const moved = await mergeClients(sel.keep.id, sel.drop.id);
+        const n = Object.values(moved).reduce((s, v) => s + v, 0);
+        closeModal();
+        showToast(`Fusionado · ${n} registro(s) movido(s)`, 'success');
+        renderList();
+      } catch (err) { showToast('Error: ' + err.message, 'error'); btn.disabled = false; btn.textContent = 'Fusionar'; }
+    });
+  }
+
   function openNewClientModal() {
     const levelOpts = (sel = '') => `
       <option value="">Sin definir</option>

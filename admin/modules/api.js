@@ -218,6 +218,26 @@ export async function deleteReservationFully(entity, id) {
   if (error) throw error;
 }
 
+// Fusiona dos fichas de cliente duplicadas: reasigna TODO lo de `dropId` al `keepId`
+// (reservas, bonos, inscripciones, alquileres, familiares, pedidos) y borra la ficha
+// duplicada. Devuelve un resumen de lo movido. (La cuenta auth huérfana queda sin
+// ficha → invisible en el panel; su limpieza definitiva es aparte.)
+export async function mergeClients(keepId, dropId) {
+  if (!keepId || !dropId) throw new Error('Faltan fichas');
+  if (keepId === dropId) throw new Error('Son la misma ficha');
+  const tables = ['bookings', 'bonos', 'class_enrollments', 'equipment_reservations', 'family_members', 'orders'];
+  const moved = {};
+  for (const t of tables) {
+    const { data, error } = await supabase.from(t).update({ user_id: keepId }).eq('user_id', dropId).select('id');
+    if (error) throw new Error(`Al mover ${t}: ${error.message}`);
+    moved[t] = (data || []).length;
+  }
+  const { error: delErr } = await supabase.from('profiles').delete().eq('id', dropId);
+  if (delErr) throw new Error(`Datos movidos, pero no se pudo borrar la ficha duplicada: ${delErr.message}`);
+  invalidateCache('profiles'); invalidateCache('bookings');
+  return moved;
+}
+
 // ---- Papelera (soft-delete con restaurar) ----
 // Archiva una instantánea completa (fila + pagos + inscripciones) en deleted_items y
 // LUEGO borra de verdad. Restaurar reinserta todo. Soporta 'bono' y 'booking'.
