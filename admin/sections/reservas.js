@@ -1,7 +1,7 @@
 /* ============================================================
    Reservas Section — Camp bookings grouped by camp
    ============================================================ */
-import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully, createBooking, sendBookingConfirmationEmail, searchProfiles } from '../modules/api.js';
+import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully, createBooking, sendBookingConfirmationEmail, searchProfiles, moveToTrash } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { recalcPaidState } from '/lib/domain/payments.js';
@@ -149,10 +149,10 @@ export async function renderReservas(container) {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const name = btn.dataset.name;
-        if (!confirm(`¿Eliminar la reserva de ${name}? Se borrarán también todos sus pagos. No se puede deshacer.`)) return;
+        if (!confirm(`¿Enviar a la papelera la reserva de ${name}? Podrás restaurarla desde Papelera.`)) return;
         try {
-          await deleteReservationFully('booking', btn.dataset.id);
-          showToast('Reserva eliminada', 'success');
+          await moveToTrash('booking', btn.dataset.id, `Reserva camp · ${name}`);
+          showToast('Reserva enviada a la papelera', 'success');
           render();
         } catch (err) {
           showToast('Error: ' + err.message, 'error');
@@ -440,11 +440,11 @@ export async function renderReservas(container) {
     // Delete reserva desde la ficha
     overlay.querySelector('.rv-ficha-delete-btn')?.addEventListener('click', async () => {
       const name = booking.profiles?.full_name || 'esta reserva';
-      if (!confirm(`¿Eliminar la reserva de ${name}? Se borrarán también todos sus pagos. No se puede deshacer.`)) return;
+      if (!confirm(`¿Enviar a la papelera la reserva de ${name}? Podrás restaurarla desde Papelera.`)) return;
       try {
-        await deleteReservationFully('booking', booking.id);
+        await moveToTrash('booking', booking.id, `Reserva camp · ${name}`);
         closeFicha();
-        showToast('Reserva eliminada', 'success');
+        showToast('Reserva enviada a la papelera', 'success');
         render();
       } catch (err) {
         showToast('Error: ' + err.message, 'error');
