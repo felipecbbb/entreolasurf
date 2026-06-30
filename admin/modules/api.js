@@ -225,13 +225,22 @@ export async function deleteReservationFully(entity, id) {
 export async function mergeClients(keepId, dropId) {
   if (!keepId || !dropId) throw new Error('Faltan fichas');
   if (keepId === dropId) throw new Error('Son la misma ficha');
-  const tables = ['bookings', 'bonos', 'class_enrollments', 'equipment_reservations', 'family_members', 'orders'];
+  // TODAS las tablas con user_id que referencian a un cliente (incluidas las legacy
+  // class_bookings/equipment_rentals que tienen ON DELETE CASCADE → si NO se reasignan,
+  // el DELETE del perfil las borraría). Se reasignan ANTES de borrar para no perder datos.
+  const tables = ['bookings', 'class_bookings', 'equipment_rentals', 'equipment_reservations', 'bonos', 'class_enrollments', 'family_members', 'orders'];
   const moved = {};
+  const missing = (msg) => /does not exist|relation .* does not exist|could not find/i.test(msg || '');
   for (const t of tables) {
-    const { data, error } = await supabase.from(t).update({ user_id: keepId }).eq('user_id', dropId).select('id');
-    if (error) throw new Error(`Al mover ${t}: ${error.message}`);
-    moved[t] = (data || []).length;
+    try {
+      const { data, error } = await supabase.from(t).update({ user_id: keepId }).eq('user_id', dropId).select('id');
+      if (error) { if (missing(error.message)) continue; throw new Error(`Al mover ${t}: ${error.message}`); }
+      if ((data || []).length) moved[t] = data.length;
+    } catch (e) { if (missing(e.message)) continue; throw e; }
   }
+  // Pagos 'custom' (deuda manual): reference_id = user_id (no es FK → quedarían huérfanos).
+  try { await supabase.from('payments').update({ reference_id: keepId }).eq('reservation_type', 'custom').eq('reference_id', dropId); } catch {}
+  // Borra la ficha duplicada (ya no le cuelga nada → el cascade no borra datos reales).
   const { error: delErr } = await supabase.from('profiles').delete().eq('id', dropId);
   if (delErr) throw new Error(`Datos movidos, pero no se pudo borrar la ficha duplicada: ${delErr.message}`);
   invalidateCache('profiles'); invalidateCache('bookings');

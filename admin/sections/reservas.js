@@ -6,6 +6,7 @@ import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToa
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { recalcPaidState } from '/lib/domain/payments.js';
 import { supabase } from '/lib/supabase.js';
+import { attachClientSuggest } from '../modules/client-suggest.js';
 
 const STATUSES = ['pending', 'deposit_paid', 'fully_paid', 'cancelled', 'refunded'];
 const STATUS_LABELS = {
@@ -800,6 +801,19 @@ export async function renderReservas(container) {
       $('nb-client-chip').style.display = 'none';
       ['nb-name', 'nb-lastname', 'nb-phone', 'nb-email'].forEach(id => setVal(id, ''));
     });
+    // Autocompletado de fichas en los campos de nombre/email (vincula y no duplica)
+    const nbLink = (it) => {
+      setVal('nb-user-id', it.id);
+      setVal('nb-name', it.full_name);
+      setVal('nb-lastname', it.last_name);
+      setVal('nb-phone', it.phone);
+      setVal('nb-email', it.email);
+      const chip = $('nb-client-chip');
+      chip.innerHTML = `✓ Enlazado a <strong>${esc(it.label || it.full_name)}</strong> — saldrá en su ficha. <button type="button" id="nb-client-clear" style="background:none;border:none;color:#065f46;text-decoration:underline;cursor:pointer;font-size:.85rem;padding:0;margin-left:6px">quitar</button>`;
+      chip.style.display = '';
+    };
+    attachClientSuggest($('nb-name'), { onPick: nbLink });
+    attachClientSuggest($('nb-email'), { onPick: nbLink, includeFamily: false });
 
     $('nb-save')?.addEventListener('click', async () => {
       const campId = $('nb-camp')?.value;

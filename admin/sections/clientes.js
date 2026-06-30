@@ -2,6 +2,7 @@
    Clientes Section — Client list + detail ficha
    ============================================================ */
 import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles } from '../modules/api.js';
+import { attachClientSuggest } from '../modules/client-suggest.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
 import { getPackPrice, bonoExpected, classPrice } from '/lib/domain/pricing.js';
@@ -619,6 +620,19 @@ export async function renderClientes(container) {
     const injurySel = document.getElementById('ncl-injury');
     injurySel.addEventListener('change', () => {
       document.getElementById('ncl-injury-wrap').style.display = injurySel.value === 'true' ? '' : 'none';
+    });
+
+    // Autocompletado: si ya existe una ficha con ese nombre, avisa y ofrece abrirla
+    // (en vez de crear un duplicado).
+    attachClientSuggest(document.querySelector('#new-client-form [name="full_name"]'), {
+      onPick: (it) => {
+        if (it.type === 'family') { showToast(`Ya existe "${it.label}" como familiar de ${it.parentName}`, 'info'); return; }
+        if (confirm(`Ya existe una ficha de "${it.label}". ¿Abrir su ficha en vez de crear una nueva?`)) {
+          const client = profiles.find(p => p.id === it.id);
+          closeModal();
+          if (client) { selectedClient = client; renderDetail(); }
+        }
+      },
     });
 
     document.getElementById('new-client-form').addEventListener('submit', async (e) => {
