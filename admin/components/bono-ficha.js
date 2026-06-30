@@ -381,6 +381,17 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     try {
       const { error } = await supabase.from('class_enrollments').insert(enrollData);
       if (error) throw error;
+      // Aviso de confirmación al cliente (fire-and-forget; no bloquea la asignación)
+      (async () => {
+        try {
+          let email = null;
+          if (bono.user_id) { const { data } = await supabase.rpc('get_user_email', { p_user_id: bono.user_id }); email = data || null; }
+          if (email && cls) {
+            const fmtD = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }); } catch { return d || ''; } };
+            await supabase.functions.invoke('send-email', { body: { to: email, type: 'class_booked', data: { customerName: cliName || '', className: cls.title || cls.type || 'Clase', classDate: fmtD(cls.date), classTime: (cls.time_start || '').slice(0, 5), instructor: cls.instructor || '' } } });
+          }
+        } catch {}
+      })();
       showToast('Clase asignada · crédito gastado', 'success');
       await reload();
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
