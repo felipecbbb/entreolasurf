@@ -2987,7 +2987,32 @@ export async function renderCalendario(container) {
               const deficit = Math.max(0, need - avail);
               const rawDeficit = deficit > 0 ? getPackPrice(cls.type, deficit, Number(cls.price) || 0) : 0;
               const charge = Math.round(rawDeficit * (1 - discRate) * 100) / 100;
-              ownerInfo[ownerId] = { bono, need, deficit, charge };
+
+              // UPGRADE clase suelta → bono: si NO tiene bono de este tipo pero SÍ clases
+              // sueltas pagadas del mismo tipo, se ofrecen para incluirlas en el bono nuevo
+              // (cuentan como usadas) descontando lo ya pagado. Ej: pagó 1 clase 35€ y hace
+              // bono de 4 (115€) → se cobra 115−35 = 80€.
+              let absorb = null, finalCharge = charge, finalTotalCredits = deficit, finalExpected = charge;
+              if (!bono && deficit > 0) {
+                try {
+                  const { data: priors } = await supabase.from('class_enrollments')
+                    .select('id, surf_classes:class_id(type)')
+                    .eq('user_id', ownerId).is('bono_id', null).neq('status', 'cancelled');
+                  const ids = (priors || []).filter(e => e.surf_classes?.type === cls.type).map(e => e.id);
+                  if (ids.length) {
+                    const { data: pays } = await supabase.from('payments').select('amount').eq('reservation_type', 'enrollment').in('reference_id', ids);
+                    const priorPaid = round2((pays || []).reduce((s, p) => s + Number(p.amount || 0), 0));
+                    const lbl = TYPE_LABELS[cls.type] || cls.type;
+                    if (confirm(`Este cliente ya tiene ${ids.length} clase(s) de ${lbl} fuera de bono (pagadas: ${priorPaid}€).\n\n¿Incluirlas en el bono nuevo (cuentan como usadas) y descontar lo ya pagado?`)) {
+                      finalTotalCredits = deficit + ids.length;
+                      finalExpected = round2(getPackPrice(cls.type, finalTotalCredits, Number(cls.price) || 0) * (1 - discRate));
+                      finalCharge = Math.max(0, round2(finalExpected - priorPaid));
+                      absorb = { ids, priorPaid };
+                    }
+                  }
+                } catch (e) { console.warn('upgrade detect', e.message); }
+              }
+              ownerInfo[ownerId] = { bono, need, deficit, charge: finalCharge, absorb, finalTotalCredits, finalExpected };
             }
 
             // 3) Anticipo cobrado (no supera el cargo total)
@@ -3011,7 +3036,8 @@ export async function renderCalendario(container) {
             const bonoByOwner = {}; // userId → { id, status }
             for (let oi = 0; oi < ownerIds.length; oi++) {
               const ownerId = ownerIds[oi];
-              const { bono, deficit, charge } = ownerInfo[ownerId];
+              const info = ownerInfo[ownerId];
+              const { bono, deficit, charge, absorb } = info;
               const ownerAnticipo = anticipoByOwner[ownerId] || 0;
 
               let bId = bono?.id || null;
@@ -3022,6 +3048,15 @@ export async function renderCalendario(container) {
                 if (deficit > 0) {
                   await extendBono(bId, { newTotalCredits: (bono.total_credits || 0) + deficit, newCustomTotal: finalExpected });
                 }
+              } else if (absorb) {
+                // Bono nuevo absorbiendo clases sueltas pagadas: total = nuevas + absorbidas;
+                // expected = precio del pack completo; las clases y SUS pagos pasan al bono.
+                finalExpected = info.finalExpected;
+                bId = await createBono({ user_id: ownerId, class_type: cls.type, total_credits: info.finalTotalCredits, custom_total: finalExpected });
+                try {
+                  await supabase.from('payments').update({ reservation_type: 'bono', reference_id: bId }).eq('reservation_type', 'enrollment').in('reference_id', absorb.ids);
+                  await supabase.from('class_enrollments').update({ bono_id: bId }).in('id', absorb.ids);
+                } catch (e) { console.warn('absorb upgrade', e.message); }
               } else {
                 finalExpected = charge;
                 bId = await createBono({ user_id: ownerId, class_type: cls.type, total_credits: deficit, custom_total: charge });
