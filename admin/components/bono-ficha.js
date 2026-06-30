@@ -14,7 +14,7 @@
 import { supabase } from '/lib/supabase.js';
 import { showToast, formatDate, formatCurrency, statusBadge } from '../modules/ui.js';
 import { TYPE_LABELS } from '../modules/constants.js';
-import { createPayment, deletePayment, fetchPayments, deleteReservationFully } from '../modules/api.js';
+import { createPayment, deletePayment, fetchPayments, moveToTrash } from '../modules/api.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { bonoExpected, getPackPrice, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
@@ -574,10 +574,10 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     const warn = used > 0
       ? `Este bono tiene ${used} clase(s) ya asignada(s); se cancelarán al borrarlo. `
       : '';
-    if (!confirm(`¿Eliminar el bono de ${typeLbl}? ${warn}Se borrarán también sus pagos. No se puede deshacer.`)) return;
+    if (!confirm(`¿Enviar a la papelera el bono de ${typeLbl}? ${warn}Podrás restaurarlo desde Papelera.`)) return;
     try {
-      await deleteReservationFully('bono', bonoId);
-      showToast('Bono eliminado', 'success');
+      await moveToTrash('bono', bonoId, `Bono ${typeLbl} · ${cliName}`);
+      showToast('Bono enviado a la papelera', 'success');
       close();
       if (onChange) await onChange();
     } catch (err) { showToast('Error: ' + err.message, 'error'); }

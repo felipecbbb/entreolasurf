@@ -218,6 +218,60 @@ export async function deleteReservationFully(entity, id) {
   if (error) throw error;
 }
 
+// ---- Papelera (soft-delete con restaurar) ----
+// Archiva una instantánea completa (fila + pagos + inscripciones) en deleted_items y
+// LUEGO borra de verdad. Restaurar reinserta todo. Soporta 'bono' y 'booking'.
+export async function moveToTrash(entityType, id, label) {
+  const snapshot = {};
+  if (entityType === 'bono') {
+    const { data: row } = await supabase.from('bonos').select('*').eq('id', id).single();
+    const { data: enrolls } = await supabase.from('class_enrollments').select('*').eq('bono_id', id);
+    const eids = (enrolls || []).map(e => e.id);
+    const { data: bonoPays } = await supabase.from('payments').select('*').eq('reservation_type', 'bono').eq('reference_id', id);
+    let enrollPays = [];
+    if (eids.length) { const { data } = await supabase.from('payments').select('*').eq('reservation_type', 'enrollment').in('reference_id', eids); enrollPays = data || []; }
+    snapshot.row = row; snapshot.enrollments = enrolls || []; snapshot.payments = [...(bonoPays || []), ...enrollPays];
+  } else if (entityType === 'booking') {
+    const { data: row } = await supabase.from('bookings').select('*').eq('id', id).single();
+    const { data: pays } = await supabase.from('payments').select('*').eq('reservation_type', 'booking').eq('reference_id', id);
+    snapshot.row = row; snapshot.payments = pays || [];
+  } else {
+    throw new Error(`Papelera no soporta: ${entityType}`);
+  }
+  if (!snapshot.row) throw new Error('No se encontró el elemento a eliminar');
+  const { error: insErr } = await supabase.from('deleted_items').insert({ entity_type: entityType, entity_id: id, label: label || null, snapshot });
+  if (insErr) throw insErr;
+  await deleteReservationFully(entityType, id);
+  invalidateCache('bookings');
+}
+
+export async function fetchTrash({ includeRestored = false } = {}) {
+  let q = supabase.from('deleted_items').select('*').order('deleted_at', { ascending: false });
+  if (!includeRestored) q = q.is('restored_at', null);
+  const { data, error } = await q;
+  if (error) { console.warn('fetchTrash:', error.message); return []; }
+  return data || [];
+}
+
+export async function restoreFromTrash(trashId) {
+  const { data: item, error } = await supabase.from('deleted_items').select('*').eq('id', trashId).single();
+  if (error || !item) throw new Error('No se encontró el elemento en la papelera');
+  if (item.restored_at) throw new Error('Este elemento ya fue restaurado');
+  const snap = item.snapshot || {};
+  if (item.entity_type === 'bono') {
+    if (snap.row) { const { error: e } = await supabase.from('bonos').insert(snap.row); if (e) throw e; }
+    if (snap.enrollments?.length) await supabase.from('class_enrollments').insert(snap.enrollments);
+    if (snap.payments?.length) await supabase.from('payments').insert(snap.payments);
+  } else if (item.entity_type === 'booking') {
+    if (snap.row) { const { error: e } = await supabase.from('bookings').insert(snap.row); if (e) throw e; }
+    if (snap.payments?.length) await supabase.from('payments').insert(snap.payments);
+  } else {
+    throw new Error(`Papelera no soporta restaurar: ${item.entity_type}`);
+  }
+  await supabase.from('deleted_items').update({ restored_at: new Date().toISOString() }).eq('id', trashId);
+  invalidateCache('bookings');
+}
+
 // ---- Pagos con filtros (channel, método, tipo, rango) ----
 export async function fetchPaymentsFiltered({ dateFrom, dateTo, channel, paymentMethod, reservationType } = {}) {
   let q = supabase.from('payments')
