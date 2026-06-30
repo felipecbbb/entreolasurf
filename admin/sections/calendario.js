@@ -6204,6 +6204,46 @@ export async function renderCalendario(container) {
     });
 
     // Rental reservation form submit
+    // Valida el stock de TODOS los materiales del carrito en sus fechas. Stock total =
+    // unidades físicas del inventario si las hay; si no, el campo 'stock' del catálogo
+    // (gestión por cantidad). Devuelve {ok} o {ok:false, message} con el material que falta.
+    const datesOverlap = (a, b) => a.date_start <= (b.date_end || b.date_start) && b.date_start <= (a.date_end || a.date_start);
+    async function checkRentalStock(lines) {
+      const byEq = {};
+      for (const ln of lines) (byEq[ln.equipment_id] ||= []).push(ln);
+      for (const eqId of Object.keys(byEq)) {
+        const eq = equipmentMap[eqId];
+        const eqLines = byEq[eqId];
+        // Stock total del material
+        let usable = 0;
+        try {
+          const { data: units } = await supabase.from('inventory_units').select('id,estado').eq('equipment_id', eqId);
+          usable = (units || []).filter(u => !['reparacion', 'perdido', 'baja'].includes(u.estado)).length;
+        } catch {}
+        const totalStock = usable > 0 ? usable : (Number(eq?.stock) || 0);
+        for (const ln of eqLines) {
+          let reservedDb = 0;
+          try {
+            const { data: busy } = await supabase.from('equipment_reservations')
+              .select('quantity,date_start,date_end')
+              .eq('equipment_id', eqId)
+              .in('status', ['pending', 'confirmed', 'active'])
+              .lte('date_start', ln.date_end)
+              .gte('date_end', ln.date_start);
+            reservedDb = (busy || []).reduce((s, b) => s + (Number(b.quantity) || 1), 0);
+          } catch {}
+          // Otras líneas del MISMO material en el carrito que solapan en fecha
+          const cartOther = eqLines.filter(o => o !== ln && datesOverlap(o, ln)).reduce((s, o) => s + (o.quantity || 1), 0);
+          const need = (ln.quantity || 1) + cartOther;
+          if (reservedDb + need > totalStock) {
+            const libres = Math.max(0, totalStock - reservedDb);
+            return { ok: false, message: `Sin stock de ${eq?.name || 'material'}: ${libres} libre(s) en esas fechas y pides ${need}.` };
+          }
+        }
+      }
+      return { ok: true };
+    }
+
     document.getElementById('new-rental-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
@@ -6217,6 +6257,14 @@ export async function renderCalendario(container) {
 
       const submitBtn = document.getElementById('ns-submit') || e.target.querySelector('button[type="submit"]');
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creando reserva…'; }
+
+      // Bloqueo por stock: si algún material no tiene disponibilidad en sus fechas, no crea.
+      const stockCheck = await checkRentalStock(lines);
+      if (!stockCheck.ok) {
+        showToast(stockCheck.message, 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Crear reserva de material'; }
+        return;
+      }
 
       // Datos de cliente compartidos por todas las líneas
       const extraData = {};
