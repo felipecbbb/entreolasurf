@@ -1049,10 +1049,14 @@ export async function renderClientes(container) {
     const isEdit = !!member;
     openModal(isEdit ? 'Editar miembro' : 'Añadir miembro familiar', `
       <form id="family-member-form" class="fm-modal-form">
-        <div class="cli-form-row" style="grid-template-columns:1fr">
+        <div class="cli-form-row">
           <div class="act-form-field">
-            <label class="act-form-label">Nombre completo</label>
-            <input type="text" class="act-form-input" name="full_name" value="${esc(member?.full_name)}" placeholder="Nombre y apellidos" required />
+            <label class="act-form-label">Nombre</label>
+            <input type="text" class="act-form-input" name="full_name" value="${esc(member?.full_name)}" placeholder="Nombre" required />
+          </div>
+          <div class="act-form-field">
+            <label class="act-form-label">Apellidos</label>
+            <input type="text" class="act-form-input" name="last_name" value="${esc(member?.last_name || '')}" placeholder="Apellidos" />
           </div>
         </div>
         <div class="cli-form-row">
@@ -1120,6 +1124,7 @@ export async function renderClientes(container) {
       e.preventDefault();
       const fd = new FormData(e.target);
       const fields = Object.fromEntries(fd);
+      if (!fields.last_name?.trim()) fields.last_name = null;
       if (!fields.birth_date) fields.birth_date = null;
       if (!fields.level) fields.level = null;
       if (!fields.notes) fields.notes = null;
@@ -1307,7 +1312,7 @@ export async function renderClientes(container) {
     el.querySelector('#member-save')?.addEventListener('click', async () => {
       const fields = {
         full_name: el.querySelector('#mf-fullname')?.value?.trim() || member.full_name,
-        last_name: el.querySelector('#mf-lastname')?.value?.trim() || '',
+        last_name: el.querySelector('#mf-lastname')?.value?.trim() || null,
         birth_date: el.querySelector('#mf-birthdate')?.value || null,
         level: el.querySelector('#mf-level')?.value || null,
         can_swim: el.querySelector('#mf-swim')?.value === 'true' ? true : el.querySelector('#mf-swim')?.value === 'false' ? false : null,

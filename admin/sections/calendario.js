@@ -31,6 +31,16 @@ function normSize(s) {
   return String(s == null ? '' : s).trim().toLowerCase().replace(/\s*años?$/, '');
 }
 
+// Normaliza un nombre para comparar y deduplicar: minúsculas, sin tildes, sin espacios
+// repetidos. Así "María  Martín" ≡ "maria martin" → no se crean familiares/clientes duplicados.
+function normName(s) {
+  return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+}
+// Normaliza un teléfono a solo dígitos (para deduplicar por teléfono).
+function normPhone(s) {
+  return String(s == null ? '' : s).replace(/\D/g, '');
+}
+
 // Duración por tipo (min) — la hora de fin se calcula sola desde inicio + duración.
 const TYPE_DURATIONS = { grupal: 90, individual: 90, paddle: 90, surfskate: 90, yoga: 60 };
 function addMinutesToTime(hhmm, mins) {
@@ -1788,9 +1798,9 @@ export async function renderCalendario(container) {
             <div class="bk-person-header">
               <span class="bk-person-number">Persona ${idx + 1}</span>
               <div class="bk-person-header-actions">
-                ${extendMode ? '' : `<button class="bk-link-client-btn" data-pid="${p.id}" title="Vincular cliente existente">
+                <button class="bk-link-client-btn" data-pid="${p.id}" title="${extendMode ? 'Elegir familiar del titular o cliente existente' : 'Vincular cliente existente'}">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-                </button>`}
+                </button>
                 <button class="bk-remove-person-btn" data-pid="${p.id}" title="Eliminar persona">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                 </button>
@@ -2839,6 +2849,16 @@ export async function renderCalendario(container) {
                 if (rows?.[0]) { responsableId = rows[0].id; showToast('Usuario existente: se vincula la reserva a su ficha (no se envía correo)', 'info'); }
               } catch {}
             }
+            // Red de seguridad anti-duplicados: si no se encontró por email, busca por teléfono
+            // (un mismo cliente registrado antes con otro/sin email no debe duplicarse).
+            const respPhone = normPhone(contactData.telefono);
+            if (!responsableId && respPhone.length >= 6) {
+              try {
+                const { data: rows } = await supabase.from('profiles').select('id, phone');
+                const hit = (rows || []).find(r => normPhone(r.phone) === respPhone);
+                if (hit) { responsableId = hit.id; showToast('Cliente existente por teléfono: se vincula a su ficha', 'info'); }
+              } catch {}
+            }
             if (!responsableId && respEmail) {
               try {
                 const nc = await createClientFromAdmin({
@@ -2871,7 +2891,8 @@ export async function renderCalendario(container) {
               if (!responsableId || !fullName) return null;
               try {
                 const { data: existing } = await supabase.from('family_members').select('id, full_name, last_name').eq('user_id', responsableId);
-                const match = (existing || []).find(m => `${m.full_name || ''} ${m.last_name || ''}`.trim().toLowerCase() === fullName.toLowerCase());
+                const target = normName(fullName);
+                const match = (existing || []).find(m => normName(`${m.full_name || ''} ${m.last_name || ''}`) === target);
                 if (match) return match.id;
                 const { data: created } = await supabase.from('family_members').insert({
                   user_id: responsableId,
@@ -3155,6 +3176,60 @@ export async function renderCalendario(container) {
       const input = searchOverlay.querySelector('.bk-search-input');
       const resultsEl = searchOverlay.querySelector('.bk-search-results');
 
+      // Pinta una lista de clientes (+ sus familiares) y cablea el clic para vincular
+      // SIN crear duplicados (se guarda profileId/familyMemberId del existente).
+      function paintResults(allProfiles, familyMap) {
+        if (!allProfiles.length) { resultsEl.innerHTML = '<p class="bk-search-hint">No se encontraron clientes</p>'; return; }
+        resultsEl.innerHTML = allProfiles.map(pr => {
+          const members = familyMap[pr.id] || [];
+          let html = `
+            <button class="bk-search-result" data-id="${pr.id}" data-name="${pr.full_name || ''}" data-type="profile">
+              <div><strong>${pr.full_name || 'Sin nombre'}</strong><small style="color:#888;display:block">${pr.phone ? pr.phone : ''}</small></div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
+            </button>`;
+          if (members.length) {
+            html += members.map(m => {
+              const age = m.birth_date ? new Date().getFullYear() - new Date(m.birth_date).getFullYear() : null;
+              return `
+                <button class="bk-search-result" data-id="${pr.id}" data-name="${m.full_name}" data-family-id="${m.id}" data-type="family" style="padding-left:36px;border-left:3px solid #0ea5e9">
+                  <div><small style="color:#0ea5e9;font-weight:600">↳ Familiar de ${pr.full_name || 'cuenta'}</small><strong style="display:block">${m.full_name}</strong>${age ? `<small style="color:#888">${age} años</small>` : ''}</div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
+                </button>`;
+            }).join('');
+          }
+          return html;
+        }).join('');
+        resultsEl.querySelectorAll('.bk-search-result').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const p = persons.find(p => String(p.id) === pid);
+            if (p) {
+              p.profileId = btn.dataset.id;
+              p.profileName = btn.dataset.name;
+              p.familyMemberId = btn.dataset.familyId || null;
+              p.nombre = '';
+              p.apellidos = '';
+            }
+            searchOverlay.remove();
+            renderPanel();
+          });
+        });
+      }
+
+      // En modo "ampliar": pre-carga los familiares del titular del bono para elegirlos
+      // directamente (sin teclear → sin duplicar "2 Borjas").
+      const titularId = extendMode ? (prefill?.profileId || null) : null;
+      if (titularId) {
+        (async () => {
+          try {
+            const [{ data: prof }, { data: members }] = await Promise.all([
+              supabase.from('profiles').select('id, full_name, phone').eq('id', titularId).single(),
+              supabase.from('family_members').select('id, full_name, birth_date').eq('user_id', titularId).order('created_at'),
+            ]);
+            if (prof) paintResults([prof], { [titularId]: members || [] });
+          } catch {}
+        })();
+      }
+
       let debounce = null;
       input.addEventListener('input', () => {
         clearTimeout(debounce);
@@ -3209,52 +3284,7 @@ export async function renderCalendario(container) {
               }
             }
 
-            if (!allProfiles.length) {
-              resultsEl.innerHTML = '<p class="bk-search-hint">No se encontraron clientes</p>';
-              return;
-            }
-
-            resultsEl.innerHTML = allProfiles.map(pr => {
-              const members = familyMap[pr.id] || [];
-              let html = `
-              <button class="bk-search-result" data-id="${pr.id}" data-name="${pr.full_name || ''}" data-type="profile">
-                <div>
-                  <strong>${pr.full_name || 'Sin nombre'}</strong>
-                  <small style="color:#888;display:block">${pr.phone ? pr.phone : ''}</small>
-                </div>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
-              </button>`;
-              if (members.length) {
-                html += members.map(m => {
-                  const age = m.birth_date ? new Date().getFullYear() - new Date(m.birth_date).getFullYear() : null;
-                  return `
-                  <button class="bk-search-result" data-id="${pr.id}" data-name="${m.full_name}" data-family-id="${m.id}" data-type="family" style="padding-left:36px;border-left:3px solid #0ea5e9">
-                    <div>
-                      <small style="color:#0ea5e9;font-weight:600">↳ Familiar de ${pr.full_name || 'cuenta'}</small>
-                      <strong style="display:block">${m.full_name}</strong>
-                      ${age ? `<small style="color:#888">${age} años</small>` : ''}
-                    </div>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
-                  </button>`;
-                }).join('');
-              }
-              return html;
-            }).join('');
-
-            resultsEl.querySelectorAll('.bk-search-result').forEach(btn => {
-              btn.addEventListener('click', () => {
-                const p = persons.find(p => String(p.id) === pid);
-                if (p) {
-                  p.profileId = btn.dataset.id;
-                  p.profileName = btn.dataset.name;
-                  p.familyMemberId = btn.dataset.familyId || null;
-                  p.nombre = '';
-                  p.apellidos = '';
-                }
-                searchOverlay.remove();
-                renderPanel();
-              });
-            });
+            paintResults(allProfiles, familyMap);
           } catch (err) {
             resultsEl.innerHTML = `<p class="bk-search-hint" style="color:#b91c1c">Error: ${err.message}</p>`;
           }
