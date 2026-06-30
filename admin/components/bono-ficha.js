@@ -14,7 +14,7 @@
 import { supabase } from '/lib/supabase.js';
 import { showToast, formatDate, formatCurrency, statusBadge } from '../modules/ui.js';
 import { TYPE_LABELS } from '../modules/constants.js';
-import { createPayment, deletePayment, fetchPayments } from '../modules/api.js';
+import { createPayment, deletePayment, fetchPayments, deleteReservationFully } from '../modules/api.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { bonoExpected, getPackPrice, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
@@ -243,6 +243,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
             <button class="bf-act" id="bf-extend-assign">Ampliar y asignar ahora</button>
             <button class="bf-act" data-form="extend">Solo sumar créditos</button>
             <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
+            <button class="bf-act" id="bf-delete" style="margin-left:auto;color:#b91c1c;border-color:#fecaca">Eliminar bono</button>
           </div>
 
           ${canAssign ? `
@@ -479,6 +480,22 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
       close();
       if (onChange) await onChange();
       if (newId) await openBonoFicha(newId, { onChange });
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+  });
+
+  // Eliminar bono completo: borra el bono, sus pagos y (por FK on delete cascade) sus
+  // inscripciones; los triggers recalculan el aforo de cada clase afectada.
+  overlay.querySelector('#bf-delete')?.addEventListener('click', async () => {
+    const used = bono.used_credits || 0;
+    const warn = used > 0
+      ? `Este bono tiene ${used} clase(s) ya asignada(s); se cancelarán al borrarlo. `
+      : '';
+    if (!confirm(`¿Eliminar el bono de ${typeLbl}? ${warn}Se borrarán también sus pagos. No se puede deshacer.`)) return;
+    try {
+      await deleteReservationFully('bono', bonoId);
+      showToast('Bono eliminado', 'success');
+      close();
+      if (onChange) await onChange();
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
   });
 

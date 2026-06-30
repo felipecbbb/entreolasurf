@@ -193,14 +193,27 @@ export async function deleteReservationFully(entity, id) {
   if (!table) throw new Error(`Entidad desconocida: ${entity}`);
 
   // 1) borrar payments asociados (no hay FK, hay que hacerlo a mano)
-  const types = ENTITY_PAYMENT_TYPE[entity];
-  if (Array.isArray(types)) {
-    await supabase.from('payments').delete().in('reservation_type', types).eq('reference_id', id);
+  if (entity === 'bono') {
+    // Pagos del propio bono (reservation_type='bono', reference_id=bono_id)
+    await supabase.from('payments').delete().eq('reservation_type', 'bono').eq('reference_id', id);
+    // Pagos de inscripción de este bono: su reference_id es el enrollment_id (no el bono_id),
+    // así que hay que resolver los enrollment_id ANTES de que el ON DELETE CASCADE borre las
+    // inscripciones; si no, esos pagos quedarían huérfanos.
+    const { data: enrolls } = await supabase.from('class_enrollments').select('id').eq('bono_id', id);
+    const eids = (enrolls || []).map(e => e.id);
+    if (eids.length) {
+      await supabase.from('payments').delete().eq('reservation_type', 'enrollment').in('reference_id', eids);
+    }
   } else {
-    await supabase.from('payments').delete().eq('reservation_type', types).eq('reference_id', id);
+    const types = ENTITY_PAYMENT_TYPE[entity];
+    if (Array.isArray(types)) {
+      await supabase.from('payments').delete().in('reservation_type', types).eq('reference_id', id);
+    } else {
+      await supabase.from('payments').delete().eq('reservation_type', types).eq('reference_id', id);
+    }
   }
 
-  // 2) borrar la reserva en sí
+  // 2) borrar la reserva en sí (las inscripciones del bono caen por FK on delete cascade)
   const { error } = await supabase.from(table).delete().eq('id', id);
   if (error) throw error;
 }
@@ -624,6 +637,43 @@ export async function updateBookingStatus(id, status) {
   invalidateCache('bookings');
 }
 
+// Alta manual de una reserva de camp desde el admin. La tabla bookings admite
+// invitados (user_id nullable + guest_name/guest_email/guest_phone, ver
+// migration-guest-checkout). El trigger on_booking_status_change ajusta spots_taken
+// según el status, así que NO hay que tocar spots_taken a mano.
+export async function createBooking(payload) {
+  const { data, error } = await supabase
+    .from('bookings')
+    .insert(payload)
+    .select('*, surf_camps:camp_id(id, title, slug, date_start, date_end)')
+    .single();
+  if (error) throw error;
+  invalidateCache('bookings');
+  invalidateCache('camps'); // spots_taken pudo cambiar por el trigger
+  return data;
+}
+
+// Envía el email de confirmación de reserva de camp (reusa la edge function
+// send-email, tipo 'camp'). `to` es el correo del cliente (manual o de su perfil).
+export async function sendBookingConfirmationEmail({ to, customerName, booking }) {
+  if (!to) throw new Error('No hay email del cliente al que enviar la confirmación');
+  const total = Number(booking.total_amount || 0);
+  const campTitle = booking.surf_camps?.title || 'Surf Camp';
+  const { error } = await supabase.functions.invoke('send-email', {
+    body: {
+      to,
+      type: 'camp',
+      data: {
+        customerName: customerName || '',
+        orderId: booking.id,
+        items: [{ name: campTitle, quantity: 1, price: total }],
+        total,
+      },
+    },
+  });
+  if (error) throw error;
+}
+
 // ---- Surf Camps ----
 export const fetchCamps = cached('camps', 30000, async () => {
   const { data, error } = await supabase
@@ -1038,8 +1088,8 @@ export async function searchProfiles(term) {
   if (!safeTerm.trim()) return [];
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, phone')
-    .or(`full_name.ilike.%${safeTerm}%,phone.ilike.%${safeTerm}%`)
+    .select('id, full_name, last_name, phone, email')
+    .or(`full_name.ilike.%${safeTerm}%,phone.ilike.%${safeTerm}%,email.ilike.%${safeTerm}%`)
     .limit(10);
   if (error) { console.warn('searchProfiles:', error.message); return []; }
   return data || [];

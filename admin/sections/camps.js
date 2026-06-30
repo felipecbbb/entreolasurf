@@ -14,6 +14,35 @@ const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 const STATUSES = ['open', 'full', 'closed', 'coming_soon'];
 const STATUS_LABELS = { open: 'Abierto', full: 'Completo', closed: 'Cerrado', coming_soon: 'Proximamente' };
 
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function slugify(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+// Parte descriptiva del título (marca/sitio): quita "surf camp", números, meses y conectores.
+function campDescriptor(title) {
+  const stop = new Set(['surf', 'camp', 'de', 'del', 'la', 'el', 'los', 'las', 'y', 'x', ...MESES]);
+  return slugify(title).split('-').filter(t => t && !stop.has(t) && !/^\d+$/.test(t)).join('-');
+}
+// Slug derivado de las FECHAS (+ descriptor del título): así la URL siempre refleja
+// las fechas reales del camp. Ej: surf-camp-9-13-septiembre-sambatrips.
+function buildCampSlug(title, dateStart, dateEnd) {
+  if (!dateStart) return slugify(title);
+  const a = new Date(dateStart + 'T00:00:00');
+  const b = new Date((dateEnd || dateStart) + 'T00:00:00');
+  const seg = a.getMonth() === b.getMonth()
+    ? `${a.getDate()}-${b.getDate()}-${MESES[a.getMonth()]}`
+    : `${a.getDate()}-${MESES[a.getMonth()]}-${b.getDate()}-${MESES[b.getMonth()]}`;
+  return ['surf-camp', seg, campDescriptor(title)].filter(Boolean).join('-');
+}
+// Garantiza unicidad frente a los demás camps (añade -2, -3… si colisiona).
+function uniqueCampSlug(base, camps, excludeId) {
+  const taken = new Set(camps.filter(c => c.id !== excludeId).map(c => c.slug));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
 function fmtDate(d) {
   if (!d) return '';
   return new Date(d + 'T00:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
@@ -175,20 +204,26 @@ export async function renderCamps(container) {
 
     const titleInput = container.querySelector('#new-title');
     const slugInput = container.querySelector('#new-slug');
-    titleInput.addEventListener('input', () => {
-      slugInput.value = titleInput.value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-    });
+    // Preview del slug: depende del t\u00edtulo Y de las fechas (la URL refleja las fechas).
+    const syncNewSlug = () => {
+      slugInput.value = buildCampSlug(titleInput.value.trim(), container.querySelector('#new-start')?.value, container.querySelector('#new-end')?.value);
+    };
+    titleInput.addEventListener('input', syncNewSlug);
+    container.querySelector('#new-start')?.addEventListener('change', syncNewSlug);
+    container.querySelector('#new-end')?.addEventListener('change', syncNewSlug);
 
     container.querySelector('#new-cancel')?.addEventListener('click', () => renderList());
     container.querySelector('#sc-back')?.addEventListener('click', () => renderList());
 
     container.querySelector('#new-save')?.addEventListener('click', async () => {
       const title = titleInput.value.trim();
-      const slug = slugInput.value.trim();
       const date_start = container.querySelector('#new-start')?.value;
       const date_end = container.querySelector('#new-end')?.value;
       const price = parseFloat(container.querySelector('#new-price')?.value) || 480;
       if (!title || !date_start || !date_end) { showToast('Titulo y fechas son obligatorios', 'error'); return; }
+      // El slug se deriva de las FECHAS (+ descriptor del título) para que la URL siempre
+      // refleje las fechas reales del camp. Único frente a los demás camps.
+      const slug = uniqueCampSlug(buildCampSlug(title, date_start, date_end), camps);
       try {
         const saved = await upsertCamp({ title, slug, date_start, date_end, price, deposit: 180, max_spots: 17, status: 'open' });
         showToast('Camp creado', 'success');
@@ -284,7 +319,7 @@ export async function renderCamps(container) {
       <h3 class="act-detail-section-title">Datos generales</h3>
       <div class="act-form-card">
         <div class="act-form-field"><label class="act-form-label">TITULO</label><input type="text" class="act-form-input" id="f-title" value="${esc(c.title)}" /></div>
-        <div class="act-form-field"><label class="act-form-label">SLUG (URL)</label><input type="text" class="act-form-input" id="f-slug" value="${esc(c.slug)}" readonly style="background:#f3f4f6;cursor:not-allowed" /><small class="act-form-hint">Bloqueado: cambiar el slug rompe la URL /${esc(c.slug)}/. Si necesitas cambiarlo, contacta al desarrollador.</small></div>
+        <div class="act-form-field"><label class="act-form-label">SLUG (URL)</label><input type="text" class="act-form-input" id="f-slug" value="${esc(c.slug)}" readonly style="background:#f3f4f6;cursor:not-allowed" /><small class="act-form-hint">Se genera automáticamente desde las fechas al guardar. Al cambiar fechas/título, la URL del camp cambia (los enlaces antiguos dejan de funcionar).</small></div>
         <div class="act-form-field"><label class="act-form-label">KICKER (texto bajo el título en las cards)</label><input type="text" class="act-form-input" id="f-kicker" value="${esc(c.kicker||'')}" placeholder="Ej: Conil x Sambatrips" /></div>
         <div class="act-form-field"><label class="act-form-label">VIBE / TAGS DE LA CARD</label><input type="text" class="act-form-input" id="f-card-vibe" value="${esc(c.card_vibe||'')}" placeholder="Ej: SURF, SOCIAL" /><small class="act-form-hint">Texto del ⚡ en la card (se muestra en mayúsculas).</small></div>
         <div class="act-form-field"><label class="act-form-label">DURACIÓN (TEXTO DE LA CARD)</label><input type="text" class="act-form-input" id="f-duration-label" value="${esc(c.duration_label||'')}" placeholder="Ej: 4 días / 3 noches" /><small class="act-form-hint">Si lo dejas vacío, se calcula automáticamente desde las fechas.</small></div>
@@ -477,6 +512,19 @@ export async function renderCamps(container) {
   }
 
   function bindTabEvents(c) {
+    /* General — preview en vivo del slug desde título + fechas */
+    if (activeTab === 'general') {
+      const slugEl = container.querySelector('#f-slug');
+      const syncSlug = () => {
+        if (slugEl) slugEl.value = uniqueCampSlug(
+          buildCampSlug(container.querySelector('#f-title')?.value.trim(), container.querySelector('#f-date-start')?.value, container.querySelector('#f-date-end')?.value),
+          camps, c.id);
+      };
+      container.querySelector('#f-title')?.addEventListener('input', syncSlug);
+      container.querySelector('#f-date-start')?.addEventListener('change', syncSlug);
+      container.querySelector('#f-date-end')?.addEventListener('change', syncSlug);
+    }
+
     /* Hero — file upload */
     if (activeTab === 'hero') {
       container.querySelector('#f-hero-file')?.addEventListener('change', async e => {
@@ -586,6 +634,11 @@ export async function renderCamps(container) {
       updates.color = container.querySelector('#f-color')?.value || '#0f2f39';
       updates.date_start = container.querySelector('#f-date-start')?.value || c.date_start;
       updates.date_end = container.querySelector('#f-date-end')?.value || c.date_end;
+      // Regenera el slug desde las fechas (+ descriptor del título) SOLO si cambiaron las
+      // fechas o el título → la URL refleja las fechas reales sin cambiarla por editar otra cosa.
+      if (updates.title !== c.title || updates.date_start !== c.date_start || updates.date_end !== c.date_end) {
+        updates.slug = uniqueCampSlug(buildCampSlug(updates.title, updates.date_start, updates.date_end), camps, c.id);
+      }
     }
 
     if (activeTab === 'hero') {
