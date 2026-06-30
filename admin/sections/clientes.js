@@ -1,7 +1,7 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles } from '../modules/api.js';
+import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles, findDuplicateProfiles } from '../modules/api.js';
 import { attachClientSuggest } from '../modules/client-suggest.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
@@ -485,7 +485,16 @@ export async function renderClientes(container) {
     const sel = { keep: null, drop: null };
     openModal('Fusionar fichas duplicadas', `
       <div class="trip-form">
-        <p style="font-size:.85rem;color:#64748b;margin:0 0 8px">Todo (reservas, bonos, clases, alquileres, familiares, pedidos) de la ficha duplicada se mueve a la ficha correcta, y la duplicada se elimina.</p>
+        <p style="font-size:.85rem;color:#64748b;margin:0 0 8px">Todo (reservas, bonos, clases, alquileres, familiares, pedidos) de la ficha duplicada se mueve a la ficha correcta, y la duplicada se elimina. Los familiares repetidos se unen (no quedan "2 Borja").</p>
+        <div style="margin:0 0 14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <strong style="font-size:.9rem">Duplicados detectados</strong>
+            <button type="button" id="mg-rescan" class="btn line" style="font-size:.8rem;padding:4px 10px">Reescanear</button>
+          </div>
+          <div id="mg-auto"><p style="font-size:.84rem;color:#94a3b8">Buscando…</p></div>
+        </div>
+        <details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:.86rem;color:#0369a1">Fusionar manualmente (elegir las dos fichas)</summary>
+        <div style="padding-top:10px">
         <label>Ficha CORRECTA (se queda)</label>
         <div style="position:relative"><input type="text" id="mg-keep" placeholder="Buscar cliente…" autocomplete="off" /><div id="mg-keep-res" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid #e2e8f0;border-radius:8px;max-height:180px;overflow:auto;box-shadow:0 8px 24px rgba(15,47,57,.12)"></div></div>
         <div id="mg-keep-chip" style="display:none;margin:6px 0;font-size:.85rem;color:#065f46"></div>
@@ -493,8 +502,40 @@ export async function renderClientes(container) {
         <div style="position:relative"><input type="text" id="mg-drop" placeholder="Buscar cliente…" autocomplete="off" /><div id="mg-drop-res" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid #e2e8f0;border-radius:8px;max-height:180px;overflow:auto;box-shadow:0 8px 24px rgba(15,47,57,.12)"></div></div>
         <div id="mg-drop-chip" style="display:none;margin:6px 0;font-size:.85rem;color:#b91c1c"></div>
         <button class="btn red" id="mg-go" style="margin-top:12px;width:100%">Fusionar</button>
+        </div></details>
       </div>
     `);
+    // Detección automática de duplicados
+    async function loadAuto() {
+      const wrap = document.getElementById('mg-auto');
+      if (!wrap) return;
+      wrap.innerHTML = '<p style="font-size:.84rem;color:#94a3b8">Buscando…</p>';
+      let groups = [];
+      try { groups = await findDuplicateProfiles(); } catch (e) { wrap.innerHTML = `<p style="font-size:.84rem;color:#b91c1c">Error: ${esc(e.message)}</p>`; return; }
+      if (!groups.length) { wrap.innerHTML = '<p style="font-size:.84rem;color:#16a34a">✓ No se detectaron duplicados</p>'; return; }
+      wrap.innerHTML = groups.map((g, gi) => {
+        const keep = g[0]; // el más antiguo se queda
+        const rows = g.map((p, i) => `<div style="font-size:.82rem;padding:2px 0;${i === 0 ? 'font-weight:700;color:#065f46' : 'color:#64748b'}">${i === 0 ? '✓ se queda · ' : '↳ se absorbe · '}${esc(p.full_name || '')}${p.last_name ? ' ' + esc(p.last_name) : ''}${p.email ? ` · ${esc(p.email)}` : ''}${p.phone ? ` · ${esc(p.phone)}` : ''}</div>`).join('');
+        return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px">
+          ${rows}
+          <button type="button" class="btn red mg-auto-go" data-gi="${gi}" style="margin-top:6px;font-size:.82rem;padding:6px 12px">Fusionar estas ${g.length}</button>
+        </div>`;
+      }).join('');
+      wrap.querySelectorAll('.mg-auto-go').forEach(btn => btn.addEventListener('click', async () => {
+        const g = groups[Number(btn.dataset.gi)];
+        const keep = g[0];
+        if (!confirm(`Fusionar ${g.length} fichas en "${keep.full_name || ''}". El resto se absorbe y se borra. ¿Continuar?`)) return;
+        btn.disabled = true; btn.textContent = 'Fusionando…';
+        try {
+          for (let i = 1; i < g.length; i++) await mergeClients(keep.id, g[i].id);
+          showToast('Duplicados fusionados', 'success');
+          await loadAuto();
+          renderList();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); btn.disabled = false; btn.textContent = `Fusionar estas ${g.length}`; }
+      }));
+    }
+    document.getElementById('mg-rescan')?.addEventListener('click', loadAuto);
+    loadAuto();
     const wire = (key) => {
       const input = document.getElementById(`mg-${key}`);
       const res = document.getElementById(`mg-${key}-res`);

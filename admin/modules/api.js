@@ -222,13 +222,64 @@ export async function deleteReservationFully(entity, id) {
 // (reservas, bonos, inscripciones, alquileres, familiares, pedidos) y borra la ficha
 // duplicada. Devuelve un resumen de lo movido. (La cuenta auth huérfana queda sin
 // ficha → invisible en el panel; su limpieza definitiva es aparte.)
+// Normalizadores para detectar/deduplicar (sin tildes, espacios colapsados).
+const _nn = s => String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+const _nphone = s => String(s == null ? '' : s).replace(/\D/g, '');
+
+// Detecta grupos de fichas de cliente duplicadas: agrupa por email, teléfono o
+// nombre+apellido iguales (union-find, así una ficha que coincide por varias claves
+// cae en el mismo grupo). Devuelve array de grupos (cada grupo = array de perfiles, >1).
+export async function findDuplicateProfiles() {
+  const profiles = await fetchProfiles();
+  const parent = {};
+  const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const union = (a, b) => { parent[find(a)] = find(b); };
+  profiles.forEach(p => { parent[p.id] = p.id; });
+  const byKey = {};
+  profiles.forEach(p => {
+    const keys = [];
+    const em = (p.email || '').trim().toLowerCase(); if (em) keys.push('e:' + em);
+    const ph = _nphone(p.phone); if (ph.length >= 6) keys.push('p:' + ph);
+    const nm = _nn(`${p.full_name || ''} ${p.last_name || ''}`); if (nm) keys.push('n:' + nm);
+    keys.forEach(k => { if (byKey[k]) union(p.id, byKey[k]); else byKey[k] = p.id; });
+  });
+  const comps = {};
+  profiles.forEach(p => { const r = find(p.id); (comps[r] ||= []).push(p); });
+  return Object.values(comps)
+    .filter(g => g.length > 1)
+    .map(g => g.slice().sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '')));
+}
+
 export async function mergeClients(keepId, dropId) {
   if (!keepId || !dropId) throw new Error('Faltan fichas');
   if (keepId === dropId) throw new Error('Son la misma ficha');
+
+  // Familiares CON dedupe: si el que se queda ya tiene ese niño (mismo nombre
+  // normalizado), las clases del duplicado se reapuntan a ese y se borra el duplicado
+  // → A no acaba con "2 Borja". Los demás familiares se reasignan normal.
+  try {
+    const [{ data: keepFam }, { data: dropFam }] = await Promise.all([
+      supabase.from('family_members').select('id, full_name, last_name').eq('user_id', keepId),
+      supabase.from('family_members').select('id, full_name, last_name').eq('user_id', dropId),
+    ]);
+    const keepByName = {};
+    (keepFam || []).forEach(m => { keepByName[_nn(`${m.full_name || ''} ${m.last_name || ''}`)] = m.id; });
+    for (const m of (dropFam || [])) {
+      const key = _nn(`${m.full_name || ''} ${m.last_name || ''}`);
+      if (keepByName[key]) {
+        await supabase.from('class_enrollments').update({ user_id: keepId, family_member_id: keepByName[key] }).eq('family_member_id', m.id);
+        await supabase.from('family_members').delete().eq('id', m.id);
+      } else {
+        await supabase.from('family_members').update({ user_id: keepId }).eq('id', m.id);
+        keepByName[key] = m.id;
+      }
+    }
+  } catch (e) { throw new Error(`Al fusionar familiares: ${e.message}`); }
+
   // TODAS las tablas con user_id que referencian a un cliente (incluidas las legacy
   // class_bookings/equipment_rentals que tienen ON DELETE CASCADE → si NO se reasignan,
   // el DELETE del perfil las borraría). Se reasignan ANTES de borrar para no perder datos.
-  const tables = ['bookings', 'class_bookings', 'equipment_rentals', 'equipment_reservations', 'bonos', 'class_enrollments', 'family_members', 'orders'];
+  const tables = ['bookings', 'class_bookings', 'equipment_rentals', 'equipment_reservations', 'bonos', 'class_enrollments', 'orders'];
   const moved = {};
   const missing = (msg) => /does not exist|relation .* does not exist|could not find/i.test(msg || '');
   for (const t of tables) {
