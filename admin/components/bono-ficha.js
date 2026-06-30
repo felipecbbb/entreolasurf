@@ -18,7 +18,8 @@ import { createPayment, deletePayment, fetchPayments, deleteReservationFully } f
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { bonoExpected, getPackPrice, round2 } from '/lib/domain/pricing.js';
 import { recalcBonoPaid } from '/lib/domain/payments.js';
-import { createBono, extendBono, bonoAvailable, defaultBonoExpiry } from '/lib/domain/bonos.js';
+import { createBono, extendBono, bonoAvailable, defaultBonoExpiry, updateBonoFields } from '/lib/domain/bonos.js';
+import { searchProfiles } from '../modules/api.js';
 
 const METHODS = ['efectivo', 'tarjeta', 'transferencia', 'voucher', 'saldo'];
 
@@ -243,6 +244,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
             <button class="bf-act" id="bf-extend-assign">Ampliar y asignar ahora</button>
             <button class="bf-act" data-form="extend">Solo sumar créditos</button>
             <button class="bf-act" data-form="newbono">+ Bono de otro tipo</button>
+            <button class="bf-act" data-form="edit">Editar / corregir</button>
             <button class="bf-act" id="bf-delete" style="margin-left:auto;color:#b91c1c;border-color:#fecaca">Eliminar bono</button>
           </div>
 
@@ -293,6 +295,25 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
             <p style="font-size:.74rem;color:var(--color-muted);margin:0">Crea un bono nuevo del tipo elegido para <strong>${esc(cliName)}</strong> y abre su ficha.</p>
           </div>
 
+          <!-- Form: editar / corregir el bono -->
+          <div class="bf-form" id="bf-form-edit" hidden>
+            <div class="row">
+              <div class="f"><label>Tipo de clase</label><select id="bf-ed-type">${Object.entries(TYPE_LABELS).map(([v, l]) => `<option value="${v}" ${v === bono.class_type ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+              <div class="f"><label>Nº clases (mín. ${bono.used_credits || 0})</label><input type="number" id="bf-ed-credits" min="${bono.used_credits || 0}" value="${bono.total_credits || 0}" style="width:90px" /></div>
+              <div class="f"><label>Caduca</label><input type="date" id="bf-ed-expiry" value="${(bono.expires_at || '').slice(0, 10)}" /></div>
+              <div class="f"><label>Total (€)</label><input type="number" id="bf-ed-total" step="0.01" min="0" value="${bono.custom_total != null ? Number(bono.custom_total).toFixed(2) : ''}" placeholder="auto" style="width:110px" /></div>
+            </div>
+            <div class="row" style="position:relative">
+              <div class="f" style="flex:1;min-width:240px"><label>Cambiar titular <span style="font-weight:400;color:var(--color-muted)">(opcional)</span></label>
+                <input type="text" id="bf-ed-titular" placeholder="Buscar cliente por nombre/email…" autocomplete="off" />
+                <div id="bf-ed-titular-results" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(15,47,57,.12);max-height:200px;overflow:auto"></div>
+                <div id="bf-ed-titular-chip" style="display:none;margin-top:6px;font-size:.82rem;color:#065f46"></div>
+              </div>
+              <button class="save" id="bf-ed-save">Guardar cambios</button>
+            </div>
+            <p style="font-size:.74rem;color:var(--color-muted);margin:0">No puedes bajar de las clases ya usadas (${bono.used_credits || 0}). Cambiar el tipo o el titular pedirá confirmación si el bono ya tiene clases asignadas.</p>
+          </div>
+
           ${hasFamily ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--color-line,#e5e7eb)">
             <div class="bf-section-title">Participantes · Responsable: ${esc(cliName)}</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -335,7 +356,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   // Toggle de formularios de acción (uno visible a la vez)
   overlay.querySelectorAll('.bf-act[data-form]').forEach(btn => btn.addEventListener('click', () => {
     const target = btn.dataset.form;
-    ['pay', 'extend', 'newbono', 'assign'].forEach(k => {
+    ['pay', 'extend', 'newbono', 'assign', 'edit'].forEach(k => {
       const el = overlay.querySelector(`#bf-form-${k}`);
       if (el) el.hidden = (k !== target) ? true : !el.hidden;
     });
@@ -480,6 +501,69 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
       close();
       if (onChange) await onChange();
       if (newId) await openBonoFicha(newId, { onChange });
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+  });
+
+  // Editar / corregir el bono. Buscador de titular (vincula a cliente existente, no duplica).
+  let edNewTitular = null; // { id, name }
+  {
+    const search = overlay.querySelector('#bf-ed-titular');
+    const results = overlay.querySelector('#bf-ed-titular-results');
+    const chip = overlay.querySelector('#bf-ed-titular-chip');
+    let timer = null;
+    search?.addEventListener('input', () => {
+      clearTimeout(timer);
+      const term = search.value.trim();
+      if (term.length < 2) { results.style.display = 'none'; return; }
+      timer = setTimeout(async () => {
+        const res = await searchProfiles(term);
+        results.innerHTML = res.length
+          ? res.map(p => `<div class="bf-ed-opt" data-id="${p.id}" data-name="${esc(p.full_name || '')}" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.86rem">${esc(p.full_name || 'Sin nombre')}${p.phone ? ` · <span style="color:#64748b">${esc(p.phone)}</span>` : ''}</div>`).join('')
+          : '<div style="padding:9px;color:#94a3b8;font-size:.84rem">Sin resultados</div>';
+        results.style.display = '';
+      }, 250);
+    });
+    results?.addEventListener('click', (e) => {
+      const opt = e.target.closest('.bf-ed-opt');
+      if (!opt) return;
+      edNewTitular = { id: opt.dataset.id, name: opt.dataset.name };
+      results.style.display = 'none';
+      search.value = '';
+      chip.innerHTML = `✓ Nuevo titular: <strong>${esc(edNewTitular.name)}</strong> <button type="button" id="bf-ed-titular-clear" style="background:none;border:none;color:#b91c1c;text-decoration:underline;cursor:pointer;font-size:.8rem">quitar</button>`;
+      chip.style.display = '';
+    });
+    chip?.addEventListener('click', (e) => {
+      if (e.target.id !== 'bf-ed-titular-clear') return;
+      edNewTitular = null; chip.style.display = 'none';
+    });
+  }
+  overlay.querySelector('#bf-ed-save')?.addEventListener('click', async () => {
+    const used = bono.used_credits || 0;
+    const credits = parseInt(overlay.querySelector('#bf-ed-credits').value, 10);
+    if (!credits || credits < 1) { showToast('Nº de clases inválido', 'error'); return; }
+    if (credits < used) { showToast(`No puedes bajar de las ${used} clase(s) ya usadas`, 'error'); return; }
+    const newType = overlay.querySelector('#bf-ed-type').value;
+    const expiryVal = overlay.querySelector('#bf-ed-expiry').value;
+    const totalVal = overlay.querySelector('#bf-ed-total').value;
+    const hasEnrolls = (enrollSorted?.length || used) > 0;
+    if (newType !== bono.class_type && hasEnrolls) {
+      if (!confirm('Este bono ya tiene clases asignadas de su tipo actual. Cambiar el tipo NO cambia las clases ya asignadas. ¿Continuar?')) return;
+    }
+    if (edNewTitular && hasEnrolls) {
+      if (!confirm(`Reasignar este bono a ${edNewTitular.name}. Las clases ya asignadas seguirán bajo el bono. ¿Continuar?`)) return;
+    }
+    const fields = {
+      class_type: newType,
+      total_credits: credits,
+      custom_total: totalVal === '' ? null : (parseFloat(totalVal) || 0),
+      status: bono.status === 'cancelled' || bono.status === 'expired' ? bono.status : (used >= credits ? 'exhausted' : 'active'),
+    };
+    if (expiryVal) fields.expires_at = new Date(expiryVal + 'T00:00:00').toISOString();
+    if (edNewTitular) fields.user_id = edNewTitular.id;
+    try {
+      await updateBonoFields(bonoId, fields);
+      showToast('Bono actualizado', 'success');
+      await reload();
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
   });
 
