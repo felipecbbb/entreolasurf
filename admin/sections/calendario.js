@@ -19,6 +19,7 @@ import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry
 import { openBonoFicha } from '../components/bono-ficha.js';
 import { supabase } from '/lib/supabase.js';
 import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry, compareSizes } from '/lib/shared-constants.js';
+import { attachClientSuggest } from '../modules/client-suggest.js';
 
 // getPackPrice / bonoExpected viven en /lib/domain/pricing.js (fuente única).
 
@@ -2106,6 +2107,14 @@ export async function renderCalendario(container) {
           const p = persons.find(p => String(p.id) === input.dataset.pid);
           if (p) p.nombre = input.value;
         });
+        // Autocompletado: sugiere fichas existentes y vincula (no duplica)
+        attachClientSuggest(input, {
+          onPick: (it) => {
+            const p = persons.find(p => String(p.id) === input.dataset.pid);
+            if (p) { p.profileId = it.id; p.profileName = it.label || it.full_name; p.familyMemberId = it.familyMemberId || null; p.nombre = ''; p.apellidos = ''; }
+            renderPanel();
+          },
+        });
       });
       overlay.querySelectorAll('.bk-apellidos').forEach(input => {
         input.addEventListener('input', () => {
@@ -2711,6 +2720,17 @@ export async function renderCalendario(container) {
             const key = id.replace('bk-co-', '');
             contactData[key] = e.target.value;
           });
+        });
+        // Autocompletado del responsable por nombre: vincula la ficha existente (no duplica)
+        attachClientSuggest(overlay.querySelector('#bk-co-nombre'), {
+          onPick: (it) => {
+            contactData.profileId = it.id;
+            contactData.nombre = it.full_name || '';
+            contactData.apellidos = it.last_name || '';
+            contactData.email = it.email || contactData.email;
+            contactData.telefono = it.phone || contactData.telefono;
+            renderPanel();
+          },
         });
 
         // Auto-detectar cliente existente al escribir el email del responsable
@@ -6106,6 +6126,18 @@ export async function renderCalendario(container) {
         setField('guest_name', ''); setField('guest_phone', '');
         setField('guest_last_name', ''); setField('guest_email', '');
       });
+      // Autocompletado de fichas en los propios campos de nombre/email (vincula y no duplica)
+      const linkPicked = (it) => {
+        cuser.value = it.id;
+        setField('guest_name', it.full_name);
+        setField('guest_last_name', it.last_name);
+        setField('guest_phone', it.phone);
+        setField('guest_email', it.email);
+        cchip.innerHTML = `✓ Enlazado a <strong>${escapeHtml(it.label || it.full_name)}</strong> — saldrá en su ficha. <button type="button" id="nr-client-clear" style="background:none;border:none;color:#065f46;text-decoration:underline;cursor:pointer;font-size:.85rem;padding:0;margin-left:6px">quitar</button>`;
+        cchip.style.display = '';
+      };
+      attachClientSuggest(rform?.querySelector('[name="guest_name"]'), { onPick: linkPicked });
+      attachClientSuggest(rform?.querySelector('[name="guest_email"]'), { onPick: linkPicked, includeFamily: false });
       document.addEventListener('click', (e) => {
         if (cresults && cresults.style.display !== 'none' && !cresults.contains(e.target) && e.target !== csearch) cresults.style.display = 'none';
       });
