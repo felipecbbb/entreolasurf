@@ -6728,6 +6728,7 @@ export async function renderCalendario(container) {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                     <input type="date" id="rd-date-end" value="${r.date_end?.slice(0, 10) || ''}" style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:.85rem;font-family:inherit" />
                   </div>
+                  ${currentStatus !== 'cancelled' ? `<button class="rd-extend-btn" style="margin-top:8px;font-size:.8rem;padding:6px 12px;background:#0ea5e9;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600">+ Alargar alquiler</button>` : ''}
                 </div>
                 <div>
                   <div style="font-size:.72rem;text-transform:uppercase;color:var(--color-muted);font-weight:600;letter-spacing:.5px;margin-bottom:4px">Material</div>
@@ -7167,6 +7168,99 @@ export async function renderCalendario(container) {
           renderRdPanel();
         } catch (err) { showToast('Error: ' + err.message, 'error'); renderRdPanel(); }
       });
+
+      // ---- Alargar alquiler ----
+      overlay.querySelector('.rd-extend-btn')?.addEventListener('click', () => openExtendRental());
+      function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000); }
+      // Precio/día derivado de las TARIFAS configuradas del material (no hardcodeado).
+      function dailyRateFromPricing(pr) {
+        pr = pr || {};
+        if (Number(pr['1d']) > 0) return Number(pr['1d']);
+        if (Number(pr['1w']) > 0) return Number(pr['1w']) / 7;
+        if (Number(pr['2w']) > 0) return Number(pr['2w']) / 14;
+        if (Number(pr['1m']) > 0) return Number(pr['1m']) / 30;
+        if (Number(pr['4h']) > 0) return Number(pr['4h']);
+        return 0;
+      }
+      // Disponibilidad en el tramo ampliado (por cantidad + unidad concreta), excluyendo esta reserva.
+      async function extensionAvailability(fromDate, toDate) {
+        let usable = 0;
+        try { const { data: units } = await supabase.from('inventory_units').select('id,estado').eq('equipment_id', r.equipment_id); usable = (units || []).filter(u => !['reparacion', 'perdido', 'baja'].includes(u.estado)).length; } catch {}
+        let stockTotal = usable;
+        if (!usable) { try { const { data: eq } = await supabase.from('rental_equipment').select('stock').eq('id', r.equipment_id).maybeSingle(); stockTotal = Number(eq?.stock) || 0; } catch {} }
+        let busy = [];
+        try {
+          const { data } = await supabase.from('equipment_reservations').select('quantity, assigned_unit_id')
+            .eq('equipment_id', r.equipment_id).neq('id', r.id)
+            .in('status', ['pending', 'confirmed', 'active'])
+            .lte('date_start', toDate).gte('date_end', fromDate);
+          busy = data || [];
+        } catch {}
+        const reserved = busy.reduce((s, b) => s + (Number(b.quantity) || 1), 0);
+        const qty = Number(r.quantity) || 1;
+        if (reserved + qty > stockTotal) return { ok: false, msg: `No se puede alargar: no hay stock de ${equipName} del ${fromDate} al ${toDate} (quedan ${Math.max(0, stockTotal - reserved)} libre(s) y necesitas ${qty}).` };
+        if (r.assigned_unit_id && busy.some(b => b.assigned_unit_id === r.assigned_unit_id)) return { ok: false, msg: `No se puede alargar: la unidad asignada ya está reservada del ${fromDate} al ${toDate}. Quítala o cámbiala primero.` };
+        return { ok: true };
+      }
+      async function openExtendRental() {
+        let pricing = r.rental_equipment?.pricing || null;
+        if (!pricing && r.equipment_id) { try { const { data } = await supabase.from('rental_equipment').select('pricing').eq('id', r.equipment_id).maybeSingle(); pricing = data?.pricing; } catch {} }
+        const perDay = dailyRateFromPricing(pricing);
+        const qty = Number(r.quantity) || 1;
+        const curEnd = String(r.date_end || r.date_start || '').slice(0, 10);
+        const nextDay = (() => { const d = new Date(curEnd + 'T00:00:00'); d.setDate(d.getDate() + 1); return getDateStr(d); })();
+        const ov = document.createElement('div'); ov.className = 'bk-overlay'; ov.style.zIndex = '10030'; document.body.appendChild(ov);
+        const close = () => ov.remove();
+        ov.addEventListener('click', e => { if (e.target === ov) close(); });
+        ov.innerHTML = `<div style="max-width:440px;width:94%;background:#fff;border-radius:16px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 4px;font-size:1.1rem">Alargar alquiler · ${escapeHtml(equipName)}</h3>
+          <p style="margin:0 0 14px;font-size:.84rem;color:#64748b">Ahora hasta <strong>${curEnd}</strong>. Elige la nueva fecha fin.</p>
+          <label style="font-size:.8rem;color:#64748b">Nueva fecha fin</label>
+          <input type="date" id="ex-end" min="${nextDay}" value="${nextDay}" style="width:100%;margin:4px 0 12px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px" />
+          <label style="font-size:.8rem;color:#64748b">Precio de la extensión (€) <span style="color:#94a3b8">— sugerido de las tarifas, editable</span></label>
+          <input type="number" id="ex-price" step="0.01" min="0" style="width:100%;margin:4px 0 6px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px" />
+          <div id="ex-hint" style="font-size:.78rem;color:#64748b;margin-bottom:12px"></div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:.86rem;margin-bottom:8px"><input type="checkbox" id="ex-charge" checked /> Cobrar ahora (si no, queda pendiente)</label>
+          <div id="ex-method-wrap"><label style="font-size:.8rem;color:#64748b">Método</label>
+            <select id="ex-method" style="width:100%;margin:4px 0 12px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px"><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="transferencia">Transferencia</option><option value="bizum">Bizum</option></select></div>
+          <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">
+            <button class="btn line" id="ex-cancel">Cancelar</button>
+            <button class="btn red" id="ex-save">Alargar</button>
+          </div>
+        </div>`;
+        const $ = id => ov.querySelector('#' + id);
+        function recompute() {
+          const newEnd = $('ex-end').value;
+          if (!newEnd || newEnd <= curEnd) { $('ex-hint').textContent = 'La nueva fecha debe ser posterior a la actual.'; return; }
+          const extraDays = daysBetween(curEnd, newEnd);
+          $('ex-price').value = (Math.round(extraDays * perDay * qty * 100) / 100).toFixed(2);
+          $('ex-hint').textContent = perDay ? `+${extraDays} día(s) · ${perDay.toFixed(2)}€/día${qty > 1 ? ` × ${qty}` : ''}` : `+${extraDays} día(s) · sin tarifa/día configurada — pon el precio a mano`;
+        }
+        $('ex-end').addEventListener('change', recompute);
+        $('ex-charge').addEventListener('change', () => { $('ex-method-wrap').style.display = $('ex-charge').checked ? '' : 'none'; });
+        recompute();
+        $('ex-cancel').addEventListener('click', close);
+        $('ex-save').addEventListener('click', async () => {
+          const newEnd = $('ex-end').value;
+          if (!newEnd || newEnd <= curEnd) { showToast('La nueva fecha debe ser posterior a la actual', 'error'); return; }
+          const extraPrice = parseFloat($('ex-price').value) || 0;
+          const btn = $('ex-save'); btn.disabled = true; btn.textContent = 'Comprobando…';
+          const avail = await extensionAvailability(nextDay, newEnd);
+          if (!avail.ok) { showToast(avail.msg, 'error'); btn.disabled = false; btn.textContent = 'Alargar'; return; }
+          try {
+            const newTotal = Math.round((Number(r.total_amount || 0) + extraPrice) * 100) / 100;
+            await updateEquipmentReservation(r.id, { date_end: newEnd, total_amount: newTotal });
+            r.date_end = newEnd; r.total_amount = newTotal; totalAmount = newTotal;
+            if ($('ex-charge').checked && extraPrice > 0) {
+              try { await createPayment({ reservation_type: 'rental', reference_id: r.id, amount: extraPrice, payment_method: $('ex-method').value, concept: `Extensión alquiler ${equipName} (hasta ${newEnd})` }); await refreshRentalPaid(); } catch (e) { console.warn('pago extensión', e.message); }
+            }
+            unitChoices = null;
+            close();
+            showToast('Alquiler alargado', 'success');
+            renderRdPanel();
+          } catch (err) { showToast('Error: ' + err.message, 'error'); btn.disabled = false; btn.textContent = 'Alargar'; }
+        });
+      }
     }
 
     renderRdPanel();
