@@ -2984,11 +2984,36 @@ export async function renderCalendario(container) {
             // existe se amplía para cubrir las clases nuevas. Los créditos prepagados
             // ya disponibles se consumen primero (no se cobran dos veces).
 
-            // 1) Sesiones nuevas por dueño (user_id)
+            // 0) DEDUP: no re-apuntar (ni contar/cobrar) sesiones que la persona YA tiene.
+            //    Solo para personas identificables (user_id o family_member_id); los invitados
+            //    sueltos sin ficha no se deduplican. p._newSessions = solo las nuevas.
+            const allSessionIds = [...new Set(persons.flatMap(p => p.sessions))];
+            let existingEnroll = [];
+            if (allSessionIds.length) {
+              try {
+                const { data } = await supabase.from('class_enrollments')
+                  .select('class_id, user_id, family_member_id')
+                  .in('class_id', allSessionIds).neq('status', 'cancelled');
+                existingEnroll = data || [];
+              } catch {}
+            }
+            let _skipped = 0;
+            for (const p of persons) {
+              const tgt = personTarget[p.id] || {};
+              if (!(tgt.user_id || tgt.family_member_id)) { p._newSessions = p.sessions.slice(); continue; }
+              p._newSessions = p.sessions.filter(sid => {
+                const has = existingEnroll.some(e => e.class_id === sid && (e.user_id || null) === (tgt.user_id || null) && (e.family_member_id || null) === (tgt.family_member_id || null));
+                if (has) _skipped++;
+                return !has;
+              });
+            }
+            if (_skipped > 0) showToast(`${_skipped} sesión(es) ya estaban asignadas · se omiten`, 'info');
+
+            // 1) Sesiones nuevas por dueño (user_id) — solo las que NO tenía ya
             const ownerSessions = {};
             for (const p of persons) {
               const tgt = personTarget[p.id];
-              if (tgt?.user_id) ownerSessions[tgt.user_id] = (ownerSessions[tgt.user_id] || 0) + p.sessions.length;
+              if (tgt?.user_id) ownerSessions[tgt.user_id] = (ownerSessions[tgt.user_id] || 0) + p._newSessions.length;
             }
 
             // 2) Déficit (clases nuevas no cubiertas por créditos prepagados) y CARGO por dueño.
@@ -3120,7 +3145,8 @@ export async function renderCalendario(container) {
             for (const p of persons) {
               const tgt = personTarget[p.id] || { guest_name: `${p.nombre} ${p.apellidos}`.trim() || 'Invitado' };
               const ownerBono = tgt.user_id ? bonoByOwner[tgt.user_id] : null;
-              for (const sid of p.sessions) {
+              // Solo las sesiones NUEVAS (las que ya tenía se omitieron en el dedup)
+              for (const sid of (p._newSessions || p.sessions)) {
                 const enrollData = { class_id: sid, created_at: new Date().toISOString() };
                 if (ownerBono?.id) {
                   enrollData.bono_id = ownerBono.id;
