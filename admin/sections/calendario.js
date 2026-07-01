@@ -456,6 +456,7 @@ export async function renderCalendario(container) {
             <span class="cal-attendance-icon"></span>
           </label>
           <span class="cal-client-name">${name}${ageLabel}</span>
+          ${e.wetsuit_size ? `<span class="cal-client-talla" style="background:#eef2ff;color:#4338ca;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:999px;white-space:nowrap" title="Talla de neopreno">${escapeHtml(String(e.wetsuit_size))}</span>` : ''}
           ${bonoLabel ? `<span class="cal-client-bono" style="color:#0ea5e9;font-size:.65rem;font-weight:600;white-space:nowrap">${bonoLabel}</span>` : ''}
           <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${isPaid ? '#16a34a' : isPartial ? '#d97706' : '#dc2626'}" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
@@ -3005,7 +3006,14 @@ export async function renderCalendario(container) {
               try { bono = await findOwnerBono(ownerId, cls.type); } catch {}
               const avail = bonoAvailable(bono);
               const deficit = Math.max(0, need - avail);
-              const rawDeficit = deficit > 0 ? getPackPrice(cls.type, deficit, Number(cls.price) || 0) : 0;
+              // Precio MARGINAL: cobrar el incremento del pack, no un pack nuevo pequeño.
+              // base = créditos que YA tiene el bono (0 si no hay bono). Así las clases por
+              // encima del pack máximo se cobran al extra_class_price configurado en Actividades:
+              // packPrice(base+deficit) − packPrice(base). Ej: bono de 7 + 3 nuevas = 3 × extra.
+              const base = bono ? (bono.total_credits || 0) : 0;
+              const rawDeficit = deficit > 0
+                ? round2(getPackPrice(cls.type, base + deficit, Number(cls.price) || 0) - getPackPrice(cls.type, base, Number(cls.price) || 0))
+                : 0;
               const charge = Math.round(rawDeficit * (1 - discRate) * 100) / 100;
 
               // UPGRADE clase suelta → bono: si NO tiene bono de este tipo pero SÍ clases

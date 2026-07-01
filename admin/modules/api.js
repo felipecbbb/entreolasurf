@@ -1154,7 +1154,7 @@ export async function fetchClassEnrollments(classId) {
   if (userIds.length) {
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, full_name')
+      .select('id, full_name, wetsuit_size')
       .in('id', userIds);
     if (profiles) profiles.forEach(p => { profilesMap[p.id] = p; });
   }
@@ -1165,7 +1165,7 @@ export async function fetchClassEnrollments(classId) {
   if (familyIds.length) {
     const { data: members } = await supabase
       .from('family_members')
-      .select('id, full_name, birth_date')
+      .select('id, full_name, birth_date, wetsuit_size')
       .in('id', familyIds);
     if (members) members.forEach(m => { familyMap[m.id] = m; });
   }
@@ -1187,6 +1187,10 @@ export async function fetchClassEnrollments(classId) {
     family_members: e.family_member_id ? familyMap[e.family_member_id] || null : null,
     profiles: e.user_id ? profilesMap[e.user_id] || null : null,
     bono: e.bono_id ? bonoMap[e.bono_id] || null : null,
+    // Talla de neopreno del asistente (familiar tiene prioridad; si no, el titular)
+    wetsuit_size: (e.family_member_id && familyMap[e.family_member_id]?.wetsuit_size)
+      || (e.user_id && profilesMap[e.user_id]?.wetsuit_size)
+      || null,
     // Set guest_name from family member or profile if not already set
     guest_name: e.guest_name
       || (e.family_member_id && familyMap[e.family_member_id]?.full_name)
