@@ -1809,6 +1809,9 @@ export async function renderCalendario(container) {
     // (sin cuenta propia) cuelgan del responsable y comparten un único pack ('resp').
     function ownerKeyForPerson(p) {
       if (p.profileId) return 'pid:' + p.profileId;
+      // Familiar/nuevo del responsable → cuelga del bono del titular (mismo orden de ramas
+      // que el confirm: isFamilyOfResponsable ANTES que email) para no divergir del cargo real.
+      if (p.isFamilyOfResponsable && prefill?.responsable?.profileId) return 'pid:' + prefill.responsable.profileId;
       if ((p.email || '').trim()) return 'email:' + p.email.trim().toLowerCase();
       return 'resp';
     }
@@ -2345,23 +2348,25 @@ export async function renderCalendario(container) {
 
       // Recalculate subtotal excluding sessions covered by credit/bono
       function recalcSubtotal() {
-        // Sesiones a cobrar (no cubiertas por crédito) agrupadas POR DUEÑO, y cada
-        // dueño preciado como su propio pack → coincide con el cargo real del confirm
-        // (totalCharge) y con el tope del anticipo.
-        const paidByOwner = {};
+        // Agrupa las sesiones POR DUEÑO, resta el avail del bono UNA vez por dueño, y
+        // precia el déficit de forma MARGINAL (packPrice(base+deficit)−packPrice(base))
+        // → coincide EXACTAMENTE con el totalCharge del confirm y con el tope del anticipo.
+        const sessByOwner = {}, bonoByOwner = {};
         for (const p of persons) {
           const k = ownerKeyForPerson(p);
+          sessByOwner[k] = (sessByOwner[k] || 0) + p.sessions.length;
           const pc = personCredits[p.id];
-          let paidCount = p.sessions.length;
-          if (pc?.useCredit && pc.bono) {
-            // Solo las sesiones que caben en los créditos disponibles van gratis; el
-            // overage se cobra (coherente con el déficit del confirm).
-            const avail = Math.max(0, (pc.bono.total_credits || 0) - (pc.bono.used_credits || 0));
-            paidCount = Math.max(0, p.sessions.length - avail);
-          }
-          paidByOwner[k] = (paidByOwner[k] || 0) + paidCount;
+          if (pc?.useCredit && pc.bono && !bonoByOwner[k]) bonoByOwner[k] = pc.bono;
         }
-        subtotal = Object.values(paidByOwner).reduce((s, n) => s + getPackPrice(cls.type, n, price), 0);
+        subtotal = Object.keys(sessByOwner).reduce((s, k) => {
+          const need = sessByOwner[k];
+          const bono = bonoByOwner[k];
+          const avail = bono ? Math.max(0, (bono.total_credits || 0) - (bono.used_credits || 0)) : 0;
+          const deficit = Math.max(0, need - avail);
+          if (deficit <= 0) return s;
+          const base = bono ? (bono.total_credits || 0) : 0;
+          return s + Math.max(0, getPackPrice(cls.type, base + deficit, price) - getPackPrice(cls.type, base, price));
+        }, 0);
       }
 
       // Checkout state
@@ -2428,23 +2433,25 @@ export async function renderCalendario(container) {
                 .eq('class_type', cls.type)
                 .in('status', ['active', 'exhausted'])
                 .gt('expires_at', new Date().toISOString());
-              // Find bonos with available credits, enrich with expected price
-              // (el filtro used<total ya descarta los agotados; incluir 'exhausted' solo
-              //  alinea el preview con el handler de confirmar)
-              const allBonos = (bonos || []).filter(b => b.used_credits < b.total_credits).map(b => {
+              // Conservamos TAMBIÉN los bonos agotados (used>=total): el preview necesita su
+              // 'base' (total_credits) para precisar el cargo marginal igual que el confirm
+              // (que amplía el bono agotado). Si no, el preview cobraría un pack fresco.
+              const allBonos = (bonos || []).map(b => {
                 const expectedPrice = bonoExpected(b);
-                // total_paid se mantiene sincronizado con la suma de payments (sin suponer importes)
                 const paid = Number(b.total_paid || 0);
                 const bPending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
                 return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: bPending, isFullyPaid: bPending <= 0 };
               });
-              const totalRemaining = allBonos.reduce((sum, b) => sum + (b.total_credits - b.used_credits), 0);
-              // Default: pick the first bono with enough credits
-              const bestBono = allBonos.find(b => (b.total_credits - b.used_credits) >= p.sessions.length) || allBonos[0] || null;
+              const totalRemaining = allBonos.reduce((sum, b) => sum + Math.max(0, b.total_credits - b.used_credits), 0);
+              // Bono por defecto: el que tenga créditos suficientes; si no, el que tenga
+              // ALGÚN crédito; si no, el más reciente (mismo criterio que findOwnerBono).
+              const bestBono = allBonos.find(b => (b.total_credits - b.used_credits) >= p.sessions.length)
+                || allBonos.find(b => (b.total_credits - b.used_credits) > 0)
+                || allBonos[0] || null;
               personCredits[p.id] = {
-                // Usa el bono si quedan créditos; las clases que excedan los
-                // créditos se cobran aparte (rojas) en el confirmar.
-                useCredit: totalRemaining > 0,
+                // Hay bono → se usa (se amplía si hace falta). Las clases que excedan los
+                // créditos libres se cobran al precio marginal en el confirmar.
+                useCredit: !!bestBono,
                 bono: bestBono,
                 selectedBonoId: bestBono?.id || null,
                 allBonos,
@@ -2456,13 +2463,18 @@ export async function renderCalendario(container) {
       }
       await loadPersonCredits();
 
-      // Count how many sessions are covered by credits
+      // Cuántas sesiones cubren realmente los créditos (topado por avail, por DUEÑO para
+      // no contar dos veces el crédito de un bono compartido entre titular y familiares).
       function getCreditSessions() {
-        let count = 0;
+        const sessByOwner = {}, availByOwner = {};
         for (const p of persons) {
+          const k = ownerKeyForPerson(p);
+          sessByOwner[k] = (sessByOwner[k] || 0) + p.sessions.length;
           const pc = personCredits[p.id];
-          if (pc?.useCredit && pc.bono) count += p.sessions.length;
+          if (pc?.useCredit && pc.bono && availByOwner[k] == null) availByOwner[k] = Math.max(0, (pc.bono.total_credits || 0) - (pc.bono.used_credits || 0));
         }
+        let count = 0;
+        for (const k of Object.keys(sessByOwner)) count += Math.min(sessByOwner[k], availByOwner[k] || 0);
         return count;
       }
 
@@ -3064,6 +3076,7 @@ export async function renderCalendario(container) {
                 // Hijo/familiar del responsable → se crea/reutiliza como familiar suyo.
                 // guest_name guarda el nombre del asistente para que el calendario muestre quién va.
                 const fid = await ensureFamilyMember(p);
+                if (!fid) { showToast(`No se pudo registrar a ${fullName || 'un asistente'} como familiar. Reintenta.`, 'error'); btn.disabled = false; btn.textContent = 'Confirmar'; return; }
                 personTarget[p.id] = { user_id: responsableId, family_member_id: fid, guest_name: fullName || null };
               } else if ((p.email || '').trim()) {
                 // Adulto independiente con email → su propia cuenta + invitación
@@ -3074,6 +3087,7 @@ export async function renderCalendario(container) {
                 // así su reserva entra en el bono del responsable y el cobro queda registrado
                 // (el dueño del bono es siempre el responsable de la reserva).
                 const fid = await ensureFamilyMember(p);
+                if (!fid) { showToast(`No se pudo registrar a ${fullName} como familiar. Reintenta.`, 'error'); btn.disabled = false; btn.textContent = 'Confirmar'; return; }
                 personTarget[p.id] = { user_id: responsableId, family_member_id: fid, guest_name: fullName };
               } else {
                 // Sin cuenta y sin nombre → invitado suelto
@@ -3095,12 +3109,22 @@ export async function renderCalendario(container) {
             const allSessionIds = [...new Set(persons.flatMap(p => p.sessions))];
             let existingEnroll = [];
             if (allSessionIds.length) {
+              // fail-CLOSED: si no se puede verificar lo ya inscrito, abortar (no seguir sin
+              // dedup, que duplicaría inscripciones y cobros). supabase-js no lanza en error
+              // de query → hay que mirar `error` explícitamente, además del try/catch de red.
+              let qErr = null, qData = null;
               try {
-                const { data } = await supabase.from('class_enrollments')
+                const res = await supabase.from('class_enrollments')
                   .select('class_id, user_id, family_member_id')
                   .in('class_id', allSessionIds).neq('status', 'cancelled');
-                existingEnroll = data || [];
-              } catch {}
+                qErr = res.error; qData = res.data;
+              } catch (e) { qErr = e; }
+              if (qErr) {
+                showToast('No se pudo verificar inscripciones existentes. Reintenta.', 'error');
+                btn.disabled = false; btn.textContent = 'Confirmar';
+                return;
+              }
+              existingEnroll = qData || [];
             }
             let _skipped = 0;
             for (const p of persons) {
@@ -3118,7 +3142,9 @@ export async function renderCalendario(container) {
             const ownerSessions = {};
             for (const p of persons) {
               const tgt = personTarget[p.id];
-              if (tgt?.user_id) ownerSessions[tgt.user_id] = (ownerSessions[tgt.user_id] || 0) + p._newSessions.length;
+              // Solo dueños con sesiones NUEVAS (si todas estaban ya asignadas, 0 → no crear
+              // un bono fantasma de 1 crédito/0€ para un dueño que no tiene nada que hacer).
+              if (tgt?.user_id && p._newSessions.length) ownerSessions[tgt.user_id] = (ownerSessions[tgt.user_id] || 0) + p._newSessions.length;
             }
 
             // 2) Déficit (clases nuevas no cubiertas por créditos prepagados) y CARGO por dueño.
@@ -3133,7 +3159,13 @@ export async function renderCalendario(container) {
             for (const ownerId of ownerIds) {
               const need = ownerSessions[ownerId];
               let bono = null;
-              try { bono = await findOwnerBono(ownerId, cls.type); } catch {}
+              // "Ampliar ESTE bono": si el asistente pasó un id explícito y el dueño es la
+              // titular, ampliar EXACTAMENTE ese bono (no re-resolver por tipo, que podría
+              // elegir otro bono vivo del mismo tipo y cobrar/ampliar el equivocado).
+              if (isExtend && prefill?.extendBonoId && ownerId === prefill?.responsable?.profileId) {
+                try { const { data } = await supabase.from('bonos').select('*').eq('id', prefill.extendBonoId).maybeSingle(); if (data) bono = data; } catch {}
+              }
+              if (!bono) { try { bono = await findOwnerBono(ownerId, cls.type); } catch {} }
               const avail = bonoAvailable(bono);
               const deficit = Math.max(0, need - avail);
               // Precio MARGINAL: cobrar el incremento del pack, no un pack nuevo pequeño.
@@ -3142,7 +3174,7 @@ export async function renderCalendario(container) {
               // packPrice(base+deficit) − packPrice(base). Ej: bono de 7 + 3 nuevas = 3 × extra.
               const base = bono ? (bono.total_credits || 0) : 0;
               const rawDeficit = deficit > 0
-                ? round2(getPackPrice(cls.type, base + deficit, Number(cls.price) || 0) - getPackPrice(cls.type, base, Number(cls.price) || 0))
+                ? Math.max(0, round2(getPackPrice(cls.type, base + deficit, Number(cls.price) || 0) - getPackPrice(cls.type, base, Number(cls.price) || 0)))
                 : 0;
               const charge = Math.round(rawDeficit * (1 - discRate) * 100) / 100;
 

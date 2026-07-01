@@ -1187,10 +1187,11 @@ export async function fetchClassEnrollments(classId) {
     family_members: e.family_member_id ? familyMap[e.family_member_id] || null : null,
     profiles: e.user_id ? profilesMap[e.user_id] || null : null,
     bono: e.bono_id ? bonoMap[e.bono_id] || null : null,
-    // Talla de neopreno del asistente (familiar tiene prioridad; si no, el titular)
-    wetsuit_size: (e.family_member_id && familyMap[e.family_member_id]?.wetsuit_size)
-      || (e.user_id && profilesMap[e.user_id]?.wetsuit_size)
-      || null,
+    // Talla de neopreno del ASISTENTE concreto: si la inscripción es de un familiar,
+    // solo su talla (nunca hereda la del titular); si es del titular, la suya.
+    wetsuit_size: e.family_member_id
+      ? (familyMap[e.family_member_id]?.wetsuit_size || null)
+      : (e.user_id ? (profilesMap[e.user_id]?.wetsuit_size || null) : null),
     // Set guest_name from family member or profile if not already set
     guest_name: e.guest_name
       || (e.family_member_id && familyMap[e.family_member_id]?.full_name)
