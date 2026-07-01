@@ -1659,12 +1659,99 @@ export async function renderCalendario(container) {
   async function openBonoExtendAssist(bono, prefill) {
     if (!bono?.class_type) { showToast('Bono sin tipo de clase', 'error'); return; }
     const todayStr = getDateStr(new Date());
-    const { data: seeds } = await supabase.from('surf_classes')
-      .select('*').eq('type', bono.class_type).gte('date', todayStr)
-      .order('date', { ascending: true }).order('time_start', { ascending: true }).limit(1);
-    const seed = seeds && seeds[0];
+    const [seedsRes, titRes, famRes] = await Promise.all([
+      supabase.from('surf_classes').select('*').eq('type', bono.class_type).gte('date', todayStr).order('date', { ascending: true }).order('time_start', { ascending: true }).limit(1),
+      supabase.from('profiles').select('id, full_name, last_name, email, phone, wetsuit_size').eq('id', bono.user_id).maybeSingle(),
+      supabase.from('family_members').select('id, full_name, last_name, birth_date, wetsuit_size').eq('user_id', bono.user_id).order('created_at'),
+    ]);
+    const seed = seedsRes.data && seedsRes.data[0];
     if (!seed) { showToast('No hay clases futuras de este tipo para asignar', 'error'); return; }
-    openBookingPanel(seed, { ...(prefill || {}), extendBonoId: bono.id });
+    const titular = titRes.data || {};
+
+    // Candidatos: titular + familiares de la cuenta (ninguno preseleccionado)
+    const candidates = [];
+    candidates.push({ key: 'tit', nombre: titular.full_name || '', apellidos: titular.last_name || '', talla: titular.wetsuit_size || '', profileId: bono.user_id, familyMemberId: null, isFamilyOfResponsable: false, role: 'Titular' });
+    (famRes.data || []).forEach(m => candidates.push({ key: 'fm:' + m.id, nombre: m.full_name || '', apellidos: m.last_name || '', talla: m.wetsuit_size || '', profileId: bono.user_id, familyMemberId: m.id, isFamilyOfResponsable: true, role: 'Familiar' }));
+
+    const chosen = new Set();
+    const extra = [];
+    let extraSeq = 0;
+    const ov = document.createElement('div');
+    ov.className = 'bk-overlay';
+    ov.style.zIndex = '10020';
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+
+    const cardHtml = (c) => {
+      const sel = chosen.has(c.key);
+      const info = [c.talla ? `Talla ${escapeHtml(String(c.talla))}` : null, c.role].filter(Boolean).join(' · ');
+      return `<div class="ba-card" data-key="${c.key}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:2px solid ${sel ? '#0ea5e9' : '#e2e8f0'};background:${sel ? '#eff6ff' : '#fff'};border-radius:10px;cursor:pointer">
+        <span style="width:18px;height:18px;border-radius:5px;border:2px solid ${sel ? '#0ea5e9' : '#cbd5e1'};background:${sel ? '#0ea5e9' : '#fff'};display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px">${sel ? '✓' : ''}</span>
+        <span style="flex:1"><strong>${escapeHtml(`${c.nombre} ${c.apellidos}`.trim() || 'Sin nombre')}</strong>${info ? `<br><small style="color:#64748b">${info}</small>` : ''}</span>
+      </div>`;
+    };
+
+    function render() {
+      const all = [...candidates, ...extra];
+      ov.innerHTML = `<div style="max-width:520px;width:94%;max-height:88vh;overflow:auto;background:#fff;border-radius:16px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.3)">
+        <h3 style="margin:0 0 4px;font-size:1.15rem">Ampliar bono · ${escapeHtml(TYPE_LABELS[bono.class_type] || bono.class_type)}</h3>
+        <p style="margin:0 0 14px;font-size:.86rem;color:#64748b">Elige a quién le asignas las clases (puedes marcar varios). La responsable seguirá siendo <strong>${escapeHtml(`${titular.full_name || ''} ${titular.last_name || ''}`.trim() || 'la cuenta')}</strong>.</p>
+        <div style="display:flex;flex-direction:column;gap:8px">${all.map(cardHtml).join('') || '<p style="color:#94a3b8;font-size:.85rem">Sin participantes. Añade una persona abajo.</p>'}</div>
+        <div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:12px">
+          <button type="button" id="ba-add-toggle" class="btn line" style="font-size:.85rem;width:100%">+ Añadir persona al bono</button>
+          <div id="ba-add-form" style="display:none;margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px">
+            <label style="font-size:.78rem;color:#64748b">Vincular cliente existente</label>
+            <div style="position:relative;margin:4px 0 10px"><input type="text" id="ba-search" placeholder="Buscar por nombre…" autocomplete="off" style="width:100%" /><div id="ba-search-res" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:5;background:#fff;border:1px solid #e2e8f0;border-radius:8px;max-height:160px;overflow:auto;box-shadow:0 8px 24px rgba(15,47,57,.12)"></div></div>
+            <label style="font-size:.78rem;color:#64748b">…o escribir los datos a mano</label>
+            <div style="display:flex;gap:6px;margin:4px 0 6px"><input type="text" id="ba-nombre" placeholder="Nombre" style="flex:1" /><input type="text" id="ba-apellidos" placeholder="Apellidos" style="flex:1" /></div>
+            <div style="display:flex;gap:6px"><input type="text" id="ba-talla" placeholder="Talla neopreno" style="flex:1" /><input type="email" id="ba-email" placeholder="Email (opcional → crea cuenta)" style="flex:1" /></div>
+            <button type="button" id="ba-add-manual" class="btn" style="margin-top:8px;width:100%;background:#0ea5e9;color:#fff;border:0;font-size:.85rem">Añadir</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+          <button type="button" id="ba-cancel" class="btn line">Cancelar</button>
+          <button type="button" id="ba-continue" class="btn red" ${chosen.size ? '' : 'disabled'} style="${chosen.size ? '' : 'opacity:.5;cursor:not-allowed'}">Continuar (${chosen.size})</button>
+        </div>
+      </div>`;
+
+      ov.querySelectorAll('.ba-card').forEach(b => b.addEventListener('click', () => {
+        const k = b.dataset.key; if (chosen.has(k)) chosen.delete(k); else chosen.add(k); render();
+      }));
+      ov.querySelector('#ba-add-toggle').addEventListener('click', () => { const f = ov.querySelector('#ba-add-form'); f.style.display = f.style.display === 'none' ? '' : 'none'; });
+      let timer = null;
+      ov.querySelector('#ba-search')?.addEventListener('input', (e) => {
+        clearTimeout(timer); const term = e.target.value.trim(); const box = ov.querySelector('#ba-search-res');
+        if (term.length < 2) { box.style.display = 'none'; return; }
+        timer = setTimeout(async () => {
+          const res = await searchProfiles(term);
+          box.innerHTML = res.length ? res.map(p => `<div class="ba-opt" data-id="${p.id}" data-name="${escapeHtml(p.full_name || '')}" data-last="${escapeHtml(p.last_name || '')}" style="padding:7px 10px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.85rem">${escapeHtml(p.full_name || 'Sin nombre')}${p.phone ? ` · ${escapeHtml(p.phone)}` : ''}</div>`).join('') : '<div style="padding:8px;color:#94a3b8;font-size:.82rem">Sin resultados</div>';
+          box.style.display = '';
+        }, 250);
+      });
+      ov.querySelector('#ba-search-res')?.addEventListener('click', (e) => {
+        const o = e.target.closest('.ba-opt'); if (!o) return;
+        const key = 'x:' + (extraSeq++);
+        extra.push({ key, nombre: o.dataset.name, apellidos: o.dataset.last, talla: '', profileId: o.dataset.id, familyMemberId: null, isFamilyOfResponsable: false, role: 'Cliente existente' });
+        chosen.add(key); render();
+      });
+      ov.querySelector('#ba-add-manual')?.addEventListener('click', () => {
+        const nombre = ov.querySelector('#ba-nombre').value.trim();
+        if (!nombre) { showToast('Indica el nombre', 'error'); return; }
+        const key = 'x:' + (extraSeq++);
+        extra.push({ key, nombre, apellidos: ov.querySelector('#ba-apellidos').value.trim(), talla: ov.querySelector('#ba-talla').value.trim(), email: ov.querySelector('#ba-email').value.trim(), profileId: null, familyMemberId: null, isFamilyOfResponsable: true, role: 'Nuevo' });
+        chosen.add(key); render();
+      });
+      ov.querySelector('#ba-cancel').addEventListener('click', close);
+      ov.querySelector('#ba-continue').addEventListener('click', () => {
+        const picked = [...candidates, ...extra].filter(c => chosen.has(c.key));
+        if (!picked.length) { showToast('Elige al menos una persona', 'error'); return; }
+        const personsSeed = picked.map(c => ({ nombre: c.nombre, apellidos: c.apellidos, tallaNeopreno: c.talla || '', profileId: c.profileId, familyMemberId: c.familyMemberId, profileName: `${c.nombre} ${c.apellidos}`.trim(), email: c.email || '', isFamilyOfResponsable: c.isFamilyOfResponsable }));
+        close();
+        openBookingPanel(seed, { extendBonoId: bono.id, persons: personsSeed, responsable: { profileId: bono.user_id, nombre: titular.full_name || '', apellidos: titular.last_name || '', email: titular.email || '' } });
+      });
+    }
+    render();
   }
 
   async function openBookingPanel(cls, prefill = null) {
@@ -1688,14 +1775,27 @@ export async function renderCalendario(container) {
     const isExtend = !!(prefill && prefill.extendBonoId);
     let sessionQuantities = {}; // classId → quantity
     if (!isExtend) sessionQuantities[cls.id] = 1;
-    const firstPerson = { id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: isExtend ? [] : [cls.id] };
-    // "Ampliar": pre-carga el cliente y su familiar; loadPersonCredits() cargará su bono
-    if (prefill) Object.assign(firstPerson, {
-      nombre: prefill.nombre || '', apellidos: prefill.apellidos || '',
-      profileId: prefill.profileId || null, profileName: prefill.profileName || null,
-      familyMemberId: prefill.familyMemberId || null, email: prefill.email || '',
+    const mkPerson = (seed = {}) => ({
+      id: personIdCounter++, nombre: seed.nombre || '', apellidos: seed.apellidos || '', edad: seed.edad || '',
+      sabeNadar: seed.sabeNadar || '', lesion: seed.lesion || 'no', lesionDetalle: seed.lesionDetalle || '',
+      tallaNeopreno: seed.tallaNeopreno || '', nivelSurf: seed.nivelSurf || 'principiante',
+      profileId: seed.profileId || null, profileName: seed.profileName || null, familyMemberId: seed.familyMemberId || null,
+      isFamilyOfResponsable: seed.isFamilyOfResponsable ?? true, email: seed.email || '', sessions: isExtend ? [] : [cls.id],
     });
-    let persons = [firstPerson];
+    // "Ampliar y asignar": puede venir una LISTA de participantes ya elegidos (cards) →
+    // se crean todos pre-vinculados. Si no, una sola persona (pre-cargada del prefill).
+    let persons;
+    if (prefill?.persons?.length) {
+      persons = prefill.persons.map(mkPerson);
+    } else {
+      const firstPerson = mkPerson();
+      if (prefill) Object.assign(firstPerson, {
+        nombre: prefill.nombre || '', apellidos: prefill.apellidos || '',
+        profileId: prefill.profileId || null, profileName: prefill.profileName || null,
+        familyMemberId: prefill.familyMemberId || null, email: prefill.email || '',
+      });
+      persons = [firstPerson];
+    }
     // Modo "ampliar este bono": las personas añadidas solo pueden ser familiares del titular
     // (sin vincular terceros ni email de cuenta propia) → un único dueño = este bono familiar.
     const extendMode = isExtend;
@@ -2307,7 +2407,12 @@ export async function renderCalendario(container) {
           contactData.apellidos = p.apellidos;
         }
       }
-      if (persons[0]) {
+      // Responsable de la reserva: en "ampliar" es SIEMPRE la titular del bono (aunque los
+      // asistentes sean sus familiares) → se pre-asigna como responsable en la confirmación.
+      if (prefill?.responsable?.profileId) {
+        contactSource = 'otra';
+        await prefillContactFromPerson({ profileId: prefill.responsable.profileId, nombre: prefill.responsable.nombre || '', apellidos: prefill.responsable.apellidos || '' });
+      } else if (persons[0]) {
         await prefillContactFromPerson(persons[0]);
       }
 
