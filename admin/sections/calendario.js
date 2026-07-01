@@ -456,6 +456,7 @@ export async function renderCalendario(container) {
             <span class="cal-attendance-icon"></span>
           </label>
           <span class="cal-client-name">${name}${ageLabel}</span>
+          ${e.wetsuit_size ? `<span class="cal-client-talla" style="background:#eef2ff;color:#4338ca;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:999px;white-space:nowrap" title="Talla de neopreno">${escapeHtml(String(e.wetsuit_size))}</span>` : ''}
           ${bonoLabel ? `<span class="cal-client-bono" style="color:#0ea5e9;font-size:.65rem;font-weight:600;white-space:nowrap">${bonoLabel}</span>` : ''}
           <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${isPaid ? '#16a34a' : isPartial ? '#d97706' : '#dc2626'}" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
@@ -1658,12 +1659,99 @@ export async function renderCalendario(container) {
   async function openBonoExtendAssist(bono, prefill) {
     if (!bono?.class_type) { showToast('Bono sin tipo de clase', 'error'); return; }
     const todayStr = getDateStr(new Date());
-    const { data: seeds } = await supabase.from('surf_classes')
-      .select('*').eq('type', bono.class_type).gte('date', todayStr)
-      .order('date', { ascending: true }).order('time_start', { ascending: true }).limit(1);
-    const seed = seeds && seeds[0];
+    const [seedsRes, titRes, famRes] = await Promise.all([
+      supabase.from('surf_classes').select('*').eq('type', bono.class_type).gte('date', todayStr).order('date', { ascending: true }).order('time_start', { ascending: true }).limit(1),
+      supabase.from('profiles').select('id, full_name, last_name, email, phone, wetsuit_size').eq('id', bono.user_id).maybeSingle(),
+      supabase.from('family_members').select('id, full_name, last_name, birth_date, wetsuit_size').eq('user_id', bono.user_id).order('created_at'),
+    ]);
+    const seed = seedsRes.data && seedsRes.data[0];
     if (!seed) { showToast('No hay clases futuras de este tipo para asignar', 'error'); return; }
-    openBookingPanel(seed, { ...(prefill || {}), extendBonoId: bono.id });
+    const titular = titRes.data || {};
+
+    // Candidatos: titular + familiares de la cuenta (ninguno preseleccionado)
+    const candidates = [];
+    candidates.push({ key: 'tit', nombre: titular.full_name || '', apellidos: titular.last_name || '', talla: titular.wetsuit_size || '', profileId: bono.user_id, familyMemberId: null, isFamilyOfResponsable: false, role: 'Titular' });
+    (famRes.data || []).forEach(m => candidates.push({ key: 'fm:' + m.id, nombre: m.full_name || '', apellidos: m.last_name || '', talla: m.wetsuit_size || '', profileId: bono.user_id, familyMemberId: m.id, isFamilyOfResponsable: true, role: 'Familiar' }));
+
+    const chosen = new Set();
+    const extra = [];
+    let extraSeq = 0;
+    const ov = document.createElement('div');
+    ov.className = 'bk-overlay';
+    ov.style.zIndex = '10020';
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+
+    const cardHtml = (c) => {
+      const sel = chosen.has(c.key);
+      const info = [c.talla ? `Talla ${escapeHtml(String(c.talla))}` : null, c.role].filter(Boolean).join(' · ');
+      return `<div class="ba-card" data-key="${c.key}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:2px solid ${sel ? '#0ea5e9' : '#e2e8f0'};background:${sel ? '#eff6ff' : '#fff'};border-radius:10px;cursor:pointer">
+        <span style="width:18px;height:18px;border-radius:5px;border:2px solid ${sel ? '#0ea5e9' : '#cbd5e1'};background:${sel ? '#0ea5e9' : '#fff'};display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px">${sel ? '✓' : ''}</span>
+        <span style="flex:1"><strong>${escapeHtml(`${c.nombre} ${c.apellidos}`.trim() || 'Sin nombre')}</strong>${info ? `<br><small style="color:#64748b">${info}</small>` : ''}</span>
+      </div>`;
+    };
+
+    function render() {
+      const all = [...candidates, ...extra];
+      ov.innerHTML = `<div style="max-width:520px;width:94%;max-height:88vh;overflow:auto;background:#fff;border-radius:16px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.3)">
+        <h3 style="margin:0 0 4px;font-size:1.15rem">Ampliar bono · ${escapeHtml(TYPE_LABELS[bono.class_type] || bono.class_type)}</h3>
+        <p style="margin:0 0 14px;font-size:.86rem;color:#64748b">Elige a quién le asignas las clases (puedes marcar varios). La responsable seguirá siendo <strong>${escapeHtml(`${titular.full_name || ''} ${titular.last_name || ''}`.trim() || 'la cuenta')}</strong>.</p>
+        <div style="display:flex;flex-direction:column;gap:8px">${all.map(cardHtml).join('') || '<p style="color:#94a3b8;font-size:.85rem">Sin participantes. Añade una persona abajo.</p>'}</div>
+        <div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:12px">
+          <button type="button" id="ba-add-toggle" class="btn line" style="font-size:.85rem;width:100%">+ Añadir persona al bono</button>
+          <div id="ba-add-form" style="display:none;margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px">
+            <label style="font-size:.78rem;color:#64748b">Vincular cliente existente</label>
+            <div style="position:relative;margin:4px 0 10px"><input type="text" id="ba-search" placeholder="Buscar por nombre…" autocomplete="off" style="width:100%" /><div id="ba-search-res" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:5;background:#fff;border:1px solid #e2e8f0;border-radius:8px;max-height:160px;overflow:auto;box-shadow:0 8px 24px rgba(15,47,57,.12)"></div></div>
+            <label style="font-size:.78rem;color:#64748b">…o escribir los datos a mano</label>
+            <div style="display:flex;gap:6px;margin:4px 0 6px"><input type="text" id="ba-nombre" placeholder="Nombre" style="flex:1" /><input type="text" id="ba-apellidos" placeholder="Apellidos" style="flex:1" /></div>
+            <div style="display:flex;gap:6px"><input type="text" id="ba-talla" placeholder="Talla neopreno" style="flex:1" /><input type="email" id="ba-email" placeholder="Email (opcional → crea cuenta)" style="flex:1" /></div>
+            <button type="button" id="ba-add-manual" class="btn" style="margin-top:8px;width:100%;background:#0ea5e9;color:#fff;border:0;font-size:.85rem">Añadir</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+          <button type="button" id="ba-cancel" class="btn line">Cancelar</button>
+          <button type="button" id="ba-continue" class="btn red" ${chosen.size ? '' : 'disabled'} style="${chosen.size ? '' : 'opacity:.5;cursor:not-allowed'}">Continuar (${chosen.size})</button>
+        </div>
+      </div>`;
+
+      ov.querySelectorAll('.ba-card').forEach(b => b.addEventListener('click', () => {
+        const k = b.dataset.key; if (chosen.has(k)) chosen.delete(k); else chosen.add(k); render();
+      }));
+      ov.querySelector('#ba-add-toggle').addEventListener('click', () => { const f = ov.querySelector('#ba-add-form'); f.style.display = f.style.display === 'none' ? '' : 'none'; });
+      let timer = null;
+      ov.querySelector('#ba-search')?.addEventListener('input', (e) => {
+        clearTimeout(timer); const term = e.target.value.trim(); const box = ov.querySelector('#ba-search-res');
+        if (term.length < 2) { box.style.display = 'none'; return; }
+        timer = setTimeout(async () => {
+          const res = await searchProfiles(term);
+          box.innerHTML = res.length ? res.map(p => `<div class="ba-opt" data-id="${p.id}" data-name="${escapeHtml(p.full_name || '')}" data-last="${escapeHtml(p.last_name || '')}" style="padding:7px 10px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:.85rem">${escapeHtml(p.full_name || 'Sin nombre')}${p.phone ? ` · ${escapeHtml(p.phone)}` : ''}</div>`).join('') : '<div style="padding:8px;color:#94a3b8;font-size:.82rem">Sin resultados</div>';
+          box.style.display = '';
+        }, 250);
+      });
+      ov.querySelector('#ba-search-res')?.addEventListener('click', (e) => {
+        const o = e.target.closest('.ba-opt'); if (!o) return;
+        const key = 'x:' + (extraSeq++);
+        extra.push({ key, nombre: o.dataset.name, apellidos: o.dataset.last, talla: '', profileId: o.dataset.id, familyMemberId: null, isFamilyOfResponsable: false, role: 'Cliente existente' });
+        chosen.add(key); render();
+      });
+      ov.querySelector('#ba-add-manual')?.addEventListener('click', () => {
+        const nombre = ov.querySelector('#ba-nombre').value.trim();
+        if (!nombre) { showToast('Indica el nombre', 'error'); return; }
+        const key = 'x:' + (extraSeq++);
+        extra.push({ key, nombre, apellidos: ov.querySelector('#ba-apellidos').value.trim(), talla: ov.querySelector('#ba-talla').value.trim(), email: ov.querySelector('#ba-email').value.trim(), profileId: null, familyMemberId: null, isFamilyOfResponsable: true, role: 'Nuevo' });
+        chosen.add(key); render();
+      });
+      ov.querySelector('#ba-cancel').addEventListener('click', close);
+      ov.querySelector('#ba-continue').addEventListener('click', () => {
+        const picked = [...candidates, ...extra].filter(c => chosen.has(c.key));
+        if (!picked.length) { showToast('Elige al menos una persona', 'error'); return; }
+        const personsSeed = picked.map(c => ({ nombre: c.nombre, apellidos: c.apellidos, tallaNeopreno: c.talla || '', profileId: c.profileId, familyMemberId: c.familyMemberId, profileName: `${c.nombre} ${c.apellidos}`.trim(), email: c.email || '', isFamilyOfResponsable: c.isFamilyOfResponsable }));
+        close();
+        openBookingPanel(seed, { extendBonoId: bono.id, persons: personsSeed, responsable: { profileId: bono.user_id, nombre: titular.full_name || '', apellidos: titular.last_name || '', email: titular.email || '' } });
+      });
+    }
+    render();
   }
 
   async function openBookingPanel(cls, prefill = null) {
@@ -1687,14 +1775,27 @@ export async function renderCalendario(container) {
     const isExtend = !!(prefill && prefill.extendBonoId);
     let sessionQuantities = {}; // classId → quantity
     if (!isExtend) sessionQuantities[cls.id] = 1;
-    const firstPerson = { id: personIdCounter++, nombre: '', apellidos: '', edad: '', sabeNadar: '', lesion: 'no', lesionDetalle: '', tallaNeopreno: '', nivelSurf: 'principiante', profileId: null, profileName: null, familyMemberId: null, isFamilyOfResponsable: true, email: '', sessions: isExtend ? [] : [cls.id] };
-    // "Ampliar": pre-carga el cliente y su familiar; loadPersonCredits() cargará su bono
-    if (prefill) Object.assign(firstPerson, {
-      nombre: prefill.nombre || '', apellidos: prefill.apellidos || '',
-      profileId: prefill.profileId || null, profileName: prefill.profileName || null,
-      familyMemberId: prefill.familyMemberId || null, email: prefill.email || '',
+    const mkPerson = (seed = {}) => ({
+      id: personIdCounter++, nombre: seed.nombre || '', apellidos: seed.apellidos || '', edad: seed.edad || '',
+      sabeNadar: seed.sabeNadar || '', lesion: seed.lesion || 'no', lesionDetalle: seed.lesionDetalle || '',
+      tallaNeopreno: seed.tallaNeopreno || '', nivelSurf: seed.nivelSurf || 'principiante',
+      profileId: seed.profileId || null, profileName: seed.profileName || null, familyMemberId: seed.familyMemberId || null,
+      isFamilyOfResponsable: seed.isFamilyOfResponsable ?? true, email: seed.email || '', sessions: isExtend ? [] : [cls.id],
     });
-    let persons = [firstPerson];
+    // "Ampliar y asignar": puede venir una LISTA de participantes ya elegidos (cards) →
+    // se crean todos pre-vinculados. Si no, una sola persona (pre-cargada del prefill).
+    let persons;
+    if (prefill?.persons?.length) {
+      persons = prefill.persons.map(mkPerson);
+    } else {
+      const firstPerson = mkPerson();
+      if (prefill) Object.assign(firstPerson, {
+        nombre: prefill.nombre || '', apellidos: prefill.apellidos || '',
+        profileId: prefill.profileId || null, profileName: prefill.profileName || null,
+        familyMemberId: prefill.familyMemberId || null, email: prefill.email || '',
+      });
+      persons = [firstPerson];
+    }
     // Modo "ampliar este bono": las personas añadidas solo pueden ser familiares del titular
     // (sin vincular terceros ni email de cuenta propia) → un único dueño = este bono familiar.
     const extendMode = isExtend;
@@ -1708,6 +1809,9 @@ export async function renderCalendario(container) {
     // (sin cuenta propia) cuelgan del responsable y comparten un único pack ('resp').
     function ownerKeyForPerson(p) {
       if (p.profileId) return 'pid:' + p.profileId;
+      // Familiar/nuevo del responsable → cuelga del bono del titular (mismo orden de ramas
+      // que el confirm: isFamilyOfResponsable ANTES que email) para no divergir del cargo real.
+      if (p.isFamilyOfResponsable && prefill?.responsable?.profileId) return 'pid:' + prefill.responsable.profileId;
       if ((p.email || '').trim()) return 'email:' + p.email.trim().toLowerCase();
       return 'resp';
     }
@@ -2244,23 +2348,25 @@ export async function renderCalendario(container) {
 
       // Recalculate subtotal excluding sessions covered by credit/bono
       function recalcSubtotal() {
-        // Sesiones a cobrar (no cubiertas por crédito) agrupadas POR DUEÑO, y cada
-        // dueño preciado como su propio pack → coincide con el cargo real del confirm
-        // (totalCharge) y con el tope del anticipo.
-        const paidByOwner = {};
+        // Agrupa las sesiones POR DUEÑO, resta el avail del bono UNA vez por dueño, y
+        // precia el déficit de forma MARGINAL (packPrice(base+deficit)−packPrice(base))
+        // → coincide EXACTAMENTE con el totalCharge del confirm y con el tope del anticipo.
+        const sessByOwner = {}, bonoByOwner = {};
         for (const p of persons) {
           const k = ownerKeyForPerson(p);
+          sessByOwner[k] = (sessByOwner[k] || 0) + p.sessions.length;
           const pc = personCredits[p.id];
-          let paidCount = p.sessions.length;
-          if (pc?.useCredit && pc.bono) {
-            // Solo las sesiones que caben en los créditos disponibles van gratis; el
-            // overage se cobra (coherente con el déficit del confirm).
-            const avail = Math.max(0, (pc.bono.total_credits || 0) - (pc.bono.used_credits || 0));
-            paidCount = Math.max(0, p.sessions.length - avail);
-          }
-          paidByOwner[k] = (paidByOwner[k] || 0) + paidCount;
+          if (pc?.useCredit && pc.bono && !bonoByOwner[k]) bonoByOwner[k] = pc.bono;
         }
-        subtotal = Object.values(paidByOwner).reduce((s, n) => s + getPackPrice(cls.type, n, price), 0);
+        subtotal = Object.keys(sessByOwner).reduce((s, k) => {
+          const need = sessByOwner[k];
+          const bono = bonoByOwner[k];
+          const avail = bono ? Math.max(0, (bono.total_credits || 0) - (bono.used_credits || 0)) : 0;
+          const deficit = Math.max(0, need - avail);
+          if (deficit <= 0) return s;
+          const base = bono ? (bono.total_credits || 0) : 0;
+          return s + Math.max(0, getPackPrice(cls.type, base + deficit, price) - getPackPrice(cls.type, base, price));
+        }, 0);
       }
 
       // Checkout state
@@ -2306,7 +2412,12 @@ export async function renderCalendario(container) {
           contactData.apellidos = p.apellidos;
         }
       }
-      if (persons[0]) {
+      // Responsable de la reserva: en "ampliar" es SIEMPRE la titular del bono (aunque los
+      // asistentes sean sus familiares) → se pre-asigna como responsable en la confirmación.
+      if (prefill?.responsable?.profileId) {
+        contactSource = 'otra';
+        await prefillContactFromPerson({ profileId: prefill.responsable.profileId, nombre: prefill.responsable.nombre || '', apellidos: prefill.responsable.apellidos || '' });
+      } else if (persons[0]) {
         await prefillContactFromPerson(persons[0]);
       }
 
@@ -2322,23 +2433,25 @@ export async function renderCalendario(container) {
                 .eq('class_type', cls.type)
                 .in('status', ['active', 'exhausted'])
                 .gt('expires_at', new Date().toISOString());
-              // Find bonos with available credits, enrich with expected price
-              // (el filtro used<total ya descarta los agotados; incluir 'exhausted' solo
-              //  alinea el preview con el handler de confirmar)
-              const allBonos = (bonos || []).filter(b => b.used_credits < b.total_credits).map(b => {
+              // Conservamos TAMBIÉN los bonos agotados (used>=total): el preview necesita su
+              // 'base' (total_credits) para precisar el cargo marginal igual que el confirm
+              // (que amplía el bono agotado). Si no, el preview cobraría un pack fresco.
+              const allBonos = (bonos || []).map(b => {
                 const expectedPrice = bonoExpected(b);
-                // total_paid se mantiene sincronizado con la suma de payments (sin suponer importes)
                 const paid = Number(b.total_paid || 0);
                 const bPending = Math.max(0, Math.round((expectedPrice - paid) * 100) / 100);
                 return { ...b, totalPaidReal: paid, expectedPrice, pendingAmount: bPending, isFullyPaid: bPending <= 0 };
               });
-              const totalRemaining = allBonos.reduce((sum, b) => sum + (b.total_credits - b.used_credits), 0);
-              // Default: pick the first bono with enough credits
-              const bestBono = allBonos.find(b => (b.total_credits - b.used_credits) >= p.sessions.length) || allBonos[0] || null;
+              const totalRemaining = allBonos.reduce((sum, b) => sum + Math.max(0, b.total_credits - b.used_credits), 0);
+              // Bono por defecto: el que tenga créditos suficientes; si no, el que tenga
+              // ALGÚN crédito; si no, el más reciente (mismo criterio que findOwnerBono).
+              const bestBono = allBonos.find(b => (b.total_credits - b.used_credits) >= p.sessions.length)
+                || allBonos.find(b => (b.total_credits - b.used_credits) > 0)
+                || allBonos[0] || null;
               personCredits[p.id] = {
-                // Usa el bono si quedan créditos; las clases que excedan los
-                // créditos se cobran aparte (rojas) en el confirmar.
-                useCredit: totalRemaining > 0,
+                // Hay bono → se usa (se amplía si hace falta). Las clases que excedan los
+                // créditos libres se cobran al precio marginal en el confirmar.
+                useCredit: !!bestBono,
                 bono: bestBono,
                 selectedBonoId: bestBono?.id || null,
                 allBonos,
@@ -2350,13 +2463,18 @@ export async function renderCalendario(container) {
       }
       await loadPersonCredits();
 
-      // Count how many sessions are covered by credits
+      // Cuántas sesiones cubren realmente los créditos (topado por avail, por DUEÑO para
+      // no contar dos veces el crédito de un bono compartido entre titular y familiares).
       function getCreditSessions() {
-        let count = 0;
+        const sessByOwner = {}, availByOwner = {};
         for (const p of persons) {
+          const k = ownerKeyForPerson(p);
+          sessByOwner[k] = (sessByOwner[k] || 0) + p.sessions.length;
           const pc = personCredits[p.id];
-          if (pc?.useCredit && pc.bono) count += p.sessions.length;
+          if (pc?.useCredit && pc.bono && availByOwner[k] == null) availByOwner[k] = Math.max(0, (pc.bono.total_credits || 0) - (pc.bono.used_credits || 0));
         }
+        let count = 0;
+        for (const k of Object.keys(sessByOwner)) count += Math.min(sessByOwner[k], availByOwner[k] || 0);
         return count;
       }
 
@@ -2958,6 +3076,7 @@ export async function renderCalendario(container) {
                 // Hijo/familiar del responsable → se crea/reutiliza como familiar suyo.
                 // guest_name guarda el nombre del asistente para que el calendario muestre quién va.
                 const fid = await ensureFamilyMember(p);
+                if (!fid) { showToast(`No se pudo registrar a ${fullName || 'un asistente'} como familiar. Reintenta.`, 'error'); btn.disabled = false; btn.textContent = 'Confirmar'; return; }
                 personTarget[p.id] = { user_id: responsableId, family_member_id: fid, guest_name: fullName || null };
               } else if ((p.email || '').trim()) {
                 // Adulto independiente con email → su propia cuenta + invitación
@@ -2968,6 +3087,7 @@ export async function renderCalendario(container) {
                 // así su reserva entra en el bono del responsable y el cobro queda registrado
                 // (el dueño del bono es siempre el responsable de la reserva).
                 const fid = await ensureFamilyMember(p);
+                if (!fid) { showToast(`No se pudo registrar a ${fullName} como familiar. Reintenta.`, 'error'); btn.disabled = false; btn.textContent = 'Confirmar'; return; }
                 personTarget[p.id] = { user_id: responsableId, family_member_id: fid, guest_name: fullName };
               } else {
                 // Sin cuenta y sin nombre → invitado suelto
@@ -2983,11 +3103,48 @@ export async function renderCalendario(container) {
             // existe se amplía para cubrir las clases nuevas. Los créditos prepagados
             // ya disponibles se consumen primero (no se cobran dos veces).
 
-            // 1) Sesiones nuevas por dueño (user_id)
+            // 0) DEDUP: no re-apuntar (ni contar/cobrar) sesiones que la persona YA tiene.
+            //    Solo para personas identificables (user_id o family_member_id); los invitados
+            //    sueltos sin ficha no se deduplican. p._newSessions = solo las nuevas.
+            const allSessionIds = [...new Set(persons.flatMap(p => p.sessions))];
+            let existingEnroll = [];
+            if (allSessionIds.length) {
+              // fail-CLOSED: si no se puede verificar lo ya inscrito, abortar (no seguir sin
+              // dedup, que duplicaría inscripciones y cobros). supabase-js no lanza en error
+              // de query → hay que mirar `error` explícitamente, además del try/catch de red.
+              let qErr = null, qData = null;
+              try {
+                const res = await supabase.from('class_enrollments')
+                  .select('class_id, user_id, family_member_id')
+                  .in('class_id', allSessionIds).neq('status', 'cancelled');
+                qErr = res.error; qData = res.data;
+              } catch (e) { qErr = e; }
+              if (qErr) {
+                showToast('No se pudo verificar inscripciones existentes. Reintenta.', 'error');
+                btn.disabled = false; btn.textContent = 'Confirmar';
+                return;
+              }
+              existingEnroll = qData || [];
+            }
+            let _skipped = 0;
+            for (const p of persons) {
+              const tgt = personTarget[p.id] || {};
+              if (!(tgt.user_id || tgt.family_member_id)) { p._newSessions = p.sessions.slice(); continue; }
+              p._newSessions = p.sessions.filter(sid => {
+                const has = existingEnroll.some(e => e.class_id === sid && (e.user_id || null) === (tgt.user_id || null) && (e.family_member_id || null) === (tgt.family_member_id || null));
+                if (has) _skipped++;
+                return !has;
+              });
+            }
+            if (_skipped > 0) showToast(`${_skipped} sesión(es) ya estaban asignadas · se omiten`, 'info');
+
+            // 1) Sesiones nuevas por dueño (user_id) — solo las que NO tenía ya
             const ownerSessions = {};
             for (const p of persons) {
               const tgt = personTarget[p.id];
-              if (tgt?.user_id) ownerSessions[tgt.user_id] = (ownerSessions[tgt.user_id] || 0) + p.sessions.length;
+              // Solo dueños con sesiones NUEVAS (si todas estaban ya asignadas, 0 → no crear
+              // un bono fantasma de 1 crédito/0€ para un dueño que no tiene nada que hacer).
+              if (tgt?.user_id && p._newSessions.length) ownerSessions[tgt.user_id] = (ownerSessions[tgt.user_id] || 0) + p._newSessions.length;
             }
 
             // 2) Déficit (clases nuevas no cubiertas por créditos prepagados) y CARGO por dueño.
@@ -3002,10 +3159,23 @@ export async function renderCalendario(container) {
             for (const ownerId of ownerIds) {
               const need = ownerSessions[ownerId];
               let bono = null;
-              try { bono = await findOwnerBono(ownerId, cls.type); } catch {}
+              // "Ampliar ESTE bono": si el asistente pasó un id explícito y el dueño es la
+              // titular, ampliar EXACTAMENTE ese bono (no re-resolver por tipo, que podría
+              // elegir otro bono vivo del mismo tipo y cobrar/ampliar el equivocado).
+              if (isExtend && prefill?.extendBonoId && ownerId === prefill?.responsable?.profileId) {
+                try { const { data } = await supabase.from('bonos').select('*').eq('id', prefill.extendBonoId).maybeSingle(); if (data) bono = data; } catch {}
+              }
+              if (!bono) { try { bono = await findOwnerBono(ownerId, cls.type); } catch {} }
               const avail = bonoAvailable(bono);
               const deficit = Math.max(0, need - avail);
-              const rawDeficit = deficit > 0 ? getPackPrice(cls.type, deficit, Number(cls.price) || 0) : 0;
+              // Precio MARGINAL: cobrar el incremento del pack, no un pack nuevo pequeño.
+              // base = créditos que YA tiene el bono (0 si no hay bono). Así las clases por
+              // encima del pack máximo se cobran al extra_class_price configurado en Actividades:
+              // packPrice(base+deficit) − packPrice(base). Ej: bono de 7 + 3 nuevas = 3 × extra.
+              const base = bono ? (bono.total_credits || 0) : 0;
+              const rawDeficit = deficit > 0
+                ? Math.max(0, round2(getPackPrice(cls.type, base + deficit, Number(cls.price) || 0) - getPackPrice(cls.type, base, Number(cls.price) || 0)))
+                : 0;
               const charge = Math.round(rawDeficit * (1 - discRate) * 100) / 100;
 
               // UPGRADE clase suelta → bono: si NO tiene bono de este tipo pero SÍ clases
@@ -3112,7 +3282,8 @@ export async function renderCalendario(container) {
             for (const p of persons) {
               const tgt = personTarget[p.id] || { guest_name: `${p.nombre} ${p.apellidos}`.trim() || 'Invitado' };
               const ownerBono = tgt.user_id ? bonoByOwner[tgt.user_id] : null;
-              for (const sid of p.sessions) {
+              // Solo las sesiones NUEVAS (las que ya tenía se omitieron en el dedup)
+              for (const sid of (p._newSessions || p.sessions)) {
                 const enrollData = { class_id: sid, created_at: new Date().toISOString() };
                 if (ownerBono?.id) {
                   enrollData.bono_id = ownerBono.id;

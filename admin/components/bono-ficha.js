@@ -450,7 +450,9 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   function suggestExtCharge() {
     const extra = parseInt(extCredits.value, 10) || 0;
     const newTotal = (bono.total_credits || 0) + extra;
-    extCharge.value = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - expected)).toFixed(2);
+    // Precio MARGINAL: incremento del pack (clases extra al extra_class_price configurado),
+    // no un pack pequeño. base = créditos actuales del bono.
+    extCharge.value = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - getPackPrice(bono.class_type, bono.total_credits || 0))).toFixed(2);
   }
   extCredits?.addEventListener('input', suggestExtCharge);
   if (extCredits) suggestExtCharge();
@@ -466,7 +468,9 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
     try {
       // El valor del bono sube por el PRECIO del pack de las clases añadidas, NO por lo
       // que se cobre ahora. Cobrar es independiente (0 = dejar pendiente → queda como deuda).
-      const valueAdded = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - expected));
+      // Valor añadido = precio marginal del catálogo (clases extra al extra_class_price),
+      // preservando cualquier descuento sobre las clases originales.
+      const valueAdded = Math.max(0, round2(getPackPrice(bono.class_type, newTotal) - getPackPrice(bono.class_type, bono.total_credits || 0)));
       const newCustomTotal = bono.custom_total != null ? round2(Number(bono.custom_total) + valueAdded) : null;
       await extendBono(bonoId, { newTotalCredits: newTotal, newCustomTotal, status: 'active', expires_at: defaultBonoExpiry() });
       if (charge > 0) {
