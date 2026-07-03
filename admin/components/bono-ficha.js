@@ -72,6 +72,9 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
   const paidSum = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
   const paid = Math.max(paidSum, round2(Number(bono.total_paid || 0)));
   const pending = Math.max(0, round2(expected - paid));
+  // Saldo a favor: si se pagó más que el total actual del bono (p.ej. tras quitar una
+  // clase del bono, que recalcula el precio a la baja). No se toca el dinero: solo se muestra.
+  const overpaid = Math.max(0, round2(paid - expected));
   const fullyPaid = pending <= 0;
   const remaining = bonoAvailable(bono);
   const pct = bono.total_credits > 0 ? Math.round((bono.used_credits / bono.total_credits) * 100) : 0;
@@ -224,6 +227,7 @@ export async function openBonoFicha(bonoId, { onChange } = {}) {
             <div class="bf-kpi"><div class="l">Clases usadas</div><div class="v">${bono.used_credits}/${bono.total_credits}</div></div>
             <div class="bf-kpi ${remaining > 0 ? 'pending' : ''}"><div class="l">Pendientes de asignar</div><div class="v">${remaining}</div></div>
             <div class="bf-kpi"><div class="l">Pagado</div><div class="v">${formatCurrency(paid)}</div></div>
+            ${overpaid > 0 ? `<div class="bf-kpi" style="background:#ecfdf5;border-color:#a7f3d0"><div class="l" style="color:#065f46">Saldo a favor</div><div class="v" style="color:#059669">${formatCurrency(overpaid)}</div></div>` : ''}
             <div class="bf-kpi"><div class="l">Total del bono</div>
               <div class="v bf-total-show">${formatCurrency(expected)}
                 <button class="bf-total-edit" title="Editar total" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:.95rem">✎</button>

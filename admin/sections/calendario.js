@@ -464,6 +464,9 @@ export async function renderCalendario(container) {
           ${e.bono ? `<button class="cal-pending-btn" data-eid="${e.id}" data-client-name="${name}" data-attended="${isAttended}" title="Dejar pendiente · libera el crédito del bono para usarlo otro día">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a16207" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
           </button>` : ''}
+          ${e.bono ? `<button class="cal-remove-bono-btn" data-eid="${e.id}" data-bono-id="${e.bono_id || ''}" data-client-name="${name}" title="Quitar esta clase del bono (baja el total y recalcula el precio)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>` : ''}
           <span class="cal-client-move-btns">
             <button class="cal-move-btn" data-eid="${e.id}" data-class-id="${c.id}" title="Mover a otro día">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14l2 2 4-4"/></svg>
@@ -1114,6 +1117,48 @@ export async function renderCalendario(container) {
             .update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', eid);
           if (error) throw error;
           showToast('Clase liberada · crédito pendiente de asignar', 'success');
+          render();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+      });
+    });
+
+    // "x": QUITAR esta clase del bono. A diferencia de "dejar pendiente" (que libera el
+    // crédito para otro día), aquí la clase se PIERDE: baja total_credits en 1 y RECALCULA
+    // el precio con las tarifas configuradas (quita el marginal de esa clase). Si el bono
+    // queda pagado de más, la ficha del bono muestra el saldo a favor.
+    container.querySelectorAll('.cal-remove-bono-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const eid = btn.dataset.eid;
+        const bonoId = btn.dataset.bonoId || null;
+        const name = btn.dataset.clientName || 'esta persona';
+        if (!eid) return;
+        let bono = null;
+        if (bonoId) { try { const { data } = await supabase.from('bonos').select('*').eq('id', bonoId).maybeSingle(); bono = data; } catch {} }
+        let msg = `¿Quitar la clase de ${name} del bono? La clase se pierde (el crédito no se devuelve).`;
+        if (bono) {
+          const oldTotal = bono.total_credits || 0;
+          const newTotal = Math.max(0, oldTotal - 1);
+          const newExpected = Math.max(0, round2(bonoExpected(bono) - (getPackPrice(bono.class_type, oldTotal) - getPackPrice(bono.class_type, newTotal))));
+          msg = `¿Quitar esta clase del bono de ${name}?\n\nEl bono pasará de ${oldTotal} a ${newTotal} clase(s) y su precio a ${newExpected.toFixed(2)}€.\nLa clase se pierde (el crédito no se devuelve).`;
+        }
+        if (!confirm(msg)) return;
+        try {
+          await deleteEnrollment(eid);
+          if (bonoId) {
+            // Refetch: used_credits ya lo recalculó el trigger; total/custom siguen siendo los previos.
+            let fresh = null;
+            try { const { data } = await supabase.from('bonos').select('*').eq('id', bonoId).maybeSingle(); fresh = data; } catch {}
+            if (fresh) {
+              const oldTotal = fresh.total_credits || 0;
+              const newTotal = Math.max(0, oldTotal - 1);
+              const newExpected = Math.max(0, round2(bonoExpected(fresh) - (getPackPrice(fresh.class_type, oldTotal) - getPackPrice(fresh.class_type, newTotal))));
+              const used = fresh.used_credits || 0;
+              const status = (fresh.status === 'cancelled' || fresh.status === 'expired') ? fresh.status : (used >= newTotal ? 'exhausted' : 'active');
+              await extendBono(bonoId, { newTotalCredits: newTotal, newCustomTotal: newExpected, status });
+            }
+          }
+          showToast('Clase quitada del bono · precio recalculado', 'success');
           render();
         } catch (err) { showToast('Error: ' + err.message, 'error'); }
       });
