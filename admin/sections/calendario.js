@@ -465,7 +465,7 @@ export async function renderCalendario(container) {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a16207" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
           </button>` : ''}
           ${e.bono ? `<button class="cal-remove-bono-btn" data-eid="${e.id}" data-bono-id="${e.bono_id || ''}" data-client-name="${name}" title="Quitar esta clase del bono (baja el total y recalcula el precio)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>` : ''}
           <span class="cal-client-move-btns">
             <button class="cal-move-btn" data-eid="${e.id}" data-class-id="${c.id}" title="Mover a otro día">

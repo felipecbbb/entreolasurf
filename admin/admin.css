@@ -2140,6 +2140,25 @@ a.admin-nav-item-external .nav-icon svg {
   background: #fef3c7;
   border-color: #fcd34d;
 }
+/* "Quitar clase del bono": elimina la clase y recalcula el precio */
+.cal-remove-bono-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  background: #fef2f2;
+  cursor: pointer;
+  color: #dc2626;
+  padding: 0;
+  flex-shrink: 0;
+}
+.cal-remove-bono-btn:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
 
 /* Drop outside hint */
 .cal-day-content.drop-outside-active {
