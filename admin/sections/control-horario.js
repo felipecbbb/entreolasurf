@@ -55,7 +55,13 @@ function shiftHours(s) {
   if (a == null || b == null || b <= a) return 0;
   return (b - a) / 60;
 }
+// Tipos de tarifa: por hora (horas × €/h) o importe FIJO del día.
+const FIXED_TYPES = ['dia_largo', 'dia_corto', 'fija'];
+const PAY_TYPE_LABELS = { hora: 'Por hora', dia_largo: 'Día largo', dia_corto: 'Día corto', fija: 'Tarifa fija' };
+function isFixedType(t) { return FIXED_TYPES.includes(t); }
 function shiftCost(s, fallbackRate) {
+  // Fijo del día: el importe guardado (snapshot), independiente de las horas.
+  if (isFixedType(s.pay_type)) return Number(s.fixed_amount) || 0;
   const rate = s.hourly_rate != null ? Number(s.hourly_rate)
     : (fallbackRate != null ? Number(fallbackRate) : 0);
   return shiftHours(s) * (Number.isFinite(rate) ? rate : 0);
@@ -76,11 +82,24 @@ function isSchemaMissing(error) {
 async function fetchInstructors() {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, hourly_rate')
+    .select('id, full_name, hourly_rate, default_pay_type, fixed_rate')
     .in('role', ['admin', 'encargado'])
     .order('full_name', { ascending: true });
   if (error) throw error;
   return data || [];
+}
+async function fetchPayrollConfig() {
+  const { data, error } = await supabase.from('payroll_config').select('dia_largo, dia_corto').eq('id', 1).maybeSingle();
+  if (error && !isSchemaMissing(error)) throw error;
+  return data || { dia_largo: 70, dia_corto: 62 };
+}
+async function savePayrollConfig(dia_largo, dia_corto) {
+  const { error } = await supabase.from('payroll_config').update({ dia_largo, dia_corto, updated_at: new Date().toISOString() }).eq('id', 1);
+  if (error) throw error;
+}
+async function updateInstructorTarifa(id, fields) {
+  const { error } = await supabase.from('profiles').update(fields).eq('id', id);
+  if (error) throw error;
 }
 async function fetchShifts(from, to) {
   const { data, error } = await supabase
@@ -121,10 +140,24 @@ export async function renderControlHorario(container) {
   let byId = {};                           // id → instructor
   let colorOf = {};                        // id → color
   let shifts = [];                         // turnos del rango cargado
+  let payroll = { dia_largo: 70, dia_corto: 62 }; // importes globales día largo/corto
 
   function rateFor(id) {
     const r = byId[id]?.hourly_rate;
     return r != null ? Number(r) : null;
+  }
+  // Importe fijo que corresponde a un tipo de tarifa (para prerellenar / calcular).
+  function fixedAmountForType(type, ins) {
+    if (type === 'dia_largo') return Number(payroll.dia_largo) || 0;
+    if (type === 'dia_corto') return Number(payroll.dia_corto) || 0;
+    if (type === 'fija') return ins?.fixed_rate != null ? Number(ins.fixed_rate) : null;
+    return null;
+  }
+  // Etiqueta de tarifa de un turno para el resumen/rejilla.
+  function shiftTariffLabel(s) {
+    if (isFixedType(s.pay_type)) return PAY_TYPE_LABELS[s.pay_type];
+    const r = s.hourly_rate != null ? Number(s.hourly_rate) : rateFor(s.instructor_id);
+    return r != null ? formatCurrency(r) + '/h' : 'por hora';
   }
   function nameFor(id) {
     return byId[id]?.full_name || 'Instructor';
@@ -142,10 +175,10 @@ export async function renderControlHorario(container) {
     const to = maxDateStr(weekTo, monthTo);
 
     try {
-      [instructors, shifts] = await Promise.all([fetchInstructors(), fetchShifts(from, to)]);
+      [instructors, shifts, payroll] = await Promise.all([fetchInstructors(), fetchShifts(from, to), fetchPayrollConfig()]);
     } catch (err) {
       if (isSchemaMissing(err)) {
-        container.innerHTML = `<div class="admin-empty"><p><strong>Falta aplicar la migración de Control Horario.</strong><br>Ejecuta <code>supabase/migration-instructor-shifts.sql</code> en el SQL Editor de Supabase y recarga la página.</p></div>`;
+        container.innerHTML = `<div class="admin-empty"><p><strong>Falta aplicar una migración de Control Horario.</strong><br>Ejecuta en el SQL Editor de Supabase <code>supabase/migration-instructor-shifts.sql</code> y <code>supabase/migration-payroll-tarifas.sql</code>, y recarga la página.</p></div>`;
       } else {
         container.innerHTML = `<div class="admin-empty"><p>Error al cargar: ${esc(err.message)}</p></div>`;
       }
@@ -169,7 +202,7 @@ export async function renderControlHorario(container) {
           <div class="ch-shift" data-id="${s.id}" style="border-left-color:${c}">
             <span class="ch-shift-time">${hm(s.start_time)}–${hm(s.end_time)}</span>
             <span class="ch-shift-name" style="color:${c}">${esc(nameFor(s.instructor_id))}</span>
-            <span class="ch-shift-meta">${fmtHours(shiftHours(s))} · ${formatCurrency(shiftCost(s, rateFor(s.instructor_id)))}</span>
+            <span class="ch-shift-meta">${isFixedType(s.pay_type) ? PAY_TYPE_LABELS[s.pay_type] : fmtHours(shiftHours(s))} · ${formatCurrency(shiftCost(s, rateFor(s.instructor_id)))}</span>
           </div>`;
       }).join('') || `<div class="ch-day-empty">—</div>`;
       return `
@@ -241,11 +274,15 @@ export async function renderControlHorario(container) {
         .sort((a, b) => nameFor(a).localeCompare(nameFor(b)))
         .map(k => {
           const c = colorOf[k] || '#0f2f39';
+          const ins = byId[k];
           const rate = rateFor(k);
+          const tarifaCell = (ins?.default_pay_type && ins.default_pay_type !== 'hora')
+            ? PAY_TYPE_LABELS[ins.default_pay_type]
+            : (rate != null ? formatCurrency(rate) + '/h' : '<span class="ch-norate">sin tarifa</span>');
           return `<tr>
             <td><span class="ch-dot" style="background:${c}"></span>${esc(nameFor(k))}</td>
             <td>${fmtHours(agg[k].hours)}</td>
-            <td>${rate != null ? formatCurrency(rate) + '/h' : '<span class="ch-norate">sin tarifa</span>'}</td>
+            <td>${tarifaCell}</td>
             <td class="ch-total-cell">${formatCurrency(agg[k].cost)}</td>
           </tr>`;
         }).join('');
@@ -306,11 +343,16 @@ export async function renderControlHorario(container) {
     if (!instructors.length) { showToast('No hay instructores. Crea encargados en Equipo.', 'error'); return; }
     const isNew = !shift;
     const s = shift || {};
+    const selInsId = s.instructor_id || (isNew ? instructors[0]?.id : null);
+    const insSel = byId[selInsId] || instructors[0] || {};
     const insOptions = instructors.map(ins =>
-      `<option value="${ins.id}" data-rate="${ins.hourly_rate ?? ''}" ${s.instructor_id === ins.id ? 'selected' : ''}>${esc(ins.full_name || 'Instructor')}</option>`
+      `<option value="${ins.id}" ${selInsId === ins.id ? 'selected' : ''}>${esc(ins.full_name || 'Instructor')}</option>`
     ).join('');
-    const defaultRate = s.hourly_rate != null ? s.hourly_rate
-      : (isNew && instructors[0] ? (instructors[0].hourly_rate ?? '') : (rateFor(s.instructor_id) ?? ''));
+    // Tipo de tarifa: el del turno; si es nuevo, el por defecto del instructor; si no, 'hora'.
+    const initType = s.pay_type || (isNew ? (insSel.default_pay_type || 'hora') : 'hora');
+    const amountVal = isFixedType(initType)
+      ? (s.fixed_amount != null ? s.fixed_amount : (fixedAmountForType(initType, insSel) ?? ''))
+      : (s.hourly_rate != null ? s.hourly_rate : (insSel.hourly_rate ?? ''));
 
     openModal(isNew ? 'Añadir horas' : 'Editar horas', `
       <form id="ch-form" class="ch-form">
@@ -324,8 +366,19 @@ export async function renderControlHorario(container) {
             <input type="date" class="act-form-input" id="ch-f-date" value="${s.work_date || prefillDate || getDateStr(new Date())}" required>
           </div>
           <div class="act-form-field">
-            <label class="act-form-label">TARIFA €/H</label>
-            <input type="number" min="0" step="0.5" class="act-form-input" id="ch-f-rate" value="${defaultRate}" placeholder="0" ${isAdmin() ? '' : 'readonly'}>
+            <label class="act-form-label">TIPO DE TARIFA</label>
+            <select class="act-form-input" id="ch-f-paytype" ${isAdmin() ? '' : 'disabled'}>
+              <option value="hora" ${initType === 'hora' ? 'selected' : ''}>Por hora</option>
+              <option value="dia_largo" ${initType === 'dia_largo' ? 'selected' : ''}>Día largo (${Number(payroll.dia_largo)}€)</option>
+              <option value="dia_corto" ${initType === 'dia_corto' ? 'selected' : ''}>Día corto (${Number(payroll.dia_corto)}€)</option>
+              <option value="fija" ${initType === 'fija' ? 'selected' : ''}>Tarifa fija</option>
+            </select>
+          </div>
+        </div>
+        <div class="ch-form-row">
+          <div class="act-form-field">
+            <label class="act-form-label" id="ch-amount-label">${initType === 'hora' ? 'TARIFA €/H' : 'IMPORTE DEL DÍA €'}</label>
+            <input type="number" min="0" step="0.5" class="act-form-input" id="ch-f-amount" value="${amountVal}" placeholder="0" ${isAdmin() ? '' : 'readonly'}>
             ${isAdmin() ? '' : '<span class="ch-field-note">La tarifa la fija el admin</span>'}
           </div>
         </div>
@@ -353,23 +406,39 @@ export async function renderControlHorario(container) {
 
     const $ = (id) => document.getElementById(id);
     const updatePreview = () => {
-      const tmp = { start_time: $('ch-f-start').value, end_time: $('ch-f-end').value, hourly_rate: $('ch-f-rate').value || null };
-      const h = shiftHours(tmp);
+      const type = $('ch-f-paytype').value;
+      const amount = $('ch-f-amount').value || null;
       const prev = $('ch-preview');
+      const h = shiftHours({ start_time: $('ch-f-start').value, end_time: $('ch-f-end').value });
+      if (isFixedType(type)) {
+        prev.classList.remove('warn');
+        prev.innerHTML = `${PAY_TYPE_LABELS[type]} · <strong>${formatCurrency(Number(amount) || 0)}</strong>${h > 0 ? ` · ${fmtHours(h)}` : ''}`;
+        return;
+      }
       if (h <= 0) { prev.textContent = 'Indica entrada y salida válidas'; prev.classList.add('warn'); return; }
       prev.classList.remove('warn');
-      prev.innerHTML = `<strong>${fmtHours(h)}</strong> · ${formatCurrency(shiftCost(tmp, 0))}`;
+      prev.innerHTML = `<strong>${fmtHours(h)}</strong> · ${formatCurrency(shiftCost({ start_time: $('ch-f-start').value, end_time: $('ch-f-end').value, hourly_rate: amount, pay_type: 'hora' }, 0))}`;
     };
-    ['ch-f-start', 'ch-f-end', 'ch-f-rate'].forEach(id => {
+    // Cambiar tipo → reetiqueta el importe y lo prerellena (día largo/corto de la config).
+    function applyType(type, ins) {
+      $('ch-amount-label').textContent = type === 'hora' ? 'TARIFA €/H' : 'IMPORTE DEL DÍA €';
+      if (type === 'dia_largo') $('ch-f-amount').value = Number(payroll.dia_largo) || 0;
+      else if (type === 'dia_corto') $('ch-f-amount').value = Number(payroll.dia_corto) || 0;
+      else if (type === 'fija') $('ch-f-amount').value = ins?.fixed_rate ?? '';
+      else $('ch-f-amount').value = ins?.hourly_rate ?? '';
+      updatePreview();
+    }
+    $('ch-f-paytype').addEventListener('change', () => applyType($('ch-f-paytype').value, byId[$('ch-f-instructor').value]));
+    ['ch-f-start', 'ch-f-end', 'ch-f-amount'].forEach(id => {
       $(id).addEventListener('input', updatePreview);
       $(id).addEventListener('change', updatePreview);
     });
-    // Al cambiar de instructor, la tarifa se sincroniza con la suya por defecto
-    // (si quieres una tarifa puntual distinta, ajústala después de elegir instructor).
+    // Al cambiar de instructor, adopta SU tarifa por defecto (tipo + importe).
     $('ch-f-instructor').addEventListener('change', (e) => {
-      const r = e.target.selectedOptions[0]?.dataset.rate;
-      $('ch-f-rate').value = (r == null || r === '') ? '' : r;
-      updatePreview();
+      const ins = byId[e.target.value];
+      const t = ins?.default_pay_type || 'hora';
+      $('ch-f-paytype').value = t;
+      applyType(t, ins);
     });
     updatePreview();
 
@@ -385,13 +454,17 @@ export async function renderControlHorario(container) {
       const work_date = $('ch-f-date').value;
       const start_time = $('ch-f-start').value;
       const end_time = $('ch-f-end').value;
-      const rateVal = $('ch-f-rate').value;
+      const payType = $('ch-f-paytype').value;
+      const amountVal2 = $('ch-f-amount').value;
       if (!instructor_id) { showToast('Elige un instructor', 'error'); return; }
       if (!work_date || !start_time || !end_time) { showToast('Faltan fecha u horas', 'error'); return; }
       if (parseHM(end_time) <= parseHM(start_time)) { showToast('La salida debe ser posterior a la entrada', 'error'); return; }
       const obj = {
         instructor_id, work_date, start_time, end_time,
-        hourly_rate: rateVal === '' ? null : Number(rateVal),
+        pay_type: payType,
+        // Por hora → snapshot de €/h; fijo → importe del día. El otro campo queda null.
+        hourly_rate: payType === 'hora' ? (amountVal2 === '' ? null : Number(amountVal2)) : null,
+        fixed_amount: isFixedType(payType) ? (amountVal2 === '' ? 0 : Number(amountVal2)) : null,
         notes: $('ch-f-notes').value.trim() || null,
       };
       if (s.id) obj.id = s.id;
@@ -408,39 +481,66 @@ export async function renderControlHorario(container) {
     });
   }
 
-  /* ---- Modal tarifas por instructor ---- */
+  /* ---- Modal tarifas: importes globales + tarifa por defecto de cada empleado ---- */
   function openRatesModal() {
     if (!instructors.length) { showToast('No hay instructores', 'error'); return; }
-    const rows = instructors.map(ins => `
-      <div class="ch-rate-row">
+    const typeOpts = (sel) => `
+      <option value="" ${!sel ? 'selected' : ''}>— sin tarifa —</option>
+      <option value="hora" ${sel === 'hora' ? 'selected' : ''}>Por hora</option>
+      <option value="dia_largo" ${sel === 'dia_largo' ? 'selected' : ''}>Día largo</option>
+      <option value="dia_corto" ${sel === 'dia_corto' ? 'selected' : ''}>Día corto</option>
+      <option value="fija" ${sel === 'fija' ? 'selected' : ''}>Tarifa fija</option>`;
+    const rows = instructors.map(ins => {
+      const t = ins.default_pay_type || '';
+      const amount = t === 'fija' ? (ins.fixed_rate ?? '') : (t === 'hora' ? (ins.hourly_rate ?? '') : '');
+      const amountDisabled = !(t === 'hora' || t === 'fija');
+      return `
+      <div class="ch-rate-row" data-id="${ins.id}">
         <span class="ch-dot" style="background:${colorOf[ins.id] || '#0f2f39'}"></span>
         <span class="ch-rate-name">${esc(ins.full_name || 'Instructor')}</span>
+        <select class="act-form-input ch-rate-type" data-id="${ins.id}" style="max-width:150px">${typeOpts(t)}</select>
         <div class="ch-rate-input">
-          <input type="number" min="0" step="0.5" class="act-form-input" data-id="${ins.id}" value="${ins.hourly_rate ?? ''}" placeholder="0">
-          <span>€/h</span>
+          <input type="number" min="0" step="0.5" class="act-form-input ch-rate-amount" data-id="${ins.id}" value="${amount}" placeholder="0" ${amountDisabled ? 'disabled' : ''}>
+          <span class="ch-rate-unit">${t === 'hora' ? '€/h' : '€'}</span>
         </div>
-      </div>`).join('');
-    openModal('Tarifas por hora', `
-      <p class="ch-rates-hint">Tarifa por defecto de cada instructor. Las horas que ya tengas anotadas conservan la tarifa con la que se guardaron.</p>
+      </div>`;
+    }).join('');
+    openModal('Tarifas', `
+      <p class="ch-rates-hint">Importe del día largo/corto (global) y tarifa por defecto de cada instructor. Los turnos ya anotados conservan su importe.</p>
+      <div style="display:flex;gap:12px;margin-bottom:14px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+        <div class="act-form-field" style="flex:1"><label class="act-form-label">DÍA LARGO €</label><input type="number" min="0" step="0.5" class="act-form-input" id="ch-cfg-largo" value="${Number(payroll.dia_largo)}"></div>
+        <div class="act-form-field" style="flex:1"><label class="act-form-label">DÍA CORTO €</label><input type="number" min="0" step="0.5" class="act-form-input" id="ch-cfg-corto" value="${Number(payroll.dia_corto)}"></div>
+      </div>
       <div class="ch-rates-list">${rows}</div>
       <div class="ch-form-actions">
         <button type="button" class="btn line" id="ch-rates-cancel">Cancelar</button>
         <button type="button" class="btn red" id="ch-rates-save">Guardar tarifas</button>
       </div>`);
 
+    // Al cambiar el tipo de un empleado: habilita/deshabilita el importe y ajusta la unidad.
+    document.querySelectorAll('.ch-rate-type').forEach(sel => sel.addEventListener('change', () => {
+      const row = sel.closest('.ch-rate-row');
+      const amt = row.querySelector('.ch-rate-amount');
+      const unit = row.querySelector('.ch-rate-unit');
+      const t = sel.value;
+      amt.disabled = !(t === 'hora' || t === 'fija');
+      unit.textContent = t === 'hora' ? '€/h' : '€';
+      if (amt.disabled) amt.value = '';
+    }));
+
     document.getElementById('ch-rates-cancel').addEventListener('click', closeModal);
     document.getElementById('ch-rates-save').addEventListener('click', async () => {
-      const inputs = [...document.querySelectorAll('.ch-rate-input input[data-id]')];
       const btn = document.getElementById('ch-rates-save'); btn.disabled = true; btn.textContent = 'Guardando…';
       try {
-        for (const inp of inputs) {
-          const id = inp.dataset.id;
-          const newVal = inp.value === '' ? null : Number(inp.value);
-          const oldVal = byId[id]?.hourly_rate ?? null;
-          // Compara tratando null ('sin tarifa') y 0 como distintos
-          const a = oldVal == null ? '' : String(Number(oldVal));
-          const b = newVal == null ? '' : String(Number(newVal));
-          if (a !== b) await updateInstructorRate(id, newVal);
+        await savePayrollConfig(Number(document.getElementById('ch-cfg-largo').value) || 0, Number(document.getElementById('ch-cfg-corto').value) || 0);
+        for (const row of document.querySelectorAll('.ch-rate-row')) {
+          const id = row.dataset.id;
+          const t = row.querySelector('.ch-rate-type').value || null;
+          const amtStr = row.querySelector('.ch-rate-amount').value;
+          const fields = { default_pay_type: t };
+          if (t === 'hora') fields.hourly_rate = amtStr === '' ? null : Number(amtStr);
+          if (t === 'fija') fields.fixed_rate = amtStr === '' ? null : Number(amtStr);
+          await updateInstructorTarifa(id, fields);
         }
         closeModal();
         showToast('Tarifas guardadas', 'success');
