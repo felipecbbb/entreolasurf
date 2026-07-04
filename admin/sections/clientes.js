@@ -307,12 +307,27 @@ export async function renderClientes(container) {
       for (const p of profiles) p._pending = pendingMap[p.id] || null;
     }
 
+    // "Pendiente de asignar" = bonos con créditos comprados SIN asignar a clase
+    // (total_credits − used_credits > 0), no caducados ni cancelados. (Antes miraba
+    // inscripciones sin class_id, que no existen → siempre salía vacío.)
+    const unassignedSet = new Set();
+    if (activeFilter === 'pending_assign') {
+      try {
+        const { data } = await supabase.from('bonos')
+          .select('user_id, total_credits, used_credits, status')
+          .in('user_id', profileIds);
+        (data || []).forEach(b => {
+          if (!['cancelled', 'expired'].includes(b.status) && (Number(b.total_credits) - Number(b.used_credits)) > 0) unassignedSet.add(b.user_id);
+        });
+      } catch (err) { console.warn('bonos sin asignar:', err.message); }
+    }
+
     // Apply filter
     let filtered = profiles;
     if (activeFilter === 'pending_pay') {
       filtered = profiles.filter(p => p._pending && p._pending.total > 0);
     } else if (activeFilter === 'pending_assign') {
-      filtered = profiles.filter(p => p._enrollments.some(e => !e.class_id));
+      filtered = profiles.filter(p => unassignedSet.has(p.id));
     } else if (activeFilter === 'paid') {
       filtered = profiles.filter(p => p._enrollments.some(e => e.status === 'paid'));
     } else if (activeFilter === 'cancelled') {
