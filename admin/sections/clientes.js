@@ -528,9 +528,20 @@ export async function renderClientes(container) {
       let groups = [];
       try { groups = await findDuplicateProfiles(); } catch (e) { wrap.innerHTML = `<p style="font-size:.84rem;color:#b91c1c">Error: ${esc(e.message)}</p>`; return; }
       if (!groups.length) { wrap.innerHTML = '<p style="font-size:.84rem;color:#16a34a">✓ No se detectaron duplicados</p>'; return; }
+      // Cargar los HIJOS (familiares) de todas las fichas de los grupos para mostrarlos.
+      const allIds = groups.flat().map(p => p.id);
+      const famByUser = {};
+      try {
+        const { data } = await supabase.from('family_members').select('user_id, full_name, last_name').in('user_id', allIds).order('created_at', { ascending: true });
+        (data || []).forEach(m => { (famByUser[m.user_id] ||= []).push(m); });
+      } catch {}
       wrap.innerHTML = groups.map((g, gi) => {
         const keep = g[0]; // el más antiguo se queda
-        const rows = g.map((p, i) => `<div style="font-size:.82rem;padding:2px 0;${i === 0 ? 'font-weight:700;color:#065f46' : 'color:#64748b'}">${i === 0 ? '✓ se queda · ' : '↳ se absorbe · '}${esc(p.full_name || '')}${p.last_name ? ' ' + esc(p.last_name) : ''}${p.email ? ` · ${esc(p.email)}` : ''}${p.phone ? ` · ${esc(p.phone)}` : ''}</div>`).join('');
+        const rows = g.map((p, i) => {
+          const kids = (famByUser[p.id] || []).map(m => `<div style="font-size:.75rem;color:#0ea5e9;padding-left:18px">↳ ${esc(m.full_name || '')}${m.last_name ? ' ' + esc(m.last_name) : ''}</div>`).join('');
+          const kidsLabel = (famByUser[p.id] || []).length ? ` <span style="color:#94a3b8">(${famByUser[p.id].length} familiar${famByUser[p.id].length === 1 ? '' : 'es'})</span>` : '';
+          return `<div style="font-size:.82rem;padding:2px 0;${i === 0 ? 'font-weight:700;color:#065f46' : 'color:#64748b'}">${i === 0 ? '✓ se queda · ' : '↳ se absorbe · '}${esc(p.full_name || '')}${p.last_name ? ' ' + esc(p.last_name) : ''}${p.email ? ` · ${esc(p.email)}` : ''}${p.phone ? ` · ${esc(p.phone)}` : ''}${kidsLabel}</div>${kids}`;
+        }).join('');
         return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px">
           ${rows}
           <button type="button" class="btn red mg-auto-go" data-gi="${gi}" style="margin-top:6px;font-size:.82rem;padding:6px 12px">Fusionar estas ${g.length}</button>
