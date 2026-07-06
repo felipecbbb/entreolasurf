@@ -2160,6 +2160,27 @@ a.admin-nav-item-external .nav-icon svg {
   border-color: #fca5a5;
 }
 
+/* ===== Control Horario — rejilla de monitores (tipo Excel) ===== */
+.mon-filter { padding:7px 10px; border:1px solid #e2e8f0; border-radius:8px; font-size:.85rem; background:#fff; }
+.mon-grid-wrap { overflow-x:auto; border:1px solid #e5e7eb; border-radius:10px; }
+.mon-grid { border-collapse:collapse; width:100%; font-size:.82rem; }
+.mon-grid th, .mon-grid td { border:1px solid #eef2f6; padding:0; text-align:center; }
+.mon-grid thead th { background:#0f2f39; color:#fff; padding:8px 6px; font-weight:700; white-space:nowrap; position:sticky; top:0; z-index:2; }
+.mon-grid .mon-col-head.is-carpa { background:#155e63; }
+.mon-corner, .mon-day-head { position:sticky; left:0; z-index:3; background:#f8fafc; font-weight:700; padding:6px 10px !important; text-align:left; white-space:nowrap; min-width:92px; }
+.mon-grid thead .mon-corner { background:#0f2f39; z-index:4; }
+.mon-day-num { color:#94a3b8; font-weight:600; }
+.mon-grid tbody tr.is-today .mon-day-head { background:#fff7ed; color:#c2410c; }
+.mon-cell { width:100%; min-width:66px; border:none; padding:7px 4px; text-align:center; font-size:.82rem; background:transparent; color:inherit; }
+.mon-cell:focus { outline:2px solid #0ea5e9; outline-offset:-2px; background:#f0f9ff; }
+.mon-cell-sel { min-width:90px; }
+.mon-total-row th, .mon-total-row td { background:#f1f5f9; font-weight:700; padding:6px 4px; }
+.mon-pago-row th, .mon-pago-row td { background:#ecfdf5; font-weight:800; color:#065f46; padding:6px 4px; }
+.mon-grandtotal { text-align:right; margin-top:10px; font-size:.95rem; }
+.mon-legend { color:#94a3b8; font-size:.75rem; margin-top:4px; }
+.mon-rows-list { display:flex; flex-direction:column; gap:6px; max-height:52vh; overflow:auto; }
+.mon-row { display:flex; align-items:center; gap:8px; }
+
 /* Drop outside hint */
 .cal-day-content.drop-outside-active {
   outline: 2px dashed #ef4444;
