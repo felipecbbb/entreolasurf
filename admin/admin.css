@@ -2181,6 +2181,21 @@ a.admin-nav-item-external .nav-icon svg {
 .mon-rows-list { display:flex; flex-direction:column; gap:6px; max-height:52vh; overflow:auto; }
 .mon-row { display:flex; align-items:center; gap:8px; }
 
+/* Control Horario — móvil */
+@media (max-width: 640px) {
+  .mon-page .ch-actions { width:100%; }
+  .mon-page .ch-actions .mon-filter { flex:1 1 100%; }
+  .mon-page .ch-actions .btn { flex:1; }
+  .mon-grid { font-size:.78rem; }
+  .mon-corner, .mon-day-head { min-width:64px; padding:5px 7px !important; }
+  .mon-day-num { display:block; }
+  .mon-cell { min-width:52px; padding:9px 2px; }
+  .mon-cell-sel { min-width:74px; font-size:.72rem; }
+  .mon-grandtotal { text-align:center; }
+  .mon-row { flex-wrap:wrap; }
+  .mon-row .mon-m-name, .mon-row .mon-m-cat { flex:1 1 45%; }
+}
+
 /* Drop outside hint */
 .cal-day-content.drop-outside-active {
   outline: 2px dashed #ef4444;
