@@ -1670,7 +1670,21 @@ export async function renderCalendario(container) {
             const bonoLabel = (e.bono && (e.bono.status === 'active' || e.bono.status === 'exhausted'))
               ? `<span style="color:#0ea5e9;font-size:.7rem;font-weight:600;white-space:nowrap">Bono ${ordMap[e.id] || e.bono.used_credits}/${e.bono.total_credits}</span>`
               : '';
-            const st = ENROLLMENT_STATUS[e.status] || { label: e.status, color: '#6b7280' };
+            // Estado de PAGO derivado del bono (como la vista-día): si va con bono, el color
+            // sale del pago del bono (una reserva web con anticipo ya cobrado → naranja, no rojo).
+            let st;
+            if (e.status === 'cancelled') st = ENROLLMENT_STATUS.cancelled;
+            else if (e.bono) {
+              const fullyPaid = bonoFullyPaid(e.bono);
+              const partial = !fullyPaid && Number(e.bono.total_paid || 0) > 0;
+              st = fullyPaid ? { label: 'Pagado', color: '#16a34a' }
+                : partial ? { label: 'Anticipo pagado', color: '#d97706' }
+                : { label: 'Pendiente de pago', color: '#dc2626' };
+            } else {
+              st = e.status === 'paid' ? { label: 'Pagado', color: '#16a34a' }
+                : e.status === 'partial' ? { label: 'Anticipo pagado', color: '#d97706' }
+                : (ENROLLMENT_STATUS[e.status] || { label: e.status, color: '#6b7280' });
+            }
             const att = e.attendance === true
               ? { label: 'Asistió', color: '#16a34a' }
               : e.attendance === false ? { label: 'No asistió', color: '#6b7280' } : null;
