@@ -272,6 +272,10 @@ export async function renderCalendario(container) {
             <span class="cal-date-main">${dayName}, ${dayNum} ${month}</span>
           </div>
           <button class="cal-today-btn" id="cal-today">Hoy</button>
+          <label class="cal-date-pick" title="Ir a una fecha">
+            <span class="cal-date-ico" aria-hidden="true">📅</span>
+            <input type="date" id="cal-date" value="${getDateStr(currentDate)}">
+          </label>
         </div>
         <div class="cal-top-right">
           <span class="cal-hours-total">${totalHours} <small>HORAS</small></span>
@@ -960,6 +964,12 @@ export async function renderCalendario(container) {
     });
     container.querySelector('#cal-today')?.addEventListener('click', () => {
       currentDate = new Date(); currentDate.setHours(0, 0, 0, 0); render();
+    });
+    container.querySelector('#cal-date')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      const [y, m, d] = v.split('-').map(Number);
+      currentDate = new Date(y, m - 1, d); currentDate.setHours(0, 0, 0, 0);
+      render();
     });
 
     container.querySelectorAll('.cal-view-btn').forEach(btn => {
