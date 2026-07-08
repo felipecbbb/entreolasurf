@@ -176,6 +176,10 @@ export async function renderControlHorario(container) {
             <button class="ch-nav-arrow" id="mon-prev" title="Semana anterior">‹</button>
             <button class="ch-today-btn" id="mon-today">Hoy</button>
             <button class="ch-nav-arrow" id="mon-next" title="Semana siguiente">›</button>
+            <label class="ch-date-pick" title="Ir a una fecha">
+              <span class="ch-date-ico" aria-hidden="true">📅</span>
+              <input type="date" id="mon-date" value="${getDateStr(currentDate)}">
+            </label>
           </div>
           <div class="ch-range">${rangeLabel}</div>
           <div class="ch-actions">
@@ -211,6 +215,12 @@ export async function renderControlHorario(container) {
     container.querySelector('#mon-prev')?.addEventListener('click', () => { currentDate.setDate(currentDate.getDate() - 7); render(); });
     container.querySelector('#mon-next')?.addEventListener('click', () => { currentDate.setDate(currentDate.getDate() + 7); render(); });
     container.querySelector('#mon-today')?.addEventListener('click', () => { currentDate = new Date(); currentDate.setHours(0, 0, 0, 0); render(); });
+    container.querySelector('#mon-date')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      const [y, m, d] = v.split('-').map(Number);
+      currentDate = new Date(y, m - 1, d); currentDate.setHours(0, 0, 0, 0);
+      render();
+    });
     container.querySelector('#mon-cat')?.addEventListener('change', (e) => { catFilter = e.target.value; render(); });
     const searchEl = container.querySelector('#mon-search');
     if (searchEl) {
