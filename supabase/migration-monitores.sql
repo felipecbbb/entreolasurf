@@ -45,8 +45,8 @@ create index if not exists idx_monitor_shifts_date on public.monitor_shifts(work
 -- 3. Tarifa "trabaja" (tercer tipo de día) en la config global (día corto/largo ya existen)
 alter table public.payroll_config add column if not exists dia_trabaja numeric(10,2) not null default 36;
 
--- Fijar las tarifas de día a las del Excel (día corto 63, largo 70, trabaja 36 -a confirmar-)
-update public.payroll_config set dia_corto = 63, dia_largo = 70, dia_trabaja = 36 where id = 1;
+-- Fijar las tarifas de día a las del Excel (día corto 62, largo 70, trabaja 36)
+update public.payroll_config set dia_corto = 62, dia_largo = 70, dia_trabaja = 36 where id = 1;
 
 -- Seed de monitores + import de las 2 semanas con datos (22-jun a 05-jul 2026)
 -- Generado desde SEGUIMIENTO HORAS MONITORES 2026.xlsx

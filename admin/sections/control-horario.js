@@ -8,7 +8,7 @@
    Acceso: admin + encargado (sección 'control-horario').
    ============================================================ */
 import { openModal, closeModal, showToast, formatCurrency } from '../modules/ui.js';
-import { isAdmin } from '../modules/auth.js';
+import { isAdmin, getProfile } from '../modules/auth.js';
 import { supabase } from '/lib/supabase.js';
 
 const esc = (s) => s == null ? '' : String(s)
@@ -63,7 +63,27 @@ async function fetchMonitorShifts(from, to) {
 async function fetchPayroll() {
   const { data, error } = await supabase.from('payroll_config').select('dia_corto, dia_largo, dia_trabaja').eq('id', 1).maybeSingle();
   if (error && !isSchemaMissing(error)) throw error;
-  return data || { dia_corto: 63, dia_largo: 70, dia_trabaja: 36 };
+  return data || { dia_corto: 62, dia_largo: 70, dia_trabaja: 36 };
+}
+// Semanas ya pagadas. Si falta la migración, degradamos a "ninguna pagada"
+// para no tumbar la rejilla entera.
+async function fetchPayments(weekStart) {
+  const { data, error } = await supabase.from('monitor_payments')
+    .select('monitor_id, week_start, amount, paid_at').eq('week_start', weekStart);
+  if (error) { if (isSchemaMissing(error)) return null; throw error; }
+  return data || [];
+}
+async function setPaid(monitor_id, week_start, amount, paid) {
+  if (!paid) {
+    const { error } = await supabase.from('monitor_payments')
+      .delete().eq('monitor_id', monitor_id).eq('week_start', week_start);
+    if (error) throw error; return;
+  }
+  const { error } = await supabase.from('monitor_payments').upsert({
+    monitor_id, week_start, amount: Math.round(amount * 100) / 100,
+    paid_at: new Date().toISOString(), paid_by: getProfile()?.id || null,
+  }, { onConflict: 'monitor_id,week_start' });
+  if (error) throw error;
 }
 async function saveCell(monitor_id, work_date, pay_type, hours) {
   // Vacío → borrar la celda
@@ -81,7 +101,9 @@ export async function renderControlHorario(container) {
   let currentDate = new Date(); currentDate.setHours(0, 0, 0, 0);
   let catFilter = '';       // '' | 'monitor' | 'carpa'
   let search = '';
-  let monitors = [], shifts = [], payroll = { dia_corto: 63, dia_largo: 70, dia_trabaja: 36 };
+  let monitors = [], shifts = [], payroll = { dia_corto: 62, dia_largo: 70, dia_trabaja: 36 };
+  let payments = [];        // pagos de la semana visible
+  let paymentsOff = false;  // true si falta la migración monitor_payments
 
   const rateOf = (m) => m.hourly_rate != null ? Number(m.hourly_rate) : 0;
   function dayRate(pt, m) {
@@ -101,7 +123,12 @@ export async function renderControlHorario(container) {
     const wk = getWeekDates(currentDate);
     const from = getDateStr(wk[0]), to = getDateStr(wk[6]);
     try {
-      [monitors, shifts, payroll] = await Promise.all([fetchMonitors(), fetchMonitorShifts(from, to), fetchPayroll()]);
+      let pay;
+      [monitors, shifts, payroll, pay] = await Promise.all([
+        fetchMonitors(), fetchMonitorShifts(from, to), fetchPayroll(), fetchPayments(from),
+      ]);
+      paymentsOff = pay === null;
+      payments = pay || [];
     } catch (err) {
       if (isSchemaMissing(err)) {
         container.innerHTML = `<div class="admin-empty"><p><strong>Falta aplicar la migración de monitores.</strong><br>Ejecuta <code>supabase/migration-monitores.sql</code> en el SQL Editor de Supabase y recarga la página.</p></div>`;
@@ -122,8 +149,20 @@ export async function renderControlHorario(container) {
     const map = {};
     shifts.forEach(s => { map[`${s.monitor_id}|${s.work_date}`] = s; });
 
+    // Pago de la semana por monitor + lookup de semanas ya pagadas
+    const paidMap = {};
+    payments.forEach(p => { paidMap[p.monitor_id] = p; });
+    const pagoByMon = {};
+    cols.forEach(m => {
+      const dayShifts = wk.map(d => map[`${m.id}|${getDateStr(d)}`]).filter(Boolean);
+      pagoByMon[m.id] = dayShifts.reduce((a, s) => a + shiftPago(s, m), 0);
+    });
+
     // ---- Cabecera de columnas ----
-    const headCols = cols.map(m => `<th class="mon-col-head ${m.category === 'carpa' ? 'is-carpa' : ''}" title="${esc(m.name)}">${esc(m.name)}</th>`).join('');
+    const headCols = cols.map(m => {
+      const paid = paidMap[m.id];
+      return `<th class="mon-col-head ${m.category === 'carpa' ? 'is-carpa' : ''} ${paid ? 'is-paid' : ''}" title="${esc(m.name)}${paid ? ' · pagado' : ''}">${esc(m.name)}${paid ? ' <span class="mon-paid-tick">✓</span>' : ''}</th>`;
+    }).join('');
 
     // ---- Filas por día ----
     const bodyRows = wk.map((d, i) => {
@@ -161,12 +200,28 @@ export async function renderControlHorario(container) {
     }).join('');
 
     // ---- Fila PAGO ----
-    let grandTotal = 0;
+    let grandTotal = 0, paidTotal = 0;
     const pagoCells = cols.map(m => {
-      const dayShifts = wk.map(d => map[`${m.id}|${getDateStr(d)}`]).filter(Boolean);
-      const pago = dayShifts.reduce((a, s) => a + shiftPago(s, m), 0);
+      const pago = pagoByMon[m.id];
       grandTotal += pago;
+      if (paidMap[m.id]) paidTotal += pago;
       return `<td class="mon-pago-cell">${pago > 0 ? formatCurrency(pago) : '·'}</td>`;
+    }).join('');
+
+    // ---- Fila PAGADO (marcar la semana como abonada a cada monitor) ----
+    const paidCells = cols.map(m => {
+      const pago = pagoByMon[m.id];
+      const p = paidMap[m.id];
+      if (!pago && !p) return `<td class="mon-paid-cell">·</td>`;
+      const when = p ? new Date(p.paid_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : '';
+      const stale = p && Math.abs(Number(p.amount) - pago) > 0.01;
+      return `<td class="mon-paid-cell ${p ? 'is-paid' : ''}">
+        <label class="mon-paid-lbl" title="${p ? `Pagado el ${when} · ${formatCurrency(Number(p.amount))}` : 'Marcar como pagado'}">
+          <input type="checkbox" class="mon-paid-cb" data-mid="${m.id}" data-amount="${pago}" ${p ? 'checked' : ''}>
+          <span class="mon-paid-when">${p ? when : 'Pagar'}</span>
+        </label>
+        ${stale ? `<span class="mon-paid-warn" title="Se pagaron ${formatCurrency(Number(p.amount))}, pero ahora la semana suma ${formatCurrency(pago)}">≠</span>` : ''}
+      </td>`;
     }).join('');
 
     container.innerHTML = `
@@ -201,11 +256,15 @@ export async function renderControlHorario(container) {
             <tfoot>
               <tr class="mon-total-row"><th class="mon-day-head">TOTAL</th>${totalCells}</tr>
               <tr class="mon-pago-row"><th class="mon-day-head">PAGO</th>${pagoCells}</tr>
+              ${paymentsOff ? '' : `<tr class="mon-paid-row"><th class="mon-day-head">PAGADO</th>${paidCells}</tr>`}
             </tfoot>
           </table>
         </div>
-        <div class="mon-grandtotal">Total semana: <strong>${formatCurrency(grandTotal)}</strong></div>
-        <div class="mon-legend">C = día corto · L = día largo · T = trabaja · F = fija</div>`}
+        <div class="mon-grandtotal">
+          Total semana: <strong>${formatCurrency(grandTotal)}</strong>
+          ${paymentsOff ? '' : ` · Pagado: <strong class="mon-gt-paid">${formatCurrency(paidTotal)}</strong> · Pendiente: <strong class="mon-gt-pending">${formatCurrency(grandTotal - paidTotal)}</strong>`}
+        </div>
+        <div class="mon-legend">C = día corto · L = día largo · T = trabaja · F = fija${paymentsOff ? ' · <em>Falta aplicar migration-monitor-payments.sql para marcar pagos</em>' : ''}</div>`}
       </div>`;
 
     bindEvents();
@@ -241,6 +300,26 @@ export async function renderControlHorario(container) {
       sel.addEventListener('change', async () => {
         try { await saveCell(sel.dataset.mid, sel.dataset.date, sel.value, null); await render(); }
         catch (err) { showToast('Error: ' + err.message, 'error'); }
+      });
+    });
+
+    // Fila PAGADO: marcar/desmarcar la semana como abonada
+    container.querySelectorAll('.mon-paid-cb').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        const weekStart = getDateStr(getWeekDates(currentDate)[0]);
+        const paid = cb.checked;
+        const amount = Number(cb.dataset.amount) || 0;
+        const name = monitors.find(m => m.id === cb.dataset.mid)?.name || 'el monitor';
+        if (!paid && !confirm(`¿Desmarcar el pago de ${name} de esta semana?`)) { cb.checked = true; return; }
+        cb.disabled = true;
+        try {
+          await setPaid(cb.dataset.mid, weekStart, amount, paid);
+          showToast(paid ? `Pago registrado: ${name} · ${formatCurrency(amount)}` : 'Pago desmarcado', 'success');
+          await render();
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+          cb.checked = !paid; cb.disabled = false;
+        }
       });
     });
   }
