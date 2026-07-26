@@ -2202,7 +2202,17 @@ a.admin-nav-item-external .nav-icon svg {
 .mon-cell-sel { min-width:90px; }
 .mon-total-row th, .mon-total-row td { background:#f1f5f9; font-weight:700; padding:6px 4px; }
 .mon-pago-row th, .mon-pago-row td { background:#ecfdf5; font-weight:800; color:#065f46; padding:6px 4px; }
+.mon-paid-row th, .mon-paid-row td { background:#f8fafc; padding:5px 4px; }
+.mon-paid-row .mon-paid-cell.is-paid { background:#dcfce7; }
+.mon-paid-lbl { display:inline-flex; align-items:center; justify-content:center; gap:5px; cursor:pointer; font-size:.72rem; font-weight:700; color:#64748b; letter-spacing:.02em; text-transform:uppercase; }
+.mon-paid-cell.is-paid .mon-paid-lbl { color:#15803d; }
+.mon-paid-cb { accent-color:#16a34a; width:15px; height:15px; cursor:pointer; }
+.mon-paid-warn { color:#c2410c; font-weight:800; margin-left:4px; cursor:help; }
+.mon-grid thead .mon-col-head.is-paid { background:#15803d; }
+.mon-paid-tick { opacity:.85; }
 .mon-grandtotal { text-align:right; margin-top:10px; font-size:.95rem; }
+.mon-gt-paid { color:#15803d; }
+.mon-gt-pending { color:#c2410c; }
 .mon-legend { color:#94a3b8; font-size:.75rem; margin-top:4px; }
 .mon-rows-list { display:flex; flex-direction:column; gap:6px; max-height:52vh; overflow:auto; }
 .mon-row { display:flex; align-items:center; gap:8px; }
@@ -2217,6 +2227,7 @@ a.admin-nav-item-external .nav-icon svg {
   .mon-day-num { display:block; }
   .mon-cell { min-width:52px; padding:9px 2px; }
   .mon-cell-sel { min-width:74px; font-size:.72rem; }
+  .mon-paid-lbl { flex-direction:column; gap:2px; font-size:.62rem; }
   .mon-grandtotal { text-align:center; }
   .mon-row { flex-wrap:wrap; }
   .mon-row .mon-m-name, .mon-row .mon-m-cat { flex:1 1 45%; }
