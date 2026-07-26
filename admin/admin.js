@@ -24,6 +24,25 @@ import { renderEquipo } from './sections/equipo.js';
 import { renderControlHorario } from './sections/control-horario.js';
 import { renderPapelera } from './sections/papelera.js';
 
+/* ---- Errores no capturados → a la vista ------------------------------------
+   En tablet/móvil no hay consola: un fallo de JS dejaba botones muertos sin
+   ninguna pista. Mostramos el error para poder reportarlo desde el dispositivo. */
+function reportCrash(msg, where) {
+  if (!msg) return;
+  const short = String(msg).slice(0, 180);
+  try { showToast(`Error${where ? ` (${where})` : ''}: ${short}`, 'error'); } catch (_) { /* ui aún sin montar */ }
+  console.error('[admin]', where || '', msg);
+}
+window.addEventListener('error', (e) => {
+  // Ignoramos fallos de carga de recursos (imágenes, etc.), solo errores de JS
+  if (e.target && e.target !== window) return;
+  reportCrash(e.message, e.filename ? e.filename.split('/').pop() : null);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  reportCrash(r?.message || r, 'promesa');
+});
+
 // DOM refs
 const loginView = document.getElementById('login-view');
 const adminApp = document.getElementById('admin-app');
