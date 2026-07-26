@@ -42,6 +42,41 @@ function normPhone(s) {
   return String(s == null ? '' : s).replace(/\D/g, '');
 }
 
+/* ---- Compatibilidad Safari antiguo (iPad/iPhone con iPadOS ≤15) ----------
+   Dos APIs de la ruta "crear reserva" no existen antes de Safari 15.4/16 y
+   dejaban el botón de guardar muerto sin ningún aviso. */
+
+// form.requestSubmit() → Safari 16+. Sin él, validamos y despachamos el submit a mano.
+function submitFormCompat(form) {
+  if (!form) return;
+  // Validación propia antes de enviar: el globo nativo se pinta anclado al campo y en
+  // tablet/móvil suele quedar fuera de la vista dentro del panel con scroll → el botón
+  // parecía no hacer nada. Llevamos el foco al campo y lo decimos con un toast.
+  if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+    const bad = form.querySelector(':invalid');
+    if (bad) {
+      try { bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) { bad.scrollIntoView(); }
+      try { bad.focus({ preventScroll: true }); } catch (_) { /* Safari viejo */ }
+      showToast(bad.validationMessage || 'Revisa los campos obligatorios', 'error');
+    }
+    return;
+  }
+  if (typeof form.requestSubmit === 'function') { form.requestSubmit(); return; }
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+}
+
+// crypto.randomUUID() → Safari 15.4+. Fallback a UUID v4 con getRandomValues.
+function makeUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;  // versión 4
+  b[8] = (b[8] & 0x3f) | 0x80;  // variante RFC 4122
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 // Duración por tipo (min) — la hora de fin se calcula sola desde inicio + duración.
 const TYPE_DURATIONS = { grupal: 90, individual: 90, paddle: 90, surfskate: 90, yoga: 60 };
 function addMinutesToTime(hhmm, mins) {
@@ -3388,7 +3423,7 @@ export async function renderCalendario(container) {
             const total = singleBono ? singleBono.expected : totalCharge;
             const paidShown = singleBono ? singleBono.paid : anticipoTotal;
             const reservationData = {
-              id: createdEnrollmentIds[0] || (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)),
+              id: createdEnrollmentIds[0] || makeUUID(),
               enrollmentIds: createdEnrollmentIds,
               bonoId: singleBonoId,
               linkedBonoId: singleBonoId,
@@ -5942,7 +5977,10 @@ export async function renderCalendario(container) {
                 <h3>Material y fechas</h3>
                 <div class="ns-field">
                   <label>Material</label>
-                  <select name="equipment_id" id="nr-equipment" required>
+                  <!-- Sin required: tras "+ Añadir" el editor se vacía y la validación
+                       nativa bloqueaba el submit aunque el carrito tuviera materiales.
+                       Lo valida el handler de submit ("Añade al menos un material"). -->
+                  <select name="equipment_id" id="nr-equipment">
                     <option value="">Cargando material…</option>
                   </select>
                 </div>
@@ -5958,7 +5996,7 @@ export async function renderCalendario(container) {
                 <div class="ns-field-2col">
                   <div class="ns-field">
                     <label>Tarifa</label>
-                    <select name="duration_key" id="nr-duration" required>
+                    <select name="duration_key" id="nr-duration">
                       <option value="">Selecciona un material…</option>
                     </select>
                   </div>
@@ -6078,7 +6116,7 @@ export async function renderCalendario(container) {
       const form = currentTab === 'clase'
         ? overlay.querySelector('#new-session-form')
         : overlay.querySelector('#new-rental-form');
-      form?.requestSubmit();
+      submitFormCompat(form);
     });
 
     // Tab switching between Clase and Material
@@ -6504,9 +6542,8 @@ export async function renderCalendario(container) {
         showToast(dates.length === 1 ? 'Sesión creada' : `${dates.length} sesiones creadas`, 'success');
         render();
       } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Crear sesiones';
+        showToast('Error: ' + (err?.message || err), 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Crear sesiones'; }
       }
     });
 
@@ -6515,30 +6552,43 @@ export async function renderCalendario(container) {
     // unidades físicas del inventario si las hay; si no, el campo 'stock' del catálogo
     // (gestión por cantidad). Devuelve {ok} o {ok:false, message} con el material que falta.
     const datesOverlap = (a, b) => a.date_start <= (b.date_end || b.date_start) && b.date_start <= (a.date_end || a.date_start);
+    // Consulta con límite de tiempo. Con cobertura mala (el iPad en la playa) estas
+    // verificaciones se quedaban colgadas y el botón moría en "Creando reserva…".
+    async function queryWithTimeout(builder, ms = 8000) {
+      let timer;
+      try {
+        return await Promise.race([
+          Promise.resolve(builder),
+          new Promise(res => { timer = setTimeout(() => res({ data: null, error: { message: 'timeout' } }), ms); }),
+        ]);
+      } catch (err) {
+        return { data: null, error: err };
+      } finally { clearTimeout(timer); }
+    }
     async function checkRentalStock(lines) {
       const byEq = {};
       for (const ln of lines) (byEq[ln.equipment_id] ||= []).push(ln);
+      let unverified = false;   // alguna consulta no respondió → no bloqueamos por stock
       for (const eqId of Object.keys(byEq)) {
         const eq = equipmentMap[eqId];
         const eqLines = byEq[eqId];
-        // Stock total del material
-        let usable = 0;
-        try {
-          const { data: units } = await supabase.from('inventory_units').select('id,estado').eq('equipment_id', eqId);
-          usable = (units || []).filter(u => !['reparacion', 'perdido', 'baja'].includes(u.estado)).length;
-        } catch {}
+        // Stock total del material. OJO: si la consulta falla NO es "0 unidades" —
+        // sin datos no se puede afirmar que no haya stock, así que se deja pasar.
+        const unitsRes = await queryWithTimeout(
+          supabase.from('inventory_units').select('id,estado').eq('equipment_id', eqId));
+        if (unitsRes.error) { unverified = true; continue; }
+        const usable = (unitsRes.data || []).filter(u => !['reparacion', 'perdido', 'baja'].includes(u.estado)).length;
         const totalStock = usable > 0 ? usable : (Number(eq?.stock) || 0);
         for (const ln of eqLines) {
-          let reservedDb = 0;
-          try {
-            const { data: busy } = await supabase.from('equipment_reservations')
+          const busyRes = await queryWithTimeout(
+            supabase.from('equipment_reservations')
               .select('quantity,date_start,date_end')
               .eq('equipment_id', eqId)
               .in('status', ['pending', 'confirmed', 'active'])
               .lte('date_start', ln.date_end)
-              .gte('date_end', ln.date_start);
-            reservedDb = (busy || []).reduce((s, b) => s + (Number(b.quantity) || 1), 0);
-          } catch {}
+              .gte('date_end', ln.date_start));
+          if (busyRes.error) { unverified = true; continue; }
+          const reservedDb = (busyRes.data || []).reduce((s, b) => s + (Number(b.quantity) || 1), 0);
           // Otras líneas del MISMO material en el carrito que solapan en fecha
           const cartOther = eqLines.filter(o => o !== ln && datesOverlap(o, ln)).reduce((s, o) => s + (o.quantity || 1), 0);
           const need = (ln.quantity || 1) + cartOther;
@@ -6548,7 +6598,7 @@ export async function renderCalendario(container) {
           }
         }
       }
-      return { ok: true };
+      return { ok: true, unverified };
     }
 
     document.getElementById('new-rental-form')?.addEventListener('submit', async (e) => {
@@ -6563,15 +6613,24 @@ export async function renderCalendario(container) {
       if (!lines.length) { showToast('Añade al menos un material', 'error'); return; }
 
       const submitBtn = document.getElementById('ns-submit') || e.target.querySelector('button[type="submit"]');
+      const resetBtn = () => { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Crear reserva de material'; } };
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creando reserva…'; }
 
       // Bloqueo por stock: si algún material no tiene disponibilidad en sus fechas, no crea.
-      const stockCheck = await checkRentalStock(lines);
+      // Si la comprobación no se pudo hacer (sin cobertura), se avisa pero se deja crear.
+      let stockCheck;
+      try {
+        stockCheck = await checkRentalStock(lines);
+      } catch (err) {
+        console.warn('checkRentalStock:', err);
+        stockCheck = { ok: true, unverified: true };
+      }
       if (!stockCheck.ok) {
         showToast(stockCheck.message, 'error');
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Crear reserva de material'; }
+        resetBtn();
         return;
       }
+      if (stockCheck.unverified) showToast('Sin conexión estable: no se pudo comprobar el stock, se crea igualmente', 'error');
 
       // Datos de cliente compartidos por todas las líneas
       const extraData = {};
@@ -6592,7 +6651,7 @@ export async function renderCalendario(container) {
       const guestPhone = fd.get('guest_phone')?.trim() || null;
       // group_id: enlaza las líneas de una misma reserva multi-material. 1 sola línea → null
       // (compatible con los alquileres antiguos, que se siguen mostrando individuales).
-      const groupId = lines.length > 1 ? crypto.randomUUID() : null;
+      const groupId = lines.length > 1 ? makeUUID() : null;
 
       try {
         for (const ln of lines) {
@@ -6626,9 +6685,8 @@ export async function renderCalendario(container) {
         showToast(lines.length > 1 ? `Reserva con ${lines.length} materiales creada` : 'Reserva de material creada', 'success');
         render();
       } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Crear reserva de material';
+        showToast('Error: ' + (err?.message || err), 'error');
+        resetBtn();
       }
     });
   }
