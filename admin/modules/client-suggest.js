@@ -23,16 +23,51 @@ export function attachClientSuggest(input, { onPick, includeFamily = true } = {}
   if (!input || input._suggestAttached) return;
   input._suggestAttached = true;
 
-  let box = null, timer = null, items = [];
+  let box = null, timer = null, items = [], picking = false, onDocDown = null;
+  const PICK_EVENT = window.PointerEvent ? 'pointerdown' : 'mousedown';
 
-  const closeBox = () => { box?.remove(); box = null; };
+  function closeBox() {
+    if (!box) return;
+    box.remove();
+    box = null;
+    picking = false;
+    // El desplegable es position:fixed: si no se recoloca al hacer scroll, se queda
+    // flotando sobre el formulario (se veía tapando el campo en tablet).
+    window.removeEventListener('scroll', positionBox, true);
+    window.removeEventListener('resize', positionBox);
+    window.visualViewport?.removeEventListener('resize', positionBox);
+    window.visualViewport?.removeEventListener('scroll', positionBox);
+    if (onDocDown) { document.removeEventListener(PICK_EVENT, onDocDown, true); onDocDown = null; }
+  }
 
   function positionBox() {
     if (!box) return;
     const r = input.getBoundingClientRect();
-    box.style.left = `${r.left}px`;
-    box.style.top = `${r.bottom + 2}px`;
-    box.style.width = `${r.width}px`;
+    // Input fuera de la vista (scroll del panel) → no dejamos el desplegable huérfano
+    if (r.bottom < 0 || r.top > window.innerHeight) { closeBox(); return; }
+
+    const margin = 8;
+    const vw = window.innerWidth;
+    const width = Math.min(Math.max(r.width, 240), vw - margin * 2);
+    // Nunca se sale por los lados: se pega al borde si no cabe
+    const left = Math.min(Math.max(r.left, margin), vw - width - margin);
+
+    // Si abajo no cabe y arriba sí, se despliega hacia arriba
+    const spaceBelow = window.innerHeight - r.bottom - margin;
+    const spaceAbove = r.top - margin;
+    const openUp = spaceBelow < 140 && spaceAbove > spaceBelow;
+    const maxH = Math.min(260, Math.max(120, openUp ? spaceAbove : spaceBelow));
+
+    box.style.width = `${width}px`;
+    box.style.left = `${left}px`;
+    box.style.maxHeight = `${maxH}px`;
+    if (openUp) {
+      box.style.top = 'auto';
+      box.style.bottom = `${window.innerHeight - r.top + 2}px`;
+    } else {
+      box.style.bottom = 'auto';
+      box.style.top = `${r.bottom + 2}px`;
+    }
   }
 
   function render() {
@@ -40,18 +75,29 @@ export function attachClientSuggest(input, { onPick, includeFamily = true } = {}
     if (!items.length) return;
     box = document.createElement('div');
     box.className = 'client-suggest-box';
-    box.style.cssText = 'position:fixed;z-index:10050;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(15,47,57,.16);max-height:240px;overflow:auto;font-size:.86rem';
+    box.style.cssText = 'position:fixed;z-index:10050;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(15,47,57,.16);overflow:auto;-webkit-overflow-scrolling:touch;font-size:.86rem';
     box.innerHTML = items.map((it, i) => `
-      <div class="cs-opt" data-i="${i}" style="padding:8px 11px;cursor:pointer;border-bottom:1px solid #f1f5f9;${it.type === 'family' ? 'padding-left:24px;border-left:3px solid #0ea5e9' : ''}">
+      <div class="cs-opt" data-i="${i}" style="padding:12px 11px;min-height:44px;cursor:pointer;border-bottom:1px solid #f1f5f9;${it.type === 'family' ? 'padding-left:24px;border-left:3px solid #0ea5e9' : ''}">
         ${it.type === 'family' ? `<small style="color:#0ea5e9;font-weight:600">↳ Familiar de ${esc(it.parentName)}</small><br>` : ''}
         <strong>${esc(it.label)}</strong>${it.sub ? ` <span style="color:#64748b">· ${esc(it.sub)}</span>` : ''}
       </div>`).join('');
     document.body.appendChild(box);
     positionBox();
+    window.addEventListener('scroll', positionBox, true);   // capture: también el scroll de paneles internos
+    window.addEventListener('resize', positionBox);
+    window.visualViewport?.addEventListener('resize', positionBox);  // teclado del móvil
+    window.visualViewport?.addEventListener('scroll', positionBox);
+
+    // Tocar fuera cierra la lista (si se hizo scroll dentro, el blur ya no vuelve a saltar)
+    onDocDown = (e) => { if (box && !box.contains(e.target) && e.target !== input) closeBox(); };
+    document.addEventListener(PICK_EVENT, onDocDown, true);
+
+    // pointerdown, no mousedown: en táctil el mousedown emulado llega DESPUÉS del
+    // blur del input y el desplegable ya se había cerrado → el toque no elegía nada.
+    box.addEventListener(PICK_EVENT, () => { picking = true; });
     box.querySelectorAll('.cs-opt').forEach(el => {
-      // mousedown (no click) para que dispare antes del blur del input
-      el.addEventListener('mousedown', (e) => {
-        e.preventDefault();
+      el.addEventListener(PICK_EVENT, (e) => {
+        e.preventDefault();   // evita el blur del input
         const it = items[Number(el.dataset.i)];
         closeBox();
         if (it && onPick) onPick(it);
@@ -86,5 +132,7 @@ export function attachClientSuggest(input, { onPick, includeFamily = true } = {}
   }
 
   input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 250); });
-  input.addEventListener('blur', () => setTimeout(closeBox, 150));
+  // Al tocar el desplegable en táctil el input pierde el foco: si ese blur cerrara la
+  // lista, el toque se perdería. Mientras el dedo esté dentro, no se cierra.
+  input.addEventListener('blur', () => setTimeout(() => { if (!picking) closeBox(); }, 200));
 }
