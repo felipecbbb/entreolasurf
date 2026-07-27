@@ -5,10 +5,11 @@
      (pago por horas) o 'carpa' (pago fijo por día: corto/largo/trabaja).
    · Rejilla: fechas en filas, monitores en columnas, editable,
      con TOTAL y PAGO por semana. Navegable por semanas + filtros.
-   Acceso: admin + encargado (sección 'control-horario').
+   Acceso: admin + encargado (sección 'control-horario'). Quien tiene la
+     sección la tiene entera: rejilla, monitores, tarifas y pagos.
    ============================================================ */
 import { openModal, closeModal, showToast, formatCurrency } from '../modules/ui.js';
-import { isAdmin, getProfile } from '../modules/auth.js';
+import { getProfile } from '../modules/auth.js';
 import { supabase } from '/lib/supabase.js';
 
 const esc = (s) => s == null ? '' : String(s)
@@ -244,7 +245,8 @@ export async function renderControlHorario(container) {
               <option value="carpa" ${catFilter === 'carpa' ? 'selected' : ''}>Carpa (día)</option>
             </select>
             <input type="search" id="mon-search" class="mon-filter" placeholder="Buscar monitor…" value="${esc(search)}">
-            ${isAdmin() ? '<button class="btn line" id="mon-manage">Monitores</button><button class="btn line" id="mon-rates">Tarifas</button>' : ''}
+            <button class="btn line" id="mon-manage">Monitores</button>
+            <button class="btn line" id="mon-rates">Tarifas</button>
           </div>
         </div>
 
