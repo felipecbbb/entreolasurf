@@ -62,9 +62,32 @@ async function fetchMonitorShifts(from, to) {
   return data || [];
 }
 async function fetchPayroll() {
-  const { data, error } = await supabase.from('payroll_config').select('dia_corto, dia_largo, dia_trabaja').eq('id', 1).maybeSingle();
+  // select('*') a propósito: si falta la columna hora_extra (migración sin aplicar)
+  // no queremos que reviente ni que se pierdan las tarifas de día ya guardadas.
+  const { data, error } = await supabase.from('payroll_config').select('*').eq('id', 1).maybeSingle();
   if (error && !isSchemaMissing(error)) throw error;
-  return data || { dia_corto: 62, dia_largo: 70, dia_trabaja: 36 };
+  return data || { dia_corto: 62, dia_largo: 70, dia_trabaja: 36, hora_extra: 10 };
+}
+// Horas extra de la semana. Si falta la migración, degradamos a "sin extras"
+// para no tumbar la rejilla entera.
+async function fetchExtras(weekStart) {
+  const { data, error } = await supabase.from('monitor_extra_hours')
+    .select('monitor_id, week_start, hours').eq('week_start', weekStart);
+  if (error) { if (isSchemaMissing(error)) return null; throw error; }
+  return data || [];
+}
+async function saveExtra(monitor_id, week_start, hours) {
+  const h = Number(hours);
+  // Vacío o 0 → borrar la celda
+  if (hours === '' || hours == null || !Number.isFinite(h) || h <= 0) {
+    const { error } = await supabase.from('monitor_extra_hours')
+      .delete().eq('monitor_id', monitor_id).eq('week_start', week_start);
+    if (error) throw error; return;
+  }
+  const { error } = await supabase.from('monitor_extra_hours').upsert({
+    monitor_id, week_start, hours: Math.round(h * 100) / 100, updated_at: new Date().toISOString(),
+  }, { onConflict: 'monitor_id,week_start' });
+  if (error) throw error;
 }
 // Semanas ya pagadas. Si falta la migración, degradamos a "ninguna pagada"
 // para no tumbar la rejilla entera.
@@ -102,9 +125,11 @@ export async function renderControlHorario(container) {
   let currentDate = new Date(); currentDate.setHours(0, 0, 0, 0);
   let catFilter = '';       // '' | 'monitor' | 'carpa'
   let search = '';
-  let monitors = [], shifts = [], payroll = { dia_corto: 62, dia_largo: 70, dia_trabaja: 36 };
+  let monitors = [], shifts = [], payroll = { dia_corto: 62, dia_largo: 70, dia_trabaja: 36, hora_extra: 10 };
   let payments = [];        // pagos de la semana visible
   let paymentsOff = false;  // true si falta la migración monitor_payments
+  let extras = [];          // horas extra de la semana visible
+  let extrasOff = false;    // true si falta la migración monitor_extra_hours
 
   const rateOf = (m) => m.hourly_rate != null ? Number(m.hourly_rate) : 0;
   function dayRate(pt, m) {
@@ -119,17 +144,20 @@ export async function renderControlHorario(container) {
     if (s.pay_type === 'hora') return (Number(s.hours) || 0) * rateOf(m);
     return dayRate(s.pay_type, m);
   }
+  const extraRate = () => Number(payroll.hora_extra) || 0;
 
   async function render() {
     const wk = getWeekDates(currentDate);
     const from = getDateStr(wk[0]), to = getDateStr(wk[6]);
     try {
-      let pay;
-      [monitors, shifts, payroll, pay] = await Promise.all([
-        fetchMonitors(), fetchMonitorShifts(from, to), fetchPayroll(), fetchPayments(from),
+      let pay, ext;
+      [monitors, shifts, payroll, pay, ext] = await Promise.all([
+        fetchMonitors(), fetchMonitorShifts(from, to), fetchPayroll(), fetchPayments(from), fetchExtras(from),
       ]);
       paymentsOff = pay === null;
       payments = pay || [];
+      extrasOff = ext === null;
+      extras = ext || [];
     } catch (err) {
       if (isSchemaMissing(err)) {
         container.innerHTML = `<div class="admin-empty"><p><strong>Falta aplicar la migración de monitores.</strong><br>Ejecuta <code>supabase/migration-monitores.sql</code> en el SQL Editor de Supabase y recarga la página.</p></div>`;
@@ -153,10 +181,15 @@ export async function renderControlHorario(container) {
     // Pago de la semana por monitor + lookup de semanas ya pagadas
     const paidMap = {};
     payments.forEach(p => { paidMap[p.monitor_id] = p; });
+    // Horas extra de la semana por monitor (ajuste semanal, no un día trabajado)
+    const extraByMon = {};
+    extras.forEach(e => { extraByMon[e.monitor_id] = Number(e.hours) || 0; });
+
     const pagoByMon = {};
     cols.forEach(m => {
       const dayShifts = wk.map(d => map[`${m.id}|${getDateStr(d)}`]).filter(Boolean);
-      pagoByMon[m.id] = dayShifts.reduce((a, s) => a + shiftPago(s, m), 0);
+      const base = dayShifts.reduce((a, s) => a + shiftPago(s, m), 0);
+      pagoByMon[m.id] = base + (extraByMon[m.id] || 0) * extraRate();
     });
 
     // ---- Cabecera de columnas ----
@@ -198,6 +231,18 @@ export async function renderControlHorario(container) {
       }
       const h = dayShifts.reduce((a, s) => a + (Number(s.hours) || 0), 0);
       return `<td class="mon-total-cell">${h > 0 ? fmtHours(h) + ' h' : '·'}</td>`;
+    }).join('');
+
+    // ---- Fila EXTRA (horas extra de la semana, para monitores y carpa) ----
+    const extraCells = cols.map(m => {
+      const h = extraByMon[m.id] || 0;
+      const imp = h * extraRate();
+      return `<td class="mon-extra-cell ${h > 0 ? 'has-extra' : ''}">
+        <input type="number" min="0" step="0.5" class="mon-cell mon-cell-extra" data-mid="${m.id}"
+          value="${h > 0 ? h : ''}" placeholder="0"
+          title="Horas extra de ${esc(m.name)} esta semana${h > 0 ? ` · ${formatCurrency(imp)}` : ''}">
+        ${h > 0 ? `<span class="mon-extra-imp">${formatCurrency(imp)}</span>` : ''}
+      </td>`;
     }).join('');
 
     // ---- Fila PAGO ----
@@ -257,6 +302,7 @@ export async function renderControlHorario(container) {
             <tbody>${bodyRows}</tbody>
             <tfoot>
               <tr class="mon-total-row"><th class="mon-day-head">TOTAL</th>${totalCells}</tr>
+              ${extrasOff ? '' : `<tr class="mon-extra-row"><th class="mon-day-head" title="Horas extra de la semana · ${formatCurrency(extraRate())}/h">EXTRA</th>${extraCells}</tr>`}
               <tr class="mon-pago-row"><th class="mon-day-head">PAGO</th>${pagoCells}</tr>
               ${paymentsOff ? '' : `<tr class="mon-paid-row"><th class="mon-day-head">PAGADO</th>${paidCells}</tr>`}
             </tfoot>
@@ -266,7 +312,7 @@ export async function renderControlHorario(container) {
           Total semana: <strong>${formatCurrency(grandTotal)}</strong>
           ${paymentsOff ? '' : ` · Pagado: <strong class="mon-gt-paid">${formatCurrency(paidTotal)}</strong> · Pendiente: <strong class="mon-gt-pending">${formatCurrency(grandTotal - paidTotal)}</strong>`}
         </div>
-        <div class="mon-legend">C = día corto · L = día largo · T = trabaja · F = fija${paymentsOff ? ' · <em>Falta aplicar migration-monitor-payments.sql para marcar pagos</em>' : ''}</div>`}
+        <div class="mon-legend">C = día corto · L = día largo · T = trabaja · F = fija${extrasOff ? ' · <em>Falta aplicar migration-horas-extra.sql para las horas extra</em>' : ` · EXTRA = horas extra de la semana a ${formatCurrency(extraRate())}/h (se suman al PAGO)`}${paymentsOff ? ' · <em>Falta aplicar migration-monitor-payments.sql para marcar pagos</em>' : ''}</div>`}
       </div>`;
 
     bindEvents();
@@ -301,6 +347,15 @@ export async function renderControlHorario(container) {
     container.querySelectorAll('.mon-cell-sel').forEach(sel => {
       sel.addEventListener('change', async () => {
         try { await saveCell(sel.dataset.mid, sel.dataset.date, sel.value, null); await render(); }
+        catch (err) { showToast('Error: ' + err.message, 'error'); }
+      });
+    });
+
+    // Fila EXTRA: horas extra de la semana por monitor
+    container.querySelectorAll('.mon-cell-extra').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const weekStart = getDateStr(getWeekDates(currentDate)[0]);
+        try { await saveExtra(inp.dataset.mid, weekStart, inp.value); await render(); }
         catch (err) { showToast('Error: ' + err.message, 'error'); }
       });
     });
@@ -389,11 +444,12 @@ export async function renderControlHorario(container) {
   /* ---- Modal: tarifas globales de día (corto/largo/trabaja) ---- */
   function openRatesModal() {
     openModal('Tarifas de día', `
-      <p class="ch-rates-hint">Importe fijo por día para la categoría "Carpa". El €/h de cada monitor se edita en el botón Monitores.</p>
+      <p class="ch-rates-hint">Importe fijo por día para la categoría "Carpa". El €/h de cada monitor se edita en el botón Monitores. La hora extra aplica a todos (monitores y carpa).</p>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <div class="act-form-field" style="flex:1;min-width:120px"><label class="act-form-label">DÍA CORTO €</label><input type="number" min="0" step="0.5" class="act-form-input" id="mon-r-corto" value="${Number(payroll.dia_corto)}"></div>
         <div class="act-form-field" style="flex:1;min-width:120px"><label class="act-form-label">DÍA LARGO €</label><input type="number" min="0" step="0.5" class="act-form-input" id="mon-r-largo" value="${Number(payroll.dia_largo)}"></div>
         <div class="act-form-field" style="flex:1;min-width:120px"><label class="act-form-label">TRABAJA €</label><input type="number" min="0" step="0.5" class="act-form-input" id="mon-r-trab" value="${Number(payroll.dia_trabaja)}"></div>
+        ${extrasOff ? '' : `<div class="act-form-field" style="flex:1;min-width:120px"><label class="act-form-label">HORA EXTRA €/h</label><input type="number" min="0" step="0.5" class="act-form-input" id="mon-r-extra" value="${extraRate()}"></div>`}
       </div>
       <div class="ch-form-actions">
         <button type="button" class="btn line" id="mon-r-cancel">Cancelar</button>
@@ -403,12 +459,15 @@ export async function renderControlHorario(container) {
     document.getElementById('mon-r-save').addEventListener('click', async () => {
       const btn = document.getElementById('mon-r-save'); btn.disabled = true; btn.textContent = 'Guardando…';
       try {
-        await supabase.from('payroll_config').update({
+        const patch = {
           dia_corto: Number(document.getElementById('mon-r-corto').value) || 0,
           dia_largo: Number(document.getElementById('mon-r-largo').value) || 0,
           dia_trabaja: Number(document.getElementById('mon-r-trab').value) || 0,
           updated_at: new Date().toISOString(),
-        }).eq('id', 1);
+        };
+        const extraEl = document.getElementById('mon-r-extra');
+        if (extraEl) patch.hora_extra = Number(extraEl.value) || 0;
+        await supabase.from('payroll_config').update(patch).eq('id', 1);
         showToast('Tarifas guardadas', 'success'); closeModal(); await render();
       } catch (err) { showToast('Error: ' + err.message, 'error'); btn.disabled = false; btn.textContent = 'Guardar tarifas'; }
     });
