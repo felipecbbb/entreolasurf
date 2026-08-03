@@ -2201,6 +2201,11 @@ a.admin-nav-item-external .nav-icon svg {
 .mon-cell:focus { outline:2px solid #0ea5e9; outline-offset:-2px; background:#f0f9ff; }
 .mon-cell-sel { min-width:90px; }
 .mon-total-row th, .mon-total-row td { background:#f1f5f9; font-weight:700; padding:6px 4px; }
+.mon-extra-row th, .mon-extra-row td { background:#fff7ed; padding:4px; }
+.mon-extra-row .mon-day-head { color:#c2410c; }
+.mon-extra-cell .mon-cell-extra { padding:5px 4px; font-weight:700; color:#9a3412; }
+.mon-extra-cell.has-extra { background:#ffedd5; }
+.mon-extra-imp { display:block; font-size:.68rem; font-weight:700; color:#c2410c; line-height:1.2; padding-bottom:2px; }
 .mon-pago-row th, .mon-pago-row td { background:#ecfdf5; font-weight:800; color:#065f46; padding:6px 4px; }
 .mon-paid-row th, .mon-paid-row td { background:#f8fafc; padding:5px 4px; }
 .mon-paid-row .mon-paid-cell.is-paid { background:#dcfce7; }
