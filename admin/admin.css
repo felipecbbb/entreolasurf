@@ -1071,7 +1071,7 @@ a.admin-nav-item-external .nav-icon svg {
 
 @media (max-width: 820px) {
   .admin-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .admin-sidebar {
