@@ -2231,6 +2231,60 @@ a.admin-nav-item-external .nav-icon svg {
 .mon-rows-list { display:flex; flex-direction:column; gap:6px; max-height:52vh; overflow:auto; }
 .mon-row { display:flex; align-items:center; gap:8px; }
 
+/* ===== Control Horario — pestañas ===== */
+.ch-tabs { display:flex; gap:4px; border-bottom:1px solid var(--color-line); margin-bottom:18px; }
+.ch-tab { appearance:none; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-1px;
+  padding:10px 16px; cursor:pointer; font-family:'Space Grotesk',sans-serif; font-size:.82rem; font-weight:600;
+  text-transform:uppercase; letter-spacing:.04em; color:var(--color-muted); }
+.ch-tab:hover { color:var(--color-navy); }
+.ch-tab.is-active { color:var(--color-navy); border-bottom-color:var(--color-yellow); }
+
+/* ===== Envío de horarios ===== */
+.sh-topbar { align-items:flex-end; }
+.sh-range { display:flex; gap:12px; flex-wrap:wrap; }
+.sh-field { display:flex; flex-direction:column; gap:4px; }
+.sh-field span { font-family:'Space Grotesk',sans-serif; font-size:.66rem; font-weight:600; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--color-muted); }
+.sh-field input { padding:7px 10px; border:1px solid #e2e8f0; border-radius:8px; font-size:.85rem; background:#fff; }
+.sh-days { display:flex; flex-direction:column; gap:12px; }
+.sh-day { background:#fff; border:1px solid var(--color-line); border-radius:10px; padding:14px 16px; }
+.sh-day-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.sh-day-head h3 { font-family:'Bebas Neue',sans-serif; font-size:1.15rem; color:var(--color-navy); margin:0; letter-spacing:.02em; }
+.sh-day-count { font-size:.72rem; color:var(--color-muted); text-transform:uppercase; letter-spacing:.04em; }
+.sh-list { list-style:none; margin:0 0 10px; padding:0; display:flex; flex-direction:column; gap:6px; }
+.sh-item { display:flex; align-items:center; gap:10px; background:#f8fafc; border-radius:8px; padding:7px 10px; }
+.sh-item-name { font-weight:700; font-size:.85rem; color:var(--color-navy); flex:1; }
+.sh-item-shift { font-size:.82rem; color:#0369a1; font-weight:600; }
+.sh-del { appearance:none; border:1px solid #fecaca; background:#fef2f2; color:#dc2626; border-radius:6px;
+  width:24px; height:24px; cursor:pointer; font-size:1rem; line-height:1; flex-shrink:0; }
+.sh-del:hover { background:#fee2e2; }
+.sh-add { display:flex; gap:8px; flex-wrap:wrap; }
+.sh-add select { flex:1; min-width:130px; padding:7px 10px; border:1px solid #e2e8f0; border-radius:8px; font-size:.85rem; background:#fff; }
+.sh-all-done { margin:0; font-size:.8rem; color:var(--color-muted); font-style:italic; }
+.sh-preview { margin-top:18px; border:1px solid var(--color-line); border-radius:10px; overflow:hidden; }
+.sh-preview-head { background:#f8fafc; padding:8px 14px; font-family:'Space Grotesk',sans-serif; font-size:.7rem;
+  font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--color-muted); border-bottom:1px solid var(--color-line); }
+.sh-preview-body { margin:0; padding:14px; font-family:'Manrope',sans-serif; font-size:.85rem; line-height:1.5;
+  color:var(--color-navy); white-space:pre-wrap; word-break:break-word; background:#fff; }
+.sh-send-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:16px; }
+.sh-send-info { font-size:.82rem; color:var(--color-muted); }
+.sh-send.is-disabled { opacity:.45; pointer-events:none; }
+.sh-hint { margin:8px 0 0; font-size:.75rem; color:var(--color-muted); }
+.sh-history { display:flex; flex-direction:column; gap:8px; max-height:60vh; overflow:auto; }
+.sh-hist-item { border:1px solid var(--color-line); border-radius:8px; padding:8px 12px; }
+.sh-hist-item summary { cursor:pointer; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:.85rem; }
+.sh-hist-when { color:var(--color-muted); font-size:.78rem; }
+
+@media (max-width: 640px) {
+  .ch-tab { flex:1; padding:10px 8px; font-size:.75rem; }
+  .sh-topbar { align-items:stretch; }
+  .sh-range { width:100%; }
+  .sh-field { flex:1; }
+  .sh-add select { flex:1 1 100%; }
+  .sh-add .btn { width:100%; }
+  .sh-send-bar { flex-direction:column; align-items:stretch; text-align:center; }
+}
+
 /* Control Horario — móvil */
 @media (max-width: 640px) {
   .mon-page .ch-actions { width:100%; }

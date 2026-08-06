@@ -9,8 +9,9 @@
      sección la tiene entera: rejilla, monitores, tarifas y pagos.
    ============================================================ */
 import { openModal, closeModal, showToast, formatCurrency } from '../modules/ui.js';
-import { getProfile } from '../modules/auth.js';
+import { getProfile, canSendSchedules } from '../modules/auth.js';
 import { supabase } from '/lib/supabase.js';
+import { renderEnvioHorarios } from './envio-horarios.js';
 
 const esc = (s) => s == null ? '' : String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -120,8 +121,39 @@ async function saveCell(monitor_id, work_date, pay_type, hours) {
   if (error) throw error;
 }
 
-/* ============================================================ */
+/* ============================================================
+   Punto de entrada: dos pestañas. La rejilla la ve quien tenga la sección;
+   "Envío de horarios" solo el admin y las cuentas con can_send_schedules.
+   ============================================================ */
 export async function renderControlHorario(container) {
+  const puedeEnviar = canSendSchedules();
+  let tab = 'rejilla';
+
+  function shell() {
+    container.innerHTML = `
+      ${puedeEnviar ? `<div class="ch-tabs" role="tablist">
+        <button class="ch-tab ${tab === 'rejilla' ? 'is-active' : ''}" data-tab="rejilla" role="tab">Rejilla de horas</button>
+        <button class="ch-tab ${tab === 'envio' ? 'is-active' : ''}" data-tab="envio" role="tab">Envío de horarios</button>
+      </div>` : ''}
+      <div id="ch-tab-body"></div>`;
+    container.querySelectorAll('.ch-tab').forEach(b => b.addEventListener('click', () => {
+      if (tab === b.dataset.tab) return;
+      tab = b.dataset.tab; mount();
+    }));
+    return container.querySelector('#ch-tab-body');
+  }
+
+  async function mount() {
+    const body = shell();
+    if (tab === 'envio' && puedeEnviar) await renderEnvioHorarios(body);
+    else await renderRejilla(body);
+  }
+
+  await mount();
+}
+
+/* ============================================================ */
+async function renderRejilla(container) {
   let currentDate = new Date(); currentDate.setHours(0, 0, 0, 0);
   let catFilter = '';       // '' | 'monitor' | 'carpa'
   let search = '';

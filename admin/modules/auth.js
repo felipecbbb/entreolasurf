@@ -13,6 +13,11 @@ export function getProfile() { return currentProfile; }
 export function isAdmin() { return currentProfile?.role === 'admin'; }
 export function isEncargado() { return currentProfile?.role === 'encargado'; }
 export function isStaff() { return STAFF_ROLES.includes(currentProfile?.role); }
+// Envío de horarios: admin, o encargado con el permiso marcado desde Equipo.
+// No basta con tener la sección 'control-horario' concedida.
+export function canSendSchedules() {
+  return currentProfile?.role === 'admin' || !!currentProfile?.can_send_schedules;
+}
 
 // Check if session exists and user is staff (admin or encargado)
 export async function checkSession() {
