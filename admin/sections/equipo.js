@@ -16,7 +16,9 @@ function fmtDate(d) {
 async function fetchStaff() {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, email, role, created_at, allowed_sections')
+    // '*' y no una lista de columnas: si la migración de envío de horarios aún
+    // no está aplicada, pedir can_send_schedules por nombre rompería la sección.
+    .select('*')
     .in('role', ['admin', 'encargado'])
     .order('role', { ascending: true })
     .order('created_at', { ascending: true });
@@ -45,6 +47,15 @@ async function updateAllowedSections(userId, sections) {
     .update({ allowed_sections: sections, updated_at: new Date().toISOString() })
     .eq('id', userId);
   if (error) throw error;
+}
+
+// Permiso de envío de horarios. Va aparte de allowed_sections: es un permiso
+// por cuenta, no una sección. La BD solo deja cambiarlo a un admin estricto.
+async function updateSendSchedules(userId, can) {
+  const { error } = await supabase.from('profiles')
+    .update({ can_send_schedules: can, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+  if (error && !/column .* does not exist|schema cache/i.test(error.message)) throw error;
 }
 
 // Checklist de secciones concedibles. `selected` = array (marcadas) o null (todas).
@@ -202,6 +213,11 @@ export async function renderEquipo(container) {
           <p class="eq-card-hint">Dashboard siempre disponible. Los cambios se aplican la próxima vez que el encargado cargue el panel.</p>
           <div class="eq-perm-grid">${sectionChecklist(staff.allowed_sections)}</div>
         </div>
+        <div class="eq-card">
+          <div class="eq-card-title-row"><h3 class="eq-card-title">Permisos especiales</h3></div>
+          <p class="eq-card-hint">Al margen de las secciones: se conceden cuenta por cuenta.</p>
+          <label class="eq-perm"><input type="checkbox" id="eq-send-sched" ${staff.can_send_schedules ? 'checked' : ''}><span>Enviar horarios por WhatsApp <small style="color:var(--color-muted)">(pestaña dentro de Control Horario)</small></span></label>
+        </div>
         <button type="submit" class="btn red" style="width:100%" id="eq-perms-submit">Guardar permisos</button>
       </form>
     `);
@@ -213,6 +229,7 @@ export async function renderEquipo(container) {
       btn.disabled = true; btn.textContent = 'Guardando…';
       try {
         await updateAllowedSections(staff.id, getChecked());
+        await updateSendSchedules(staff.id, document.getElementById('eq-send-sched').checked);
         closeModal();
         showToast('Permisos actualizados', 'success');
         await render();
