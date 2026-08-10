@@ -126,18 +126,32 @@ Deno.serve(async (req) => {
       for (const camp of camps) {
         const campId = camp.metadata?.campId || camp.id?.replace("camp-", "") || null;
         if (campId) {
+          // Plazas compradas: el carrito manda la cantidad. La señal es por
+          // plaza, así que el cobro real es price × plazas.
+          const spots = Math.max(1, Number(camp.metadata?.spots ?? camp.quantity) || 1);
+          const depositPaid = Number(camp.price) * spots;
+          // El total lo recalcula la BD con los tramos configurados: lo que
+          // venga del carrito es del cliente y podría estar manipulado.
+          const { data: priced } = await supabase.rpc("camp_price_for", {
+            p_camp_id: campId, p_spots: spots,
+          });
+          const totalAmount = Number(priced) > 0
+            ? Number(priced)
+            : Number(camp.metadata?.totalAmount) || depositPaid;
+
           const { data: bk } = await supabase.from("bookings").insert({
             user_id: userId,
             camp_id: campId,
-            deposit_amount: camp.price,
-            total_amount: camp.metadata?.totalAmount || camp.price,
+            num_spots: spots,
+            deposit_amount: depositPaid,
+            total_amount: totalAmount,
             status: "deposit_paid",
-            notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}`,
+            notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}${spots > 1 ? ` | ${spots} plazas` : ""}`,
           }).select("id").single();
           if (bk?.id) {
             paymentRows.push({
               ...paymentsBase,
-              amount: camp.price,
+              amount: depositPaid,
               reservation_type: "booking",
               reference_id: bk.id,
               concept: `Señal surf camp ${camp.name || ''}`.trim(),
