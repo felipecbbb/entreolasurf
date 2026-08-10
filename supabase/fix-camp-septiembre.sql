@@ -18,20 +18,21 @@ update public.surf_camps set
   meta_title       = 'Surf Camp 10–13 Septiembre | Entre Olas',
   meta_description = 'Surf Camp Entre Olas 10-13 Septiembre: 4 días en villa privada con surf, aventura y pensión completa.',
   description      = '4 días de surf, aventura y fiesta en villa privada con todo incluido.',
-  whats_included   = jsonb_build_array(
+  -- OJO: whats_included e ideal_for son text[], no jsonb
+  whats_included   = ARRAY[
     'Villa privada de lujo con piscina, jardín, terraza y zonas comunes (a 7 min de la playa)',
     'Pensión completa (desayunos, comidas, cenas y BBQ de bienvenida)',
     'Clases de surf con monitor titulado durante 3 días + material 24h',
     'Transporte ida y vuelta desde aeropuerto de Jerez, Sevilla o San Fernando Bahía Sur',
     'Aventura: parque de tirolinas, rutas por la naturaleza y actividades al aire libre',
     '4 días completos (3 noches en la villa)'
-  ),
-  ideal_for        = jsonb_build_array(
+  ]::text[],
+  ideal_for        = ARRAY[
     'Mayores de 18 años',
     'Viajeros individuales que buscan grupo',
     'Cualquier nivel de surf',
     'Quienes quieren alargar el verano'
-  ),
+  ]::text[],
   updated_at       = now()
 where slug = 'surf-camp-10-13-septiembre-sambatrips';
 
