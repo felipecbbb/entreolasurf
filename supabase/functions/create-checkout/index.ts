@@ -78,18 +78,31 @@ Deno.serve(async (req) => {
     if (campItems.length) {
       const campId = (i: any) => i.metadata?.campId || (i.id || "").replace("camp-", "");
       const ids = [...new Set(campItems.map(campId).filter(Boolean))];
-      const { data: camps } = await supabase.from("surf_camps").select("id, deposit")
+      const { data: camps } = await supabase.from("surf_camps")
+        .select("id, deposit, max_spots, spots_taken, sold_out, status")
         .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
-      const depById: Record<string, number> = {};
-      (camps || []).forEach((c: any) => { depById[c.id] = Number(c.deposit); });
+      const byId: Record<string, any> = {};
+      (camps || []).forEach((c: any) => { byId[c.id] = c; });
       for (const it of campItems) {
-        const dep = depById[campId(it)];
+        const c = byId[campId(it)];
+        const dep = c ? Number(c.deposit) : null;
         if (dep == null || Number.isNaN(dep)) {
           return new Response(JSON.stringify({ error: `Surf camp no disponible: ${it.name}` }), {
             status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        it.price = dep; // señal real
+        // Aforo: con varias plazas por reserva hay que comprobar que caben
+        // todas, o se vende por encima del máximo.
+        const spots = Math.max(1, parseInt(it.quantity, 10) || 1);
+        const libres = Math.max(Number(c.max_spots || 0) - Number(c.spots_taken || 0), 0);
+        if (c.sold_out || c.status === "closed" || libres < spots) {
+          return new Response(JSON.stringify({
+            error: libres > 0
+              ? `Solo quedan ${libres} plaza(s) en ${it.name}`
+              : `Surf camp agotado: ${it.name}`,
+          }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        it.price = dep; // señal real, por plaza
       }
     }
 

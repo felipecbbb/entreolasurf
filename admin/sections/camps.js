@@ -8,6 +8,7 @@ import {
   upsertCampTestimonial, deleteCampTestimonial,
   upsertCampFaq, deleteCampFaq,
 } from '../modules/api.js';
+import { supabase } from '/lib/supabase.js';
 
 const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
 
@@ -77,6 +78,7 @@ export async function renderCamps(container) {
   let selectedId = null;
   let campFull = null;
   let activeTab = 'general';
+  let campTiers = [];   // tramos de precio por volumen del camp abierto
 
   let camps = await fetchCamps();
 
@@ -240,7 +242,17 @@ export async function renderCamps(container) {
   async function openDetail() {
     try { campFull = await fetchCampFull(selectedId); }
     catch (err) { showToast('Error cargando camp', 'error'); return renderList(); }
+    campTiers = await fetchTiers(selectedId);
     renderDetail();
+  }
+
+  // Si falta la migración de precios por volumen, la sección sigue funcionando
+  // sin tramos en vez de romperse.
+  async function fetchTiers(campId) {
+    const { data, error } = await supabase.from('camp_price_tiers')
+      .select('*').eq('camp_id', campId).order('spots', { ascending: true });
+    if (error) { console.warn('camp_price_tiers:', error.message); return []; }
+    return data || [];
   }
 
   function renderDetail() {
@@ -465,6 +477,44 @@ export async function renderCamps(container) {
         <div class="act-form-field"><label class="act-form-label">ESTADO</label>
           <select class="act-form-input" id="f-status" style="width:180px">${STATUSES.map(s => `<option value="${s}" ${c.status===s?'selected':''}>${STATUS_LABELS[s]||s}</option>`).join('')}</select>
         </div>
+      </div>
+      ${tiersCard(c)}`;
+  }
+
+  // Tramos por volumen: precio POR PERSONA según cuántas plazas se compren.
+  function tiersCard(c) {
+    const tiers = (campTiers || []).slice().sort((a, b) => a.spots - b.spots);
+    const base = Number(c.price) || 0;
+    const rows = tiers.map(t => {
+      const ahorro = base > 0 ? (base - Number(t.price_per_person)) * Number(t.spots) : 0;
+      return `
+      <div class="cv-tier" data-id="${t.id}">
+        <span class="cv-tier-qty"><input type="number" class="act-form-input cv-t-spots" value="${t.spots}" min="1" style="width:64px"> plazas</span>
+        <span class="cv-tier-arrow">→</span>
+        <span class="cv-tier-price"><input type="number" class="act-form-input cv-t-price" value="${Number(t.price_per_person)}" step="0.01" min="0" style="width:96px"> € por persona</span>
+        <span class="cv-tier-total">${t.spots * Number(t.price_per_person)}€ total${ahorro > 0 ? ` · ahorra ${Math.round(ahorro)}€` : ''}</span>
+        <button type="button" class="cp-action-btn cv-t-del" data-id="${t.id}" title="Eliminar tramo">×</button>
+      </div>`;
+    }).join('');
+
+    return `
+      <div class="act-form-card" style="margin-top:16px">
+        <div class="act-form-field">
+          <label class="act-form-label">PRECIO POR VOLUMEN</label>
+          <small class="act-form-hint">Descuento por comprar varias plazas de golpe. El precio de cada tramo es <strong>por persona</strong>. Si no hay tramos, todas las plazas van al precio normal.</small>
+        </div>
+        <div class="cv-tiers">${rows || '<p class="dash-empty" style="margin:0 0 10px">Sin tramos. Ahora mismo cada plaza cuesta el precio normal.</p>'}</div>
+        <div class="cv-tier cv-tier-new">
+          <span class="cv-tier-qty"><input type="number" class="act-form-input" id="cv-new-spots" placeholder="2" min="1" style="width:64px"> plazas</span>
+          <span class="cv-tier-arrow">→</span>
+          <span class="cv-tier-price"><input type="number" class="act-form-input" id="cv-new-price" placeholder="450" step="0.01" min="0" style="width:96px"> € por persona</span>
+          <button type="button" class="btn line" id="cv-add">Añadir tramo</button>
+        </div>
+        <div class="act-form-field" style="margin-top:14px">
+          <label class="act-form-label">PRECIO POR PLAZA EXTRA</label>
+          <div style="display:flex;align-items:center;gap:8px"><input type="number" class="act-form-input" id="f-extra-spot" value="${c.extra_spot_price ?? ''}" step="0.01" min="0" style="width:120px" /><span>€ por persona</span></div>
+          <small class="act-form-hint">Lo que cuesta cada plaza por encima del tramo más alto. Si lo dejas vacío, esas plazas se cobran al precio del tramo más alto.</small>
+        </div>
       </div>`;
   }
 
@@ -524,6 +574,35 @@ export async function renderCamps(container) {
       container.querySelector('#f-date-start')?.addEventListener('change', syncSlug);
       container.querySelector('#f-date-end')?.addEventListener('change', syncSlug);
     }
+
+    /* Precios — tramos por volumen */
+    container.querySelector('#cv-add')?.addEventListener('click', async () => {
+      const spots = parseInt(container.querySelector('#cv-new-spots')?.value, 10);
+      const price = parseFloat(container.querySelector('#cv-new-price')?.value);
+      if (!Number.isFinite(spots) || spots < 1) { showToast('Indica el número de plazas', 'error'); return; }
+      if (!Number.isFinite(price) || price < 0) { showToast('Indica el precio por persona', 'error'); return; }
+      if (campTiers.some(t => Number(t.spots) === spots)) { showToast(`Ya hay un tramo de ${spots} plazas`, 'error'); return; }
+      try {
+        const { error } = await supabase.from('camp_price_tiers')
+          .insert({ camp_id: c.id, spots, price_per_person: price });
+        if (error) throw error;
+        campTiers = await fetchTiers(c.id);
+        showToast('Tramo añadido', 'success');
+        renderDetail();
+      } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    });
+
+    container.querySelectorAll('.cv-t-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          const { error } = await supabase.from('camp_price_tiers').delete().eq('id', btn.dataset.id);
+          if (error) throw error;
+          campTiers = await fetchTiers(c.id);
+          showToast('Tramo eliminado', 'success');
+          renderDetail();
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+      });
+    });
 
     /* Hero — file upload */
     if (activeTab === 'hero') {
@@ -664,6 +743,23 @@ export async function renderCamps(container) {
       updates.original_price = parseFloat(container.querySelector('#f-original-price')?.value) || null;
       updates.deposit = parseFloat(container.querySelector('#f-deposit')?.value) || c.deposit;
       updates.status = container.querySelector('#f-status')?.value || c.status;
+
+      const extraRaw = container.querySelector('#f-extra-spot')?.value;
+      const extra = parseFloat(extraRaw);
+      updates.extra_spot_price = (extraRaw === '' || !Number.isFinite(extra)) ? null : extra;
+
+      // Ediciones en línea de los tramos ya existentes
+      for (const row of container.querySelectorAll('.cv-tier[data-id]')) {
+        const spots = parseInt(row.querySelector('.cv-t-spots')?.value, 10);
+        const price = parseFloat(row.querySelector('.cv-t-price')?.value);
+        if (!Number.isFinite(spots) || spots < 1 || !Number.isFinite(price) || price < 0) continue;
+        const prev = campTiers.find(t => t.id === row.dataset.id);
+        if (prev && Number(prev.spots) === spots && Number(prev.price_per_person) === price) continue;
+        const { error } = await supabase.from('camp_price_tiers')
+          .update({ spots, price_per_person: price }).eq('id', row.dataset.id);
+        if (error) throw error;
+      }
+      campTiers = await fetchTiers(c.id);
     }
 
     if (activeTab === 'ajustes') {

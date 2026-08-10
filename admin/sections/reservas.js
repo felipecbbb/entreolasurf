@@ -112,7 +112,7 @@ export async function renderReservas(container) {
                 <div class="rv-booking-row rv-booking-clickable" data-id="${b.id}" style="cursor:pointer">
                   <div class="rv-booking-client">
                     <strong>${esc(b.profiles?.full_name || b.guest_name || 'Sin nombre')}</strong>
-                    <span class="rv-booking-phone">${esc(b.profiles?.phone || b.guest_phone || '')}</span>
+                    <span class="rv-booking-phone">${esc(b.profiles?.phone || b.guest_phone || '')}${Number(b.num_spots) > 1 ? ` · <strong>${b.num_spots} plazas</strong>` : ''}</span>
                   </div>
                   <div class="rv-booking-amounts">
                     <span class="rv-booking-deposit">Señal: ${formatCurrency(b.deposit_amount)}</span>
