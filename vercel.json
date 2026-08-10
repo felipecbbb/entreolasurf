@@ -8,6 +8,6 @@
     }
   ],
   "rewrites": [
-    { "source": "/surf-camp-:slug+", "destination": "/camp-template/index.html" }
+    { "source": "/surf-camp-:slug+", "destination": "/camp-template" }
   ]
 }
