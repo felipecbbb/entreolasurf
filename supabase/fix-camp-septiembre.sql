@@ -22,7 +22,7 @@ update public.surf_camps set
   meta_description = 'Surf Camp Entre Olas 10-13 Septiembre: 4 días en villa privada con surf, aventura y pensión completa. Desde 480€.',
   description      = '4 días de surf, aventura y fiesta en villa privada con todo incluido.',
   duration_label   = '4 días / 3 noches',
-  duration_days    = 4,
+  -- duration_days NO se toca: es una columna generada desde las fechas
   -- OJO: whats_included e ideal_for son text[], no jsonb
   whats_included   = ARRAY[
     'Villa privada de lujo con piscina, jardín, terraza y zonas comunes (a 7 min de la playa)',
