@@ -1666,6 +1666,72 @@ td a {
   top: -12px;
 }
 
+/* Oferta por volumen — bloque destacado */
+.camp-vol {
+  margin: 22px 0 6px;
+}
+.camp-vol-kicker {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--color-red, #c0392b);
+  margin: 0 0 12px;
+}
+.camp-vol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.camp-vol-item {
+  position: relative;
+  background: #fff;
+  border: 2px solid var(--color-line, #e6e2d6);
+  border-radius: 14px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+.camp-vol-item.is-deal {
+  border-color: var(--color-yellow, #FFCC01);
+  background: #fffdf3;
+}
+.camp-vol-qty {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-muted, #7b8794);
+}
+.camp-vol-total {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(2.1rem, 4.5vw, 3rem);
+  line-height: 1;
+  color: var(--color-navy, #0f2f39);
+  letter-spacing: .02em;
+}
+.camp-vol-each {
+  font-size: .82rem;
+  color: var(--color-muted, #7b8794);
+}
+.camp-vol-save {
+  margin-top: 6px;
+  display: inline-block;
+  background: var(--color-red, #c0392b);
+  color: #fff;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: .72rem;
+  letter-spacing: .04em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  align-self: center;
+}
+
 /* Selector de plazas (precio por volumen) */
 .camp-spots-picker {
   display: flex;

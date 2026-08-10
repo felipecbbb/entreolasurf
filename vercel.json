@@ -1,5 +1,12 @@
 {
   "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/surf-camp-10-13-septiembre-sambatrips",
+      "destination": "/surf-camp-10-13-septiembre",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     { "source": "/surf-camp-:slug+", "destination": "/camp-template/index.html" }
   ]
