@@ -200,7 +200,7 @@ export async function renderPedidos(container) {
         const emailTo = order.profiles?.email || order.guest_email;
         if (emailType && emailTo) {
           try {
-            supabase.functions.invoke('send-email', {
+            await supabase.functions.invoke('send-email', {
               body: {
                 to: emailTo,
                 type: emailType,

@@ -336,12 +336,12 @@ export async function renderCalendar(panel) {
               classTime: cls ? formatTime(cls.time_start) + ' — ' + formatTime(cls.time_end) : '',
             };
             if (user?.email) {
-              supabase.functions.invoke('send-email', {
+              await supabase.functions.invoke('send-email', {
                 body: { to: user.email, type: 'class_cancelled', data: emailData },
               });
             }
             // Notificar al admin
-            supabase.functions.invoke('send-email', {
+            await supabase.functions.invoke('send-email', {
               body: {
                 to: ADMIN_EMAIL,
                 type: 'admin_class_cancelled',
@@ -490,12 +490,12 @@ export async function renderCalendar(panel) {
           };
           // Email al cliente
           if (user?.email) {
-            supabase.functions.invoke('send-email', {
+            await supabase.functions.invoke('send-email', {
               body: { to: user.email, type: 'class_booked', data: emailData },
             });
           }
           // Email al admin
-          supabase.functions.invoke('send-email', {
+          await supabase.functions.invoke('send-email', {
             body: {
               to: ADMIN_EMAIL,
               type: 'admin_class_booked',
