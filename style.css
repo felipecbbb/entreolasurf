@@ -489,6 +489,92 @@ body.internal-page.no-hero .dropdown a {
   margin: 0 auto;
 }
 
+/* ── Carrusel de fotos del camp ── */
+.camp-carousel {
+  position: relative;
+  outline: none;
+}
+.camp-carousel-track {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+.camp-carousel-track::-webkit-scrollbar { display: none; }
+.camp-slide {
+  margin: 0;
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  border-radius: 22px;
+  overflow: hidden;
+  background: #eee;
+  aspect-ratio: 16 / 10;
+}
+.camp-slide img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.camp-carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,.92);
+  color: var(--color-navy, #0f2f39);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity .2s, background .2s;
+  z-index: 2;
+}
+.camp-carousel-btn:hover { background: #fff; }
+.camp-carousel-btn:disabled { opacity: 0; pointer-events: none; }
+.camp-carousel-prev { left: 12px; }
+.camp-carousel-next { right: 12px; }
+.camp-carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.camp-dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: #d6d2c4;
+  cursor: pointer;
+  transition: background .2s, transform .2s;
+}
+.camp-dot.is-active {
+  background: var(--color-yellow, #FFCC01);
+  transform: scale(1.35);
+}
+
+@media (min-width: 900px) {
+  /* En escritorio se ven dos fotos y se intuye la siguiente */
+  .camp-slide { flex-basis: calc(50% - 8px); aspect-ratio: 4 / 3; }
+}
+@media (max-width: 620px) {
+  .camp-slide { border-radius: 16px; aspect-ratio: 4 / 3; }
+  .camp-carousel-btn { width: 38px; height: 38px; font-size: 1.3rem; }
+}
+
 .showcase-media-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
