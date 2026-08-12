@@ -18,7 +18,7 @@ import { recalcBonoPaid, recalcPaidState } from '/lib/domain/payments.js';
 import { findOwnerBono, bonoAvailable, createBono, extendBono, defaultBonoExpiry } from '/lib/domain/bonos.js';
 import { openBonoFicha } from '../components/bono-ficha.js';
 import { supabase } from '/lib/supabase.js';
-import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry, compareSizes } from '/lib/shared-constants.js';
+import { WETSUIT_SIZES, wetsuitOptionsHtml, audienceOptionsHtml, dialForCountry, compareSizes, ADMIN_EMAIL } from '/lib/shared-constants.js';
 import { attachClientSuggest } from '../modules/client-suggest.js';
 
 // getPackPrice / bonoExpected viven en /lib/domain/pricing.js (fuente única).
@@ -145,6 +145,41 @@ async function notifyEnrolledClients(classId, kind, payload) {
     console.warn('notifyEnrolledClients error:', err);
   }
   return result;
+}
+
+// ---- Confirmación de reserva creada desde el panel ----
+// El wizard tiene un check "Enviar confirmación de reserva" que hasta ago-2026
+// no enviaba nada: la variable se guardaba en el objeto de la reserva y ahí
+// moría. Las reservas hechas desde el panel se quedaban sin aviso, mientras que
+// las compras de la web sí lo mandaban (de ahí el "unos sí y otros no").
+async function sendBookingConfirmation({ email, customerName, sessions, activityLabel }) {
+  if (!email) return { sent: 0, reason: 'sin-email' };
+  const first = sessions?.[0] || null;
+  const fmt = (t) => (t || '').slice(0, 5);
+  const data = {
+    customerName: customerName || '',
+    className: activityLabel || first?.title || 'Clase',
+    classDate: first?.date || '',
+    classTime: first ? `${fmt(first.time_start)}${first.time_end ? ' — ' + fmt(first.time_end) : ''}` : '',
+    instructor: first?.instructor || '',
+    spots: sessions?.length || 1,
+  };
+  try {
+    const { error } = await supabase.functions.invoke('send-email', {
+      body: { to: email, type: 'class_booked', data },
+    });
+    if (error) throw error;
+  } catch (err) {
+    console.warn('sendBookingConfirmation (cliente):', err.message);
+    return { sent: 0, reason: 'error', error: err.message };
+  }
+  // Copia al admin: que quede constancia aunque el cliente no conteste
+  try {
+    await supabase.functions.invoke('send-email', {
+      body: { to: ADMIN_EMAIL, type: 'admin_class_booked', data: { ...data, customerEmail: email } },
+    });
+  } catch { /* la copia interna no debe romper el flujo */ }
+  return { sent: 1 };
 }
 
 function notifyToastMessage(action, r) {
@@ -3452,7 +3487,20 @@ export async function renderCalendario(container) {
               payments: [],
             };
 
-            showToast('Reserva confirmada', 'success');
+            // Confirmación al cliente si el check está marcado (lo está por defecto)
+            if (enviarConfirmacion) {
+              const r = await sendBookingConfirmation({
+                email: contactData.email,
+                customerName: [contactData.nombre, contactData.apellidos].filter(Boolean).join(' '),
+                sessions: reservationData.sessions,
+                activityLabel: label,
+              });
+              if (r.sent) showToast('Reserva confirmada · email enviado', 'success');
+              else if (r.reason === 'sin-email') showToast('Reserva confirmada (sin email del cliente, no se envió confirmación)', 'info');
+              else showToast('Reserva confirmada, pero el email falló: ' + (r.error || ''), 'error');
+            } else {
+              showToast('Reserva confirmada', 'success');
+            }
             // Caso común (responsable+familia = un bono): abrir la ficha de bono ÚNICA,
             // la misma que se ve desde clientes/reserva-clases/calendario. Multi-bono o
             // sin bono: el resumen de reserva clásico.

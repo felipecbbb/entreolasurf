@@ -113,11 +113,11 @@ export async function renderEnrollments(panel) {
               classTime: cls ? formatTime(cls.time_start) + ' — ' + formatTime(cls.time_end) : '',
             };
             if (user?.email) {
-              supabase.functions.invoke('send-email', {
+              await supabase.functions.invoke('send-email', {
                 body: { to: user.email, type: 'class_cancelled', data: emailData },
               });
             }
-            supabase.functions.invoke('send-email', {
+            await supabase.functions.invoke('send-email', {
               body: {
                 to: ADMIN_EMAIL,
                 type: 'admin_class_cancelled',
