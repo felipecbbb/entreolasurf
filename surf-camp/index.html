@@ -11,7 +11,10 @@
 <body class="internal-page">
 
 <main>
-  <section class="hero hero-video">
+  <!-- El vídeo va sobre una foto: si YouTube tarda o no arranca (pasa siempre
+       en iOS, donde el autoplay de un iframe está bloqueado), se ve la villa y
+       no un rectángulo gris. -->
+  <section class="hero hero-video" style="--hero-image:url('/uploads/2026/08/villa/villa-32.webp')">
     <div class="hero-video-bg" aria-hidden="true">
       <iframe
         class="hero-video-frame"
@@ -36,19 +39,38 @@
       <div class="dot"></div>
       <p class="lead">Descubre nuestro exclusivo Surf Camp en una villa de lujo con capacidad para 17 personas. Te espera una experiencia inolvidable con pensión completa, clases de surf para todos los niveles, sesiones de yoga, adrenalina en la tirolina y el mejor ambiente.</p>
     </div>
-    <div class="container showcase-media-grid">
-      <figure class="showcase-photo">
-        <img src="/uploads/2026/08/villa/villa-32.webp" alt="La villa del Surf Camp con piscina y jardín">
-      </figure>
-      <figure class="showcase-photo">
-        <img src="/uploads/2026/08/surf-camp/gente-01.webp" alt="Alumnos del Surf Camp Entre Olas en el agua">
-      </figure>
-      <figure class="showcase-photo">
-        <img src="/uploads/2026/08/villa/villa-27.webp" alt="Jardín y piscina de la villa con tumbonas">
-      </figure>
-      <figure class="showcase-photo">
-        <img src="/uploads/2026/08/surf-camp/paisaje-03.webp" alt="Acantilado de Roche al atardecer">
-      </figure>
+    <div class="container">
+      <div class="camp-carousel" tabindex="0" aria-roledescription="carrusel" aria-label="Fotos del Surf Camp">
+        <div class="camp-carousel-track">
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/villa/villa-32.webp" alt="La villa del Surf Camp con piscina y jardín" loading="lazy" decoding="async">
+        </figure>
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/surf-camp/gente-01.webp" alt="Alumnos del Surf Camp Entre Olas en el agua" loading="lazy" decoding="async">
+        </figure>
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/villa/villa-27.webp" alt="Jardín y piscina de la villa con tumbonas" loading="lazy" decoding="async">
+        </figure>
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/surf-camp/paisaje-03.webp" alt="Acantilado de Roche al atardecer" loading="lazy" decoding="async">
+        </figure>
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/villa/villa-09.webp" alt="Vista aérea de la villa en Roche" loading="lazy" decoding="async">
+        </figure>
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/surf-camp/gente-02.webp" alt="Surfistas cogiendo una ola en Roche" loading="lazy" decoding="async">
+        </figure>
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/villa/villa-30.webp" alt="Zona de comedor exterior bajo los pinos" loading="lazy" decoding="async">
+        </figure>
+        <figure class="camp-slide">
+          <img src="/uploads/2026/08/surf-camp/paisaje-01.webp" alt="Pasarela de madera hacia la playa" loading="lazy" decoding="async">
+        </figure>
+        </div>
+        <button class="camp-carousel-btn camp-carousel-prev" type="button" aria-label="Foto anterior">‹</button>
+        <button class="camp-carousel-btn camp-carousel-next" type="button" aria-label="Foto siguiente">›</button>
+        <div class="camp-carousel-dots"></div>
+      </div>
     </div>
   </section>
 
@@ -314,5 +336,6 @@
 
 <script type="module" src="/app.js"></script>
 <script type="module" src="/lib/camp-overview.js"></script>
+  <script type="module" src="/lib/camp-carousel.js"></script>
 </body>
 </html>

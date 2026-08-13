@@ -430,8 +430,11 @@ body.internal-page.no-hero .dropdown a {
   max-width: 800px;
 }
 
+/* La foto NO se oculta cuando hay vídeo: se queda debajo como respaldo. El
+   vídeo va después en el DOM, así que lo tapa cuando carga; si no arranca
+   (iOS bloquea el autoplay de iframes) se ve la foto y no un hueco gris. */
 .hero.hero-video::before {
-  display: none;
+  display: block;
 }
 
 .hero-video-bg {
