@@ -684,10 +684,15 @@ body.internal-page.no-hero .dropdown a {
   margin: 0 auto;
 }
 
+/* Tope de 340px por tarjeta: con 1fr se estiraban hasta ocupar media pantalla
+   en monitores anchos y quedaban desproporcionadas (foto gigante y mucho aire
+   dentro). Con un máximo fijo y el grid centrado, se ven siempre a la misma
+   escala y caben las que quepan. */
 .camps-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 340px));
+  justify-content: center;
+  gap: 20px;
 }
 
 .camp-card {
@@ -706,7 +711,10 @@ body.internal-page.no-hero .dropdown a {
 
 .camp-cover {
   position: relative;
-  min-height: 340px;
+  /* Proporción fija en vez de alto mínimo: la foto crece con la tarjeta y no
+     se dispara a 340px de alto cuando la tarjeta es estrecha. */
+  aspect-ratio: 4 / 3;
+  min-height: 0;
 }
 
 .camp-cover img {
@@ -791,6 +799,9 @@ body.internal-page.no-hero .dropdown a {
   padding: 14px;
   display: grid;
   gap: 7px;
+  /* Sin esto, el cuerpo (que absorbe el alto sobrante) repartía el espacio
+     entre el "INCLUYE" y su texto, y quedaba un vacío enorme en medio. */
+  align-content: start;
 }
 
 .camp-body h4 {
@@ -1568,9 +1579,7 @@ td a {
     min-height: 250px;
   }
 
-  .camps-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+  /* auto-fit con tope ya reparte solo; forzar 3 columnas estiraba las tarjetas */
 
   .reviews-feature-wrap {
     grid-template-columns: 1fr;
@@ -1583,9 +1592,7 @@ td a {
 }
 
 @media (max-width: 900px) {
-  .camps-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  /* idem: el auto-fit se encarga */
 }
 
 @media (max-width: 820px) {
@@ -1695,7 +1702,7 @@ td a {
   }
 
   .camps-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .camp-cover {
