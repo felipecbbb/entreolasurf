@@ -1,7 +1,7 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles, findDuplicateProfiles } from '../modules/api.js';
+import { fetchProfiles, searchGuests, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles, findDuplicateProfiles } from '../modules/api.js';
 import { attachClientSuggest } from '../modules/client-suggest.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
@@ -360,8 +360,33 @@ export async function renderClientes(container) {
         ${filterBtn('cancelled', 'Canceladas', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>')}
       </div>`;
 
+    // Si la búsqueda no da fichas, mirar entre los que reservaron SIN cuenta:
+    // quien solo ha alquilado material como invitado es un cliente real que
+    // pagó, pero no tiene ficha y antes salía un "No hay clientes" a secas.
+    let guestsHtml = '';
+    if (searchTerm && searchTerm.trim().length >= 2 && !filtered.length) {
+      try {
+        const guests = await searchGuests(searchTerm);
+        if (guests.length) {
+          guestsHtml = `
+            <div class="cli-guests">
+              <p class="cli-guests-hint">Sin ficha de cliente, pero ${guests.length === 1 ? 'aparece' : 'aparecen'} en reservas hechas como invitado:</p>
+              ${guests.map(g => `
+                <div class="cli-guest-row">
+                  <div>
+                    <strong>${esc(g.nombre)}</strong>
+                    <span class="cli-guest-meta">${g.origenes.join(' · ')}${g.n > 1 ? ` · ${g.n} reservas` : ''}</span>
+                    ${g.email || g.telefono ? `<span class="cli-guest-meta">${esc(g.email || '')}${g.email && g.telefono ? ' · ' : ''}${esc(g.telefono || '')}</span>` : ''}
+                  </div>
+                  <button class="btn line cli-guest-create" data-nombre="${esc(g.nombre)}" data-email="${esc(g.email || '')}" data-tel="${esc(g.telefono || '')}">Crear ficha</button>
+                </div>`).join('')}
+            </div>`;
+        }
+      } catch (err) { console.warn('searchGuests:', err.message); }
+    }
+
     const listHtml = !filtered.length
-      ? '<div class="admin-empty"><p>No hay clientes</p></div>'
+      ? `<div class="admin-empty"><p>No hay clientes con ficha${searchTerm ? ' que coincidan con la búsqueda' : ''}</p></div>${guestsHtml}`
       : `<div class="cli-list">${filtered.map(r => {
         const fullName = esc(r.full_name) + (r.last_name ? ' ' + esc(r.last_name) : '');
         const familyHtml = (r._family || []).map(m =>
@@ -431,6 +456,12 @@ export async function renderClientes(container) {
 
     // New client
     container.querySelector('#new-client-btn').addEventListener('click', () => openNewClientModal());
+    // "Crear ficha" desde un invitado encontrado en la búsqueda
+    container.querySelectorAll('.cli-guest-create').forEach(btn => {
+      btn.addEventListener('click', () => openNewClientModal({
+        nombre: btn.dataset.nombre, email: btn.dataset.email, telefono: btn.dataset.tel,
+      }));
+    });
     container.querySelector('#merge-clients-btn')?.addEventListener('click', () => openMergeModal());
 
     // Family member tag click → open client detail then member ficha
@@ -611,7 +642,8 @@ export async function renderClientes(container) {
     });
   }
 
-  function openNewClientModal() {
+  // prefill: datos que ya conocemos de un invitado (viene de "Crear ficha")
+  function openNewClientModal(prefill = null) {
     const levelOpts = (sel = '') => `
       <option value="">Sin definir</option>
       <option value="principiante" ${sel === 'principiante' ? 'selected' : ''}>Principiante</option>
@@ -698,6 +730,17 @@ export async function renderClientes(container) {
     injurySel.addEventListener('change', () => {
       document.getElementById('ncl-injury-wrap').style.display = injurySel.value === 'true' ? '' : 'none';
     });
+
+    // Datos que ya conocíamos del invitado: nombre, email y teléfono de su reserva
+    if (prefill) {
+      const f = document.getElementById('new-client-form');
+      const partes = (prefill.nombre || '').trim().split(/\s+/);
+      const set = (name, val) => { const el = f?.querySelector(`[name="${name}"]`); if (el && val) el.value = val; };
+      set('full_name', partes[0] || '');
+      set('last_name', partes.slice(1).join(' '));
+      set('email', prefill.email || '');
+      set('phone', prefill.telefono || '');
+    }
 
     // Autocompletado: si ya existe una ficha con ese nombre, avisa y ofrece abrirla
     // (en vez de crear un duplicado).

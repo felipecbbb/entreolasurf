@@ -1101,11 +1101,63 @@ export const fetchProfiles = cached('profiles', 30000, async (search) => {
     .select('*')
     .order('created_at', { ascending: false });
 
-  if (search) query = query.ilike('full_name', `%${search}%`);
+  // Buscaba SOLO en full_name: si el apellido estaba en last_name (que es lo
+  // normal en las fichas creadas desde el panel), buscar por apellido no
+  // encontraba a nadie. Se busca también por apellido, email y teléfono, y
+  // "nombre apellido" se parte en palabras para que cada una valga.
+  if (search) {
+    const t = search.trim();
+    const campos = (v) => [
+      `full_name.ilike.%${v}%`,
+      `last_name.ilike.%${v}%`,
+      `email.ilike.%${v}%`,
+      `phone.ilike.%${v}%`,
+    ].join(',');
+    const palabras = t.split(/\s+/).filter(Boolean);
+    query = query.or(campos(palabras.length > 1 ? palabras[palabras.length - 1] : t));
+  }
   const { data, error } = await query;
   if (error) throw error;
   return data || [];
 });
+
+// Clientes SIN ficha: los que solo aparecen como invitados en un alquiler, una
+// clase o una reserva de camp. Han pagado y existen, pero no salen en Clientes
+// porque esa sección lista perfiles. Se buscan aparte para poder encontrarlos.
+export async function searchGuests(search) {
+  const t = (search || '').trim();
+  if (t.length < 2) return [];
+  const like = `%${t}%`;
+  const [alq, cls, camp] = await Promise.all([
+    supabase.from('equipment_reservations')
+      .select('guest_name, guest_email, guest_phone, date_start, status')
+      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(20),
+    supabase.from('class_enrollments')
+      .select('guest_name, status, created_at')
+      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(20),
+    supabase.from('bookings')
+      .select('guest_name, guest_email, guest_phone, status, created_at')
+      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(20),
+  ]);
+
+  // Un mismo invitado puede tener varias reservas: se agrupa por nombre y se
+  // queda el email/teléfono que se conozca.
+  const porNombre = {};
+  const add = (r, origen) => {
+    const nombre = (r.guest_name || '').trim();
+    if (!nombre) return;
+    const k = nombre.toLowerCase();
+    const g = (porNombre[k] ||= { nombre, email: null, telefono: null, origenes: [], n: 0 });
+    g.email = g.email || r.guest_email || null;
+    g.telefono = g.telefono || r.guest_phone || null;
+    g.n++;
+    if (!g.origenes.includes(origen)) g.origenes.push(origen);
+  };
+  (alq.data || []).forEach(r => add(r, 'alquiler'));
+  (cls.data || []).forEach(r => add(r, 'clase'));
+  (camp.data || []).forEach(r => add(r, 'surf camp'));
+  return Object.values(porNombre);
+}
 
 // ---- Recent bookings (for dashboard) ----
 export async function fetchRecentBookings(limit = 5) {
