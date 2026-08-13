@@ -9092,3 +9092,37 @@ select.inv-cell { cursor: pointer; }
   .ch-form-actions { flex-direction: column; align-items: stretch; }
   .ch-form-actions button { width: 100%; }
 }
+
+
+/* ── Táctil (iPad y móvil): que el dedo acierte donde ve el botón ──
+   En una pantalla táctil el :hover se queda "pegado" tras el primer toque.
+   Si ese hover agranda o desplaza el elemento, el área que responde deja de
+   coincidir con lo que se ve y hay que tocar descentrado (pasaba en el iPad
+   de la escuela: había que pulsar más a la derecha). Aquí se anulan SOLO las
+   transformaciones; los cambios de color y sombra se mantienen. */
+@media (hover: none) {
+  .bk-close-btn:hover,
+  .bk-final-confirm-btn:hover,
+  .bk-payment-method:hover,
+  .bkw-cal-day.available:hover,
+  .bkw-type-card:hover,
+  .cal-rental-card:hover,
+  .dash-action:hover,
+  .dash-detail-card:hover,
+  .dash-kpi-card:hover,
+  .dash-today-card:hover,
+  .dash-type-card:hover,
+  .epm-quick:hover,
+  .estad-kpi-clickable:hover,
+  .rv-add-payment-btn:hover,
+  .rv-bono-card:hover,
+  .rv-bono-expand-btn:hover,
+  .rv-bono-pay-btn:hover,
+  .sc-card:hover,
+  .stat-activity-card:hover,
+  .stat-bono-type-card:hover,
+  .stat-bonos-credits:hover,
+  .stat-kpi:hover,
+  .tar-card:hover,
+  .wa-row:hover { transform: none; }
+}

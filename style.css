@@ -4454,3 +4454,21 @@ body.internal-page.no-hero .main-nav .lang-sep { color: var(--color-navy); }
 .co-invoice-toggle input { width: auto !important; margin: 0; }
 .co-invoice-fields { margin-top: 10px; }
 .co-invoice-fields[hidden] { display: none; }
+
+
+/* ── Táctil (iPad y móvil): que el dedo acierte donde ve el botón ──
+   En una pantalla táctil el :hover se queda "pegado" tras el primer toque.
+   Si ese hover agranda o desplaza el elemento, el área que responde deja de
+   coincidir con lo que se ve y hay que tocar descentrado (pasaba en el iPad
+   de la escuela: había que pulsar más a la derecha). Aquí se anulan SOLO las
+   transformaciones; los cambios de color y sombra se mantienen. */
+@media (hover: none) {
+  .btn:hover,
+  .contact-channel-card:hover,
+  .hp-review-card:hover,
+  .hp-services-grid .card:hover,
+  .hp-shop-product:hover,
+  .ig-activity-card:hover,
+  .pack-card:hover,
+  .rcal-day.available:hover { transform: none; }
+}

@@ -278,13 +278,23 @@ export async function renderClientes(container) {
     // Batch-fetch emails, family members, and enrollments for all listed profiles
     const profileIds = profiles.map(p => p.id);
     const [, familyRes, enrollRes] = await Promise.all([
+      // profiles.email ya viene en fetchProfiles (select *). Antes se pedía uno
+      // a uno con la RPC get_user_email: 131 peticiones EN FILA y ~15s de
+      // espera para un dato que ya estaba cargado. Solo se pregunta por los
+      // que no lo tengan, y en paralelo.
       (async () => {
+        const faltan = [];
         for (const p of profiles) {
-          if (emailCache[p.id] === undefined) {
-            emailCache[p.id] = await getAuthEmail(p.id);
-          }
-          p._email = emailCache[p.id];
+          const cached = p.email || emailCache[p.id];
+          if (cached) { p._email = cached; emailCache[p.id] = cached; }
+          else if (emailCache[p.id] === undefined) faltan.push(p);
+          else p._email = emailCache[p.id];
         }
+        if (!faltan.length) return;
+        await Promise.all(faltan.map(async p => {
+          emailCache[p.id] = await getAuthEmail(p.id);
+          p._email = emailCache[p.id];
+        }));
       })(),
       profileIds.length
         ? supabase.from('family_members').select('id, user_id, full_name, last_name').in('user_id', profileIds).order('created_at', { ascending: true })
@@ -758,9 +768,9 @@ export async function renderClientes(container) {
     const c = selectedClient;
     if (!c) return renderList();
 
-    // Try to fetch auth email (best-effort, cached on client object)
+    // El email suele venir ya en el perfil; la RPC solo para los que no lo tengan
     if (c._email === undefined) {
-      c._email = await getAuthEmail(c.id);
+      c._email = c.email || emailCache[c.id] || await getAuthEmail(c.id);
       if (c._email) emailCache[c.id] = c._email;
     }
 
