@@ -1095,31 +1095,42 @@ export async function createClientFromAdmin(fields) {
   };
 }
 
-export const fetchProfiles = cached('profiles', 30000, async (search) => {
-  let query = supabase
+// Se trae la lista COMPLETA y el filtrado va en memoria (ver matchProfile).
+// Filtrar en el servidor con ilike obligaba a acertar los acentos y a elegir
+// qué palabra buscar; con la lista entera (una sola petición, cacheada) se
+// puede comparar sin acentos y exigir que todas las palabras encajen, en
+// cualquier campo. Son ~130 clientes: el coste es nulo y no se pierde a nadie.
+export const fetchProfiles = cached('profiles', 30000, async () => {
+  const { data, error } = await supabase
     .from('profiles')
     .select('*')
     .order('created_at', { ascending: false });
-
-  // Buscaba SOLO en full_name: si el apellido estaba en last_name (que es lo
-  // normal en las fichas creadas desde el panel), buscar por apellido no
-  // encontraba a nadie. Se busca también por apellido, email y teléfono, y
-  // "nombre apellido" se parte en palabras para que cada una valga.
-  if (search) {
-    const t = search.trim();
-    const campos = (v) => [
-      `full_name.ilike.%${v}%`,
-      `last_name.ilike.%${v}%`,
-      `email.ilike.%${v}%`,
-      `phone.ilike.%${v}%`,
-    ].join(',');
-    const palabras = t.split(/\s+/).filter(Boolean);
-    query = query.or(campos(palabras.length > 1 ? palabras[palabras.length - 1] : t));
-  }
-  const { data, error } = await query;
   if (error) throw error;
   return data || [];
 });
+
+// Normaliza para comparar: sin acentos, minúsculas y sin separadores de teléfono.
+export function normalizarBusqueda(s) {
+  return String(s ?? '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[\s()+.\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// ¿Este perfil casa con lo escrito? Cada palabra debe aparecer en ALGÚN campo
+// (nombre, apellido, email o teléfono). Así "alejandro" saca a todos los
+// Alejandros, "carmona" a todos los Carmona, y "alejandro carmona" a quien
+// cumpla las dos, sin importar el orden ni los acentos.
+export function matchProfile(p, search) {
+  const q = normalizarBusqueda(search);
+  if (!q) return true;
+  const heno = normalizarBusqueda(
+    [p.full_name, p.last_name, p.email, p.phone].filter(Boolean).join(' ')
+  );
+  return q.split(' ').every(w => heno.includes(w));
+}
 
 // Clientes SIN ficha: los que solo aparecen como invitados en un alquiler, una
 // clase o una reserva de camp. Han pagado y existen, pero no salen en Clientes
@@ -1127,18 +1138,28 @@ export const fetchProfiles = cached('profiles', 30000, async (search) => {
 export async function searchGuests(search) {
   const t = (search || '').trim();
   if (t.length < 2) return [];
-  const like = `%${t}%`;
-  const [alq, cls, camp] = await Promise.all([
+  // Se pide por la primera palabra (lo mínimo que acota en servidor) y luego se
+  // filtra en memoria sin acentos exigiendo todas: igual criterio que las fichas.
+  const primera = normalizarBusqueda(t).split(' ')[0];
+  const like = `%${primera}%`;
+  const casa = (r) => {
+    const heno = normalizarBusqueda([r.guest_name, r.guest_email, r.guest_phone].filter(Boolean).join(' '));
+    return normalizarBusqueda(t).split(' ').every(w => heno.includes(w));
+  };
+  const [alqR, clsR, campR] = await Promise.all([
     supabase.from('equipment_reservations')
       .select('guest_name, guest_email, guest_phone, date_start, status')
-      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(20),
+      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(50),
     supabase.from('class_enrollments')
       .select('guest_name, status, created_at')
-      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(20),
+      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(50),
     supabase.from('bookings')
       .select('guest_name, guest_email, guest_phone, status, created_at')
-      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(20),
+      .is('user_id', null).ilike('guest_name', like).order('created_at', { ascending: false }).limit(50),
   ]);
+  const alq = { data: (alqR.data || []).filter(casa) };
+  const cls = { data: (clsR.data || []).filter(casa) };
+  const camp = { data: (campR.data || []).filter(casa) };
 
   // Un mismo invitado puede tener varias reservas: se agrupa por nombre y se
   // queda el email/teléfono que se conozca.

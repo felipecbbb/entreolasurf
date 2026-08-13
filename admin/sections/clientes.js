@@ -1,7 +1,7 @@
 /* ============================================================
    Clientes Section — Client list + detail ficha
    ============================================================ */
-import { fetchProfiles, searchGuests, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles, findDuplicateProfiles } from '../modules/api.js';
+import { fetchProfiles, matchProfile, searchGuests, createClientFromAdmin, createPayment, deletePayment, fetchPayments, deleteEnrollment, updateEnrollmentStatus, updateEquipmentReservationStatus, cancelEquipmentReservation, fetchClientsPending, mergeClients, searchProfiles, findDuplicateProfiles } from '../modules/api.js';
 import { attachClientSuggest } from '../modules/client-suggest.js';
 import { renderTable, statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { supabase } from '/lib/supabase.js';
@@ -271,9 +271,15 @@ export async function renderClientes(container) {
   // ===================== LIST VIEW =====================
   async function renderList() {
     selectedClient = null;
-    // Solo clientes: los instructores (admin/encargado) se gestionan en Equipo
-    const allProfiles = await fetchProfiles(searchTerm || undefined);
-    const profiles = allProfiles.filter(p => p.role !== 'admin' && p.role !== 'encargado');
+    // Solo clientes: los instructores (admin/encargado) se gestionan en Equipo.
+    // La búsqueda se aplica en memoria (matchProfile): sin acentos y exigiendo
+    // que TODAS las palabras encajen en algún campo — nombre, apellido, email o
+    // teléfono. Así "alejandro" lista a todos los Alejandros y "carmona" a todos
+    // los Carmona, no solo a quien coincida por un campo concreto.
+    const allProfiles = await fetchProfiles();
+    const profiles = allProfiles
+      .filter(p => p.role !== 'admin' && p.role !== 'encargado')
+      .filter(p => matchProfile(p, searchTerm));
 
     // Batch-fetch emails, family members, and enrollments for all listed profiles
     const profileIds = profiles.map(p => p.id);
