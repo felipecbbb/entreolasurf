@@ -697,6 +697,11 @@ body.internal-page.no-hero .dropdown a {
   overflow: hidden;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.09);
   display: grid;
+  /* Sin filas definidas, al igualarse la altura de las tarjetas el sobrante
+     se repartía entre todas las filas y abría huecos enormes entre la ficha y
+     los botones. Ahora el sobrante lo absorbe el cuerpo y los botones quedan
+     pegados abajo, alineados entre tarjetas. */
+  grid-template-rows: auto auto 1fr auto;
 }
 
 .camp-cover {
