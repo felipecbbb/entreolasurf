@@ -8,7 +8,7 @@ import {
   createClientFromAdmin, fetchEquipment, createEquipmentReservation,
   fetchEquipmentReservationsOverlapping, updateEquipmentReservationStatus,
   updateEquipmentReservation, cancelEquipmentReservation,
-  fetchPayments, createPayment, deletePayment,
+  fetchPayments, createPayment, deletePayment, fetchProfiles, normalizarBusqueda,
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
@@ -6119,6 +6119,12 @@ export async function renderCalendario(container) {
                     <input type="tel" name="guest_phone" placeholder="+34 600 000 000" />
                   </div>
                 </div>
+                <label class="ns-field" style="flex-direction:row;align-items:flex-start;gap:8px;cursor:pointer">
+                  <input type="checkbox" name="crear_ficha" id="nr-crear-ficha" checked style="margin-top:3px" />
+                  <span style="font-size:.85rem;line-height:1.35">Crear ficha de cliente<br>
+                    <span style="color:#94a3b8;font-size:.8rem">Si ya tiene ficha se enlaza a la suya; si no, se crea. Así el alquiler queda en su historial. Necesita email.</span>
+                  </span>
+                </label>
                 <div class="ns-field-2col">
                   <div class="ns-field">
                     <label>Talla neopreno</label>
@@ -6712,11 +6718,43 @@ export async function renderCalendario(container) {
       // (compatible con los alquileres antiguos, que se siguen mostrando individuales).
       const groupId = lines.length > 1 ? makeUUID() : null;
 
+      // El alquiler pasa a comportarse como las clases: si no se enlazó a nadie
+      // pero hay email, se busca su ficha y, si no existe, se crea. Antes se
+      // guardaba como invitado suelto y ese cliente no aparecía en Clientes ni
+      // acumulaba historial.
+      let clienteId = userId;
+      let avisoFicha = '';
+      const quiereFicha = rform?.querySelector('#nr-crear-ficha')?.checked;
+      if (!clienteId && quiereFicha && guestEmail) {
+        try {
+          const perfiles = await fetchProfiles();
+          const email = normalizarBusqueda(guestEmail);
+          const existente = perfiles.find(p => normalizarBusqueda(p.email) === email);
+          if (existente) {
+            clienteId = existente.id;
+            avisoFicha = ' · enlazado a su ficha';
+          } else {
+            const creado = await createClientFromAdmin({
+              full_name: fd.get('guest_name')?.trim() || fullName,
+              last_name: guestLastName || null,
+              email: guestEmail,
+              phone: guestPhone || null,
+            });
+            clienteId = creado.id;
+            avisoFicha = creado.already_existed ? ' · enlazado a su ficha' : ' · ficha de cliente creada';
+          }
+        } catch (err) {
+          // Que no se pueda crear la ficha no debe impedir el alquiler
+          console.warn('ficha de cliente:', err.message);
+          avisoFicha = ' · (no se pudo crear la ficha: ' + err.message + ')';
+        }
+      }
+
       try {
         for (const ln of lines) {
           const payload = {
             equipment_id: ln.equipment_id,
-            user_id: userId,
+            user_id: clienteId,
             guest_name: fullName,
             guest_email: guestEmail,
             guest_phone: guestPhone,
@@ -6741,7 +6779,7 @@ export async function renderCalendario(container) {
         }
         document.getElementById('ns-overlay')?.remove();
         closeModal();
-        showToast(lines.length > 1 ? `Reserva con ${lines.length} materiales creada` : 'Reserva de material creada', 'success');
+        showToast((lines.length > 1 ? `Reserva con ${lines.length} materiales creada` : 'Reserva de material creada') + avisoFicha, 'success');
         render();
       } catch (err) {
         showToast('Error: ' + (err?.message || err), 'error');
