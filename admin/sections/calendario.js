@@ -1250,6 +1250,7 @@ export async function renderCalendario(container) {
         e.stopPropagation();
         const checked = cb.checked;
         const itemType = cb.dataset.type;
+        cb.disabled = true;   // evita que un doble toque lance dos guardados
 
         if (itemType === 'enrollment') {
           const eid = cb.dataset.eid;
@@ -1278,8 +1279,17 @@ export async function renderCalendario(container) {
               await updateEnrollmentAttendance(eid, null);
               showToast('Asistencia revertida', 'success');
             }
-            render();
+            // NADA de render() aquí: el tic lo pinta el CSS con input:checked,
+            // así que repintar el día entero no aporta nada y, pasando lista a
+            // varios niños seguidos, los repintados se pisaban entre sí y
+            // reconstruían las casillas a medio pulsar (parecía que la página
+            // se recargaba). Basta con dejar el caché al día.
+            for (const list of Object.values(enrollmentsCache)) {
+              const en = list?.find?.(x => x.id === eid);
+              if (en) { en.attendance = checked ? true : null; break; }
+            }
           } catch (err) { showToast('Error: ' + err.message, 'error'); cb.checked = !checked; }
+          finally { cb.disabled = false; }
         } else if (itemType === 'rental') {
           const rid = cb.dataset.rid;
           // checked = returned (finalized), unchecked = active
@@ -1289,6 +1299,7 @@ export async function renderCalendario(container) {
             showToast(checked ? 'Material devuelto — finalizado' : 'Marcado como activo', 'success');
             render();
           } catch (err) { showToast('Error: ' + err.message, 'error'); cb.checked = !checked; }
+          finally { cb.disabled = false; }
         }
       });
     });
