@@ -6724,7 +6724,10 @@ export async function renderCalendario(container) {
       // acumulaba historial.
       let clienteId = userId;
       let avisoFicha = '';
-      const quiereFicha = rform?.querySelector('#nr-crear-ficha')?.checked;
+      // getElementById y no rform: esa variable vive en otro bloque y aquí
+      // lanzaba ReferenceError al enviar (el ?. no protege de eso), dejando el
+      // formulario colgado sin crear el alquiler.
+      const quiereFicha = document.getElementById('nr-crear-ficha')?.checked;
       if (!clienteId && quiereFicha && guestEmail) {
         try {
           const perfiles = await fetchProfiles();
