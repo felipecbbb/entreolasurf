@@ -418,10 +418,11 @@ Deno.serve(async (req) => {
 
       try {
         const userEmail = session.customer_email || session.customer_details?.email;
-        const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", userId).single();
+        const { data: profile } = await supabase.from("profiles").select("full_name, phone").eq("id", userId).single();
         const customerName = profile?.full_name || "";
         const emailItems = cart.map((i: any) => ({ name: i.name, quantity: i.quantity || 1, price: i.price }));
-        const emailData = { customerName, orderId, items: emailItems, total: totalPaid, customerEmail: userEmail };
+        const emailData = { customerName, orderId, items: emailItems, total: totalPaid, customerEmail: userEmail,
+          customerPhone: customer.phone || profile?.phone || "" };
 
         if (userEmail) {
           // Send one email per type in the cart

@@ -5,6 +5,21 @@ import { supabase } from '/lib/supabase.js';
 import { TYPE_LABELS, showToast } from '/lib/utils.js';
 import { LEVEL_OPTIONS, AUDIENCE_OPTIONS, ADMIN_EMAIL } from '/lib/shared-constants.js';
 
+// Telefono del cliente para los avisos al admin (viene del perfil, no de la
+// sesion). Se cachea: se pide una vez por carga de pagina.
+let _telefonoPerfil = null;
+async function cargarTelefonoPerfil() {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+      cargarTelefonoPerfil();
+    if (!user) return null;
+    const { data } = await supabase.from('profiles').select('phone').eq('id', user.id).single();
+    _telefonoPerfil = data?.phone || null;
+  } catch { /* si falla, el aviso sale sin telefono */ }
+  return _telefonoPerfil;
+}
+function perfilTelefono() { return _telefonoPerfil || ''; }
+
 const TYPE_COLORS = {
   grupal: '#0ea5e9',
   individual: '#f59e0b',
@@ -345,7 +360,7 @@ export async function renderCalendar(panel) {
               body: {
                 to: ADMIN_EMAIL,
                 type: 'admin_class_cancelled',
-                data: { ...emailData, customerEmail: user?.email || '' },
+                data: { ...emailData, customerEmail: user?.email || '', customerPhone: perfilTelefono() },
               },
             });
           } catch {}
@@ -499,7 +514,7 @@ export async function renderCalendar(panel) {
             body: {
               to: ADMIN_EMAIL,
               type: 'admin_class_booked',
-              data: { ...emailData, customerEmail: user?.email || '' },
+              data: { ...emailData, customerEmail: user?.email || '', customerPhone: perfilTelefono() },
             },
           });
         } catch {}

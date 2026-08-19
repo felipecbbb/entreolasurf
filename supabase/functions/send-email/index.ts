@@ -155,6 +155,23 @@ function emailWrap(logo: string, content: string, isCamp: boolean) {
 /* ============================================================
    Email types
    ============================================================ */
+
+/* El asunto viaja en una cabecera y denomailer la codifica mal cuando lleva
+   acentos, guiones largos o simbolos: el correo llega con el MIME en crudo
+   (=?utf-8?Q?..., --boundary, el HTML como texto). Se manda en ASCII puro; el
+   cuerpo si conserva tildes porque va en el body, que si se codifica bien.
+   Ya habia rastro del problema: el asunto de "Nueva venta" ponia 15.00E. */
+function asuntoSeguro(s: string): string {
+  return String(s ?? "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")   // tildes fuera
+    .replace(/[\u2010-\u2015]/g, "-")                   // guiones largos
+    .replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"')
+    .replace(/\u20ac/g, "EUR").replace(/\u00a0/g, " ")
+    .replace(/[^\x20-\x7e]/g, "")                       // cualquier resto no ASCII
+    .replace(/\s+/g, " ").trim()
+    .slice(0, 150);                                     // cabeceras muy largas tambien se parten mal
+}
+
 function buildEmail(type: string, data: any): { subject: string; html: string } {
   const d = data || {};
   const name = d.customerName || "";
@@ -341,6 +358,7 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
           <td style="background-color:#f3ecdd;border-radius:10px;padding:14px 20px">
             <p style="font-family:${F};font-size:13px;color:#64757d;margin:0">Cliente: <strong style="color:#0f2f39">${d.customerName || ""}</strong></p>
             <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Email: <strong style="color:#0f2f39">${d.customerEmail || ""}</strong></p>
+            <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Telefono: <strong style="color:#0f2f39">${d.customerPhone || "no facilitado"}</strong></p>
           </td>
         </tr></table>`,
         `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
@@ -364,6 +382,7 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
           <td style="background-color:#f3ecdd;border-radius:10px;padding:14px 20px">
             <p style="font-family:${F};font-size:13px;color:#64757d;margin:0">Cliente: <strong style="color:#0f2f39">${d.customerName || ""}</strong></p>
             <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Email: <strong style="color:#0f2f39">${d.customerEmail || ""}</strong></p>
+            <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Telefono: <strong style="color:#0f2f39">${d.customerPhone || "no facilitado"}</strong></p>
           </td>
         </tr></table>`,
         `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
@@ -385,6 +404,7 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
           <td style="background-color:#f3ecdd;border-radius:10px;padding:14px 20px">
             <p style="font-family:${F};font-size:13px;color:#64757d;margin:0">Cliente: <strong style="color:#0f2f39">${d.customerName || ""}</strong></p>
             <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Email: <strong style="color:#0f2f39">${d.customerEmail || ""}</strong></p>
+            <p style="font-family:${F};font-size:13px;color:#64757d;margin:4px 0 0">Telefono: <strong style="color:#0f2f39">${d.customerPhone || "no facilitado"}</strong></p>
           </td>
         </tr></table>`,
         itemsTable(d.items),
@@ -439,7 +459,7 @@ Deno.serve(async (req) => {
       },
     });
 
-    await client.send({ from: FROM, to, subject, html });
+    await client.send({ from: FROM, to, subject: asuntoSeguro(subject), html });
     await client.close();
 
     return new Response(JSON.stringify({ success: true }), {
