@@ -161,6 +161,18 @@ function emailWrap(logo: string, content: string, isCamp: boolean) {
    (=?utf-8?Q?..., --boundary, el HTML como texto). Se manda en ASCII puro; el
    cuerpo si conserva tildes porque va en el body, que si se codifica bien.
    Ya habia rastro del problema: el asunto de "Nueva venta" ponia 15.00E. */
+
+/* El cuerpo viaja en quoted-printable y denomailer parte las lineas a 76
+   caracteres. Cuando la linea lleva caracteres multibyte (—, ·, tildes) el
+   corte cae mal y asoma el codigo en el correo: el famoso "=20" (un espacio)
+   suelto en mitad del texto.
+   Se convierte todo lo que no sea ASCII a entidades HTML (&#233; etc.): el
+   mensaje viaja como ASCII puro, no hay nada que trocear, y el cliente de
+   correo lo pinta con sus tildes de siempre. */
+function htmlSoloAscii(html: string): string {
+  return String(html ?? "").replace(/[^\x00-\x7f]/g, (c) => `&#${c.codePointAt(0)};`);
+}
+
 function asuntoSeguro(s: string): string {
   return String(s ?? "")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")   // tildes fuera
@@ -459,7 +471,7 @@ Deno.serve(async (req) => {
       },
     });
 
-    await client.send({ from: FROM, to, subject: asuntoSeguro(subject), html });
+    await client.send({ from: FROM, to, subject: asuntoSeguro(subject), html: htmlSoloAscii(html) });
     await client.close();
 
     return new Response(JSON.stringify({ success: true }), {
