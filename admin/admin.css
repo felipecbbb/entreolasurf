@@ -9136,3 +9136,13 @@ select.inv-cell { cursor: pointer; }
 }
 .cli-guest-row strong { display: block; color: var(--color-navy); }
 .cli-guest-meta { display: block; font-size: .78rem; color: var(--color-muted); }
+
+/* Cancelar alquiler desde la fila del horario */
+.cal-cancel-rental-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; flex-shrink: 0;
+  border: 1px solid #fecaca; border-radius: 6px;
+  background: #fef2f2; color: #dc2626; cursor: pointer;
+}
+.cal-cancel-rental-btn:hover { background: #fee2e2; border-color: #fca5a5; }
+.cal-cancel-rental-btn:disabled { opacity: .5; cursor: default; }
