@@ -5,7 +5,7 @@ import { fetchTrash, restoreFromTrash } from '../modules/api.js';
 import { formatDate, showToast } from '../modules/ui.js';
 
 const esc = s => s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') : '';
-const TYPE_LABELS = { bono: 'Bono', booking: 'Reserva camp' };
+const TYPE_LABELS = { bono: 'Bono', booking: 'Reserva camp', rental: 'Alquiler' };
 
 export async function renderPapelera(container) {
   let includeRestored = false;
