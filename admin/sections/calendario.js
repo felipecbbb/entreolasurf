@@ -7,7 +7,7 @@ import {
   searchProfiles, moveEnrollment, updateEnrollmentStatus, updateEnrollmentAttendance,
   createClientFromAdmin, fetchEquipment, createEquipmentReservation,
   fetchEquipmentReservationsOverlapping, updateEquipmentReservationStatus,
-  updateEquipmentReservation, cancelEquipmentReservation,
+  updateEquipmentReservation, cancelEquipmentReservation, moveToTrash,
   fetchPayments, createPayment, deletePayment, fetchProfiles, normalizarBusqueda,
 } from '../modules/api.js';
 import { openModal, closeModal, showToast, formatDate } from '../modules/ui.js';
@@ -673,7 +673,7 @@ export async function renderCalendario(container) {
         <span class="cal-client-pay-icon" title="${isPaid ? 'Pagado' : isPartial ? 'Anticipo pagado' : 'Pendiente de pago'}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         </span>
-        ${r.status === 'cancelled' ? '' : `<button class="cal-cancel-rental-btn" draggable="false" data-rid="${r.id}" data-client-name="${escapeHtml(r.guest_name || 'este alquiler')}" data-amount="${amount}" title="Cancelar este alquiler">
+        ${`<button class="cal-cancel-rental-btn" draggable="false" data-rid="${r.id}" data-client-name="${escapeHtml(r.guest_name || 'este alquiler')}" data-material="${escapeHtml(r.rental_equipment?.name || 'material')}" data-amount="${amount}" title="Borrar este alquiler">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
         </button>`}
       </div>`;
@@ -1248,22 +1248,23 @@ export async function renderCalendario(container) {
     });
 
     // Attendance checkbox → mark as completed/returned or revert
-    // Cancelar un alquiler desde el propio horario, sin abrir la ficha. Reusa
-    // cancelEquipmentReservation: borra los pagos, deja el importe a 0 y libera
-    // la unidad. No borra el registro, queda como CANCELADO.
+    // Borrar un alquiler desde el propio horario. Va a la Papelera: desaparece
+    // del calendario y del historial del cliente, pero se puede restaurar (en
+    // una tablet, con prisa, el dedo se equivoca).
     container.querySelectorAll('.cal-cancel-rental-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();   // que no abra la ficha del alquiler
         const nombre = btn.dataset.clientName;
+        const material = btn.dataset.material || 'material';
         const importe = Number(btn.dataset.amount) || 0;
         const aviso = importe > 0
-          ? `\u00bfCancelar el alquiler de ${nombre}? Se marcar\u00e1 como CANCELADO, el importe de ${importe.toFixed(2)}\u20ac pasar\u00e1 a 0, se borrar\u00e1n los pagos registrados y se liberar\u00e1 el material.`
-          : `\u00bfCancelar el alquiler de ${nombre}? Se marcar\u00e1 como CANCELADO y se liberar\u00e1 el material.`;
+          ? `\u00bfBorrar el alquiler de ${nombre} (${material})? Se elimina junto a sus pagos de ${importe.toFixed(2)}\u20ac. Podr\u00e1s recuperarlo desde la Papelera.`
+          : `\u00bfBorrar el alquiler de ${nombre} (${material})? Podr\u00e1s recuperarlo desde la Papelera.`;
         if (!confirm(aviso)) return;
         btn.disabled = true;
         try {
-          await cancelEquipmentReservation(btn.dataset.rid);
-          showToast(`Alquiler de ${nombre} cancelado`, 'success');
+          await moveToTrash('rental', btn.dataset.rid, `${nombre} \u00b7 ${material}`);
+          showToast(`Alquiler de ${nombre} borrado \u00b7 est\u00e1 en la Papelera`, 'success');
           render();
         } catch (err) {
           showToast('Error: ' + err.message, 'error');

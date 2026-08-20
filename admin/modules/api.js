@@ -315,6 +315,10 @@ export async function moveToTrash(entityType, id, label) {
     const { data: row } = await supabase.from('bookings').select('*').eq('id', id).single();
     const { data: pays } = await supabase.from('payments').select('*').eq('reservation_type', 'booking').eq('reference_id', id);
     snapshot.row = row; snapshot.payments = pays || [];
+  } else if (entityType === 'rental') {
+    const { data: row } = await supabase.from('equipment_reservations').select('*').eq('id', id).single();
+    const { data: pays } = await supabase.from('payments').select('*').eq('reservation_type', 'rental').eq('reference_id', id);
+    snapshot.row = row; snapshot.payments = pays || [];
   } else {
     throw new Error(`Papelera no soporta: ${entityType}`);
   }
@@ -344,6 +348,9 @@ export async function restoreFromTrash(trashId) {
     if (snap.payments?.length) await supabase.from('payments').insert(snap.payments);
   } else if (item.entity_type === 'booking') {
     if (snap.row) { const { error: e } = await supabase.from('bookings').insert(snap.row); if (e) throw e; }
+    if (snap.payments?.length) await supabase.from('payments').insert(snap.payments);
+  } else if (item.entity_type === 'rental') {
+    if (snap.row) { const { error: e } = await supabase.from('equipment_reservations').insert(snap.row); if (e) throw e; }
     if (snap.payments?.length) await supabase.from('payments').insert(snap.payments);
   } else {
     throw new Error(`Papelera no soporta restaurar: ${item.entity_type}`);
