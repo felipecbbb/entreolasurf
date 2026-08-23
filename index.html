@@ -36,15 +36,15 @@
       </div>
     </section>
 
-    <!-- ====== 1. CLASES — Ahorro 30% con bonos ====== -->
+    <!-- ====== 1. CLASES — Ahorro 33% con bonos ====== -->
     <section class="section hp-clases">
       <div class="container">
         <div class="hp-clases-grid">
           <div class="page-intro">
             <p class="kicker">Escuela de Surf</p>
-            <h2 class="title">Ahorra hasta un 33%<br>con nuestros bonos</h2>
+            <h2 class="title"><span data-max-discount>Ahorra hasta un 33%</span><br>con nuestros bonos</h2>
             <p class="lead">Cuantas más clases, más ahorras. Packs de 2 a 7 sesiones con material incluido, seguro y grupos reducidos. Válidos 180 días.</p>
-            <div class="hp-savings-pills">
+            <div class="hp-savings-pills" data-savings-pills>
               <span class="savings-pill">2 clases <strong>-7%</strong></span>
               <span class="savings-pill">3 clases <strong>-14%</strong></span>
               <span class="savings-pill">5 clases <strong>-23%</strong></span>
@@ -60,7 +60,7 @@
               <h3>Clases Grupales</h3>
               <p>90 min · Máx. 6 personas · Material y seguro incluidos</p>
               <div class="svc-card-footer">
-                <span class="price">Desde 35€ <small style="color:var(--color-muted);font-weight:400">/clase</small></span>
+                <span class="price" data-price-for="grupal">Desde 35€ <small style="color:var(--color-muted);font-weight:400">/clase</small></span>
                 <a class="btn red" href="/clases-de-surf-grupales/">Ver packs</a>
               </div>
             </article>
@@ -69,7 +69,7 @@
               <h3>Clases Individuales</h3>
               <p>90 min · Atención 100% personalizada · Progresa el doble de rápido</p>
               <div class="svc-card-footer">
-                <span class="price">Desde 69€ <small style="color:var(--color-muted);font-weight:400">/clase</small></span>
+                <span class="price" data-price-for="individual">Desde 69€ <small style="color:var(--color-muted);font-weight:400">/clase</small></span>
                 <a class="btn red" href="/clases-de-surf-individuales/">Ver packs</a>
               </div>
             </article>
@@ -98,7 +98,7 @@
             <img src="/uploads/2026/08/villa/villa-27.webp" alt="Piscina y zona exterior de la villa" loading="lazy">
           </figure>
           <figure class="hp-camp-photo">
-            <img src="/uploads/2026/02/DJI_0070.webp" alt="Vista aérea de la villa y la costa" loading="lazy">
+            <img src="/uploads/2026/08/villa/villa-32.webp" alt="La villa con piscina y jardín" loading="lazy">
           </figure>
           <figure class="hp-camp-photo">
             <img src="/uploads/2026/08/villa/villa-01.webp" alt="Interior de la Surf House" loading="lazy">
@@ -298,6 +298,7 @@
 
   <script type="module" src="/app.js"></script>
   <script type="module" src="/lib/camp-overview.js"></script>
+  <script type="module" src="/lib/home-pricing.js"></script>
 </body>
 
 </html>
