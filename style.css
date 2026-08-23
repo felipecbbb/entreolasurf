@@ -4547,3 +4547,23 @@ body.internal-page.no-hero .main-nav .lang-sep { color: var(--color-navy); }
   .pack-card:hover,
   .rcal-day.available:hover { transform: none; }
 }
+
+/* Vía rápida por WhatsApp junto al formulario de trip privado */
+.camp-wa-box {
+  margin-top: 26px;
+  padding: 22px 24px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.16);
+}
+.camp-wa-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--color-yellow, #FFCC01);
+  margin: 0 0 6px;
+}
+.camp-wa-text { color: rgba(255,255,255,.8); font-size: .94rem; margin: 0 0 16px; }
+.camp-wa-btn { display: inline-block; }
