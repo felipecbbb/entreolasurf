@@ -2519,7 +2519,12 @@ td a {
   margin-top: 0;
 }
 .hp-camp-section .camps-grid {
+  /* justify-content normal: la regla base centra y encoge el grid, y aqui el
+     destacado necesita ocupar el ancho util para lucir. */
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-content: normal;
+  max-width: 1040px;
+  margin-inline: auto;
 }
 .hp-camp-section .camp-card {
   background: rgba(255,255,255,.06);
@@ -2531,9 +2536,42 @@ td a {
   order: -1;
   background: rgba(255,255,255,.10);
 }
-.hp-camp-section .camps-grid .camp-card-next .camp-cover { min-height: 380px; }
-.hp-camp-section .camps-grid .camp-card-next .camp-overlay h3 { font-size: 1.9rem; }
-.hp-camp-section .camps-grid .camp-card-next .camp-from { font-size: 1.5rem; }
+/* El destacado ocupaba las dos columnas (1220px) y, con la proporcion 4:3 de
+   la portada, la foto se iba a 900px de alto: un cartelon. En pantalla ancha
+   pasa a tarjeta HORIZONTAL — foto a un lado, ficha al otro — asi sigue siendo
+   el protagonista pero con una altura civilizada. */
+@media (min-width: 900px) {
+  .hp-camp-section .camps-grid .camp-card-next {
+    margin-bottom: 8px;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    /* 3 filas para los 3 bloques de la derecha y el conjunto centrado: sin
+       esto quedaba un hueco muerto entre los datos y los botones. */
+    grid-template-rows: auto auto auto;
+    align-content: center;
+  }
+  .hp-camp-section .camps-grid .camp-card-next .camp-cover {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    aspect-ratio: auto;
+    height: 100%;
+    min-height: 340px;
+  }
+  .hp-camp-section .camps-grid .camp-card-next .camp-overlay,
+  .hp-camp-section .camps-grid .camp-card-next .camp-meta,
+  .hp-camp-section .camps-grid .camp-card-next .camp-body,
+  .hp-camp-section .camps-grid .camp-card-next .camp-actions {
+    grid-column: 2;
+  }
+  /* Esta tarjeta no lleva bloque "incluye", asi que el alto sobrante se lo
+     comian los botones (185px de alto). Se pegan abajo con su altura normal. */
+  .hp-camp-section .camps-grid .camp-card-next .camp-actions {
+    align-items: end;
+    padding-top: 22px;
+  }
+  .hp-camp-section .camps-grid .camp-card-next .camp-overlay { padding-top: 26px; }
+  .hp-camp-section .camps-grid .camp-card-next .camp-overlay h3 { font-size: 2.6rem; }
+  .hp-camp-section .camps-grid .camp-card-next .camp-from { font-size: 1.35rem; }
+}
 .hp-camp-section .camp-meta {
   border-color: rgba(255,255,255,.14);
   color: rgba(255,255,255,.82);
