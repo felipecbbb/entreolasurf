@@ -997,6 +997,26 @@ body.internal-page.no-hero .dropdown a {
   background: rgba(11, 17, 22, 0.82);
 }
 
+/* El boton de sonido estaba siempre encima del video y ensuciaba la imagen.
+   Con raton solo aparece al pasar por encima del video (o al enfocarlo con
+   teclado). En tactil no hay hover, asi que ahi se queda visible: si se
+   ocultara, no habria forma de activar el audio. */
+@media (hover: hover) {
+  .reviews-video-shell .audio-toggle {
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity .22s ease, transform .22s ease, background .2s ease;
+    pointer-events: none;
+  }
+  .reviews-video-shell:hover .audio-toggle,
+  .reviews-video-shell:focus-within .audio-toggle,
+  .reviews-video-shell .audio-toggle:focus-visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+}
+
 .reveal-up {
   opacity: 0;
   transform: translateY(34px);
