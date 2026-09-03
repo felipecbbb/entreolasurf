@@ -741,6 +741,13 @@ export async function renderReservas(container) {
           <div style="flex:1"><label>Señal (€)</label><input type="number" id="nb-deposit" min="0" step="0.01" value="0" /></div>
           <div style="flex:1"><label>Total (€)</label><input type="number" id="nb-total" min="0" step="0.01" value="0" /></div>
         </div>
+        <label style="margin-top:8px">Cómo se cobró</label>
+        <select id="nb-method">
+          <option value="efectivo">Efectivo</option>
+          <option value="tarjeta">Tarjeta (TPV en playa)</option>
+          <option value="transferencia">Transferencia</option>
+        </select>
+        <p style="font-size:.76rem;color:#64748b;margin:6px 0 0">La señal se registra como un pago real, así queda descontada del total.</p>
         <label style="margin-top:8px">Estado</label>
         <select id="nb-status">${statusOpts}</select>
         <label style="margin-top:8px">Notas <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
@@ -838,6 +845,36 @@ export async function renderReservas(container) {
           status: $('nb-status').value,
           notes: $('nb-notes').value.trim() || null,
         });
+        // La señal debe quedar registrada en `payments` (única verdad del dinero):
+        // si solo se guardaba en bookings.deposit_amount, la ficha —que calcula lo
+        // pagado con SUM(payments)— mostraba la señal como no cobrada y no la
+        // descontaba del total.
+        const wantedStatus = $('nb-status').value;
+        const charged = wantedStatus === 'fully_paid'
+          ? (Number($('nb-total').value) || 0)
+          : (Number($('nb-deposit').value) || 0);
+        // Aislado en su propio try: la reserva ya existe, así que un fallo aquí no
+        // debe abortar el alta (reintentar el botón crearía una reserva duplicada).
+        try {
+          if (charged > 0) {
+            await createPayment({
+              amount: charged,
+              payment_method: $('nb-method').value,
+              channel: 'in_person',
+              reservation_type: 'booking',
+              reference_id: booking.id,
+              concept: `${wantedStatus === 'fully_paid' ? 'Pago' : 'Señal'} surf camp ${booking.surf_camps?.title || ''}`.trim(),
+            });
+          }
+          // Importe y estado derivados de la suma real de pagos. No se toca si la
+          // reserva nace cancelada/reembolsada: ahí el estado lo fija el admin.
+          if (!['cancelled', 'refunded'].includes(wantedStatus)) {
+            await recalcPaidState('booking', booking.id);
+          }
+        } catch (payErr) {
+          showToast('Reserva creada, pero la señal no se registró: ' + payErr.message + '. Añádela desde la ficha.', 'error');
+        }
+
         if (wantsEmail && email) {
           try {
             await sendBookingConfirmationEmail({ to: email, customerName: fullName, booking });
