@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS public.class_waitlist (
   name            text NOT NULL,
   email           text NOT NULL,
   phone           text,
-  -- '' = "cualquier clase". Se evita NULL a propósito: la clave única de
-  -- abajo debe ser de columnas planas para que el upsert de PostgREST la use.
+  -- '' = "cualquier clase". Se evita NULL a propósito: en un índice único,
+  -- cada NULL cuenta como distinto y la misma persona podría repetirse.
   class_type      text NOT NULL DEFAULT '',
   wants_whatsapp  boolean NOT NULL DEFAULT true,
   source          text NOT NULL DEFAULT 'class-picker',
@@ -53,9 +53,9 @@ CREATE TABLE IF NOT EXISTS public.class_waitlist (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
--- Una persona no debe aparecer dos veces para el mismo tipo de clase.
--- Restricción de columnas planas (no un índice de expresión) porque el upsert
--- del cliente la nombra en ON CONFLICT; el email se guarda ya en minúsculas.
+-- Una persona no debe aparecer dos veces para el mismo tipo de clase. El alta
+-- es un INSERT normal y el cliente se traga el error de duplicado (23505); el
+-- email se guarda ya en minúsculas para que la comparación sea fiable.
 ALTER TABLE public.class_waitlist
   DROP CONSTRAINT IF EXISTS class_waitlist_unico;
 ALTER TABLE public.class_waitlist
@@ -66,10 +66,16 @@ CREATE INDEX IF NOT EXISTS class_waitlist_creado
 
 ALTER TABLE public.class_waitlist ENABLE ROW LEVEL SECURITY;
 
--- Cualquiera puede apuntarse (el formulario vive en la web pública)
+-- Cualquiera puede apuntarse (el formulario vive en la web pública), pero solo
+-- para darse de alta: sin WITH CHECK, un visitante podía mandar notified_at ya
+-- puesto (la fila nacía "avisada" y no salía en el filtro que usa el admin) o
+-- atribuir el alta al user_id de otro cliente.
 DROP POLICY IF EXISTS "Anyone joins waitlist" ON public.class_waitlist;
 CREATE POLICY "Anyone joins waitlist" ON public.class_waitlist
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT WITH CHECK (
+    notified_at IS NULL
+    AND (user_id IS NULL OR user_id = auth.uid())
+  );
 
 -- Leerla y gestionarla, solo el staff con la sección concedida
 DROP POLICY IF EXISTS "Staff manage waitlist" ON public.class_waitlist;
