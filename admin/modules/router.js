@@ -23,11 +23,13 @@ export const sectionTitles = {
   cupones: 'Cupones',
   equipo: 'Equipo',
   'control-horario': 'Control Horario',
+  'lista-espera': 'Lista de Espera',
   papelera: 'Papelera',
+  ajustes: 'Ajustes',
 };
 
 // Secciones restringidas: solo role='admin' puede acceder (nunca un encargado)
-const ADMIN_ONLY_SECTIONS = new Set(['estadisticas', 'cupones', 'equipo', 'papelera']);
+const ADMIN_ONLY_SECTIONS = new Set(['estadisticas', 'cupones', 'equipo', 'papelera', 'ajustes']);
 
 // Secciones que se le pueden conceder a un encargado (todas menos las admin-only)
 export const GRANTABLE_SECTIONS = Object.keys(sectionTitles).filter(s => !ADMIN_ONLY_SECTIONS.has(s));
