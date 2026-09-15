@@ -9146,3 +9146,145 @@ select.inv-cell { cursor: pointer; }
 }
 .cal-cancel-rental-btn:hover { background: #fee2e2; border-color: #fca5a5; }
 .cal-cancel-rental-btn:disabled { opacity: .5; cursor: default; }
+
+/* ============================================================
+   Lista de Espera (le-) y Ajustes (aj-)
+   ============================================================ */
+.le-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.le-stats { display: flex; flex-wrap: wrap; gap: 18px; }
+.le-stat {
+  font-size: .82rem;
+  color: var(--color-muted, #64757d);
+  font-family: 'Space Grotesk', sans-serif;
+}
+.le-stat strong {
+  display: block;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-navy, #0f2f39);
+}
+.le-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.le-tools .act-form-input { width: auto; min-width: 180px; }
+
+.le-table { width: 100%; border-collapse: collapse; }
+.le-table th {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid #eee9da;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-muted, #64757d);
+  white-space: nowrap;
+}
+.le-table td {
+  padding: 11px 10px;
+  border-bottom: 1px solid #f3f1e8;
+  font-size: .86rem;
+  vertical-align: middle;
+}
+.le-row-done { opacity: .62; }
+.le-contact { display: flex; flex-direction: column; gap: 2px; }
+.le-contact a { color: var(--color-navy, #0f2f39); }
+.le-phone { font-size: .78rem; color: var(--color-muted, #64757d); }
+.le-yes { color: #15803d; font-weight: 700; }
+.le-no  { color: #9aa5ab; }
+.le-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; white-space: nowrap; }
+.le-btn { font-size: .74rem !important; padding: 5px 11px !important; }
+.le-del {
+  background: none;
+  border: 0;
+  color: #b91c1c;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 2px 7px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.le-del:hover { background: #fef2f2; }
+
+/* La tabla no debe empujar el panel fuera de la pantalla en iPad */
+.admin-table-wrap { width: 100%; overflow-x: auto; }
+
+.aj-wrap { display: grid; gap: 16px; max-width: 720px; }
+.aj-card {
+  background: #fff;
+  border: 1px solid #eee9da;
+  border-radius: 14px;
+  padding: 20px 22px;
+}
+.aj-card-head { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; }
+.aj-card-title {
+  margin: 0 0 6px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.4rem;
+  letter-spacing: .01em;
+  color: var(--color-navy, #0f2f39);
+}
+.aj-card-lead { margin: 0; font-size: .85rem; line-height: 1.55; color: var(--color-muted, #64757d); }
+
+.aj-switch { flex: 0 0 auto; cursor: pointer; }
+.aj-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.aj-switch-track {
+  display: block;
+  width: 50px;
+  height: 28px;
+  border-radius: 999px;
+  background: #d7d0c2;
+  position: relative;
+  transition: background .2s ease;
+}
+.aj-switch-thumb {
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0,0,0,.2);
+  transition: transform .2s cubic-bezier(.2,.6,.2,1);
+}
+.aj-switch input:checked + .aj-switch-track { background: #22c55e; }
+.aj-switch input:checked + .aj-switch-track .aj-switch-thumb { transform: translateX(22px); }
+.aj-switch input:focus-visible + .aj-switch-track { box-shadow: 0 0 0 3px rgba(34,197,94,.3); }
+
+.aj-fields { display: grid; gap: 12px; margin-top: 18px; }
+.aj-field { display: flex; flex-direction: column; gap: 5px; }
+.aj-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .66rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 700;
+  color: var(--color-muted, #64757d);
+}
+.aj-hint { margin: 0; font-size: .76rem; color: #9aa5ab; }
+.aj-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #f3f1e8;
+}
+.aj-state {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--color-muted, #64757d);
+}
+
+@media (max-width: 720px) {
+  .le-tools { width: 100%; }
+  .le-tools .act-form-input { flex: 1 1 140px; min-width: 0; }
+  .aj-card-head { flex-direction: column; }
+}

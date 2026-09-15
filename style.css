@@ -4711,3 +4711,123 @@ body.internal-page.no-hero .main-nav .lang-sep { color: var(--color-navy); }
   .camp-waitlist { padding: 30px 24px; gap: 22px; }
   .camp-waitlist-btn { width: 100%; padding: 18px 24px; font-size: .95rem; }
 }
+
+/* ============================================================
+   Lista de espera de clases (lib/waitlist.js)
+   ------------------------------------------------------------
+   Sale donde antes había un hueco muerto: el panel de horarios del
+   selector de clases y el calendario de mi cuenta, cuando el mes no
+   tiene ninguna clase publicada.
+   ============================================================ */
+.wl-box {
+  background: var(--color-paper, #fff);
+  border: 1px solid var(--color-line, #d7d0c2);
+  border-left: 4px solid var(--color-yellow, #FFCC01);
+  border-radius: var(--radius-md, 18px);
+  padding: 22px 22px 18px;
+  margin-top: 4px;
+  box-shadow: var(--shadow-sm, 0 8px 24px rgba(15,47,57,.08));
+}
+.wl-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; }
+.wl-icon {
+  flex: 0 0 auto;
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: rgba(255, 204, 1, .18);
+  color: var(--color-navy, #0f2f39);
+}
+.wl-title {
+  margin: 0 0 4px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.45rem;
+  line-height: 1.1;
+  letter-spacing: .01em;
+  color: var(--color-navy, #0f2f39);
+}
+.wl-lead { margin: 0; font-size: .88rem; line-height: 1.5; color: var(--color-muted, #64757d); }
+
+.wl-fields { display: grid; gap: 10px; margin-bottom: 12px; }
+@media (min-width: 620px) {
+  .wl-fields { grid-template-columns: 1fr 1fr; }
+  .wl-fields .wl-field:first-child { grid-column: 1 / -1; }
+}
+.wl-field { display: flex; flex-direction: column; gap: 5px; }
+.wl-field > span {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: .66rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  font-weight: 700;
+  color: var(--color-muted, #64757d);
+}
+.wl-field input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--color-line, #d7d0c2);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--color-bg, #fffdf7);
+  font: inherit;
+  font-size: .92rem;
+  color: var(--color-text, #2d3d45);
+}
+.wl-field input:focus {
+  outline: none;
+  border-color: var(--color-yellow, #FFCC01);
+  box-shadow: 0 0 0 3px rgba(255, 204, 1, .22);
+}
+.wl-asuser { margin: 0 0 12px; font-size: .88rem; color: var(--color-text, #2d3d45); }
+
+.wl-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  font-size: .85rem;
+  line-height: 1.45;
+  color: var(--color-text, #2d3d45);
+  cursor: pointer;
+}
+.wl-check input { margin-top: 2px; flex: 0 0 auto; width: 16px; height: 16px; accent-color: var(--color-navy, #0f2f39); }
+
+.wl-submit {
+  width: 100%;
+  padding: 14px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-yellow, #FFCC01);
+  color: var(--color-navy, #0f2f39);
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: .92rem;
+  cursor: pointer;
+  transition: transform .2s cubic-bezier(.2,.6,.2,1), box-shadow .2s ease;
+}
+.wl-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15,47,57,.16); }
+.wl-submit:disabled { opacity: .6; cursor: default; }
+
+.wl-edit {
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px;
+  background: none;
+  border: 0;
+  color: var(--color-muted, #64757d);
+  font: inherit;
+  font-size: .82rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.wl-legal { margin: 12px 0 0; font-size: .72rem; line-height: 1.45; color: #9aa5ab; }
+
+.wl-done { display: flex; gap: 14px; align-items: center; }
+.wl-done-tick {
+  flex: 0 0 auto;
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 1.1rem;
+  font-weight: 700;
+}

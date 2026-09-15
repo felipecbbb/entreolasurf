@@ -4,6 +4,7 @@ import { fetchFamilyMembers } from '/lib/family.js';
 import { supabase } from '/lib/supabase.js';
 import { TYPE_LABELS, showToast } from '/lib/utils.js';
 import { LEVEL_OPTIONS, AUDIENCE_OPTIONS, ADMIN_EMAIL } from '/lib/shared-constants.js';
+import { waitlistBoxIfEnabled, bindWaitlistBox } from '/lib/waitlist.js';
 
 // Telefono del cliente para los avisos al admin (viene del perfil, no de la
 // sesion). Se cachea: se pide una vez por carga de pagina.
@@ -11,7 +12,6 @@ let _telefonoPerfil = null;
 async function cargarTelefonoPerfil() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
-      cargarTelefonoPerfil();
     if (!user) return null;
     const { data } = await supabase.from('profiles').select('phone').eq('id', user.id).single();
     _telefonoPerfil = data?.phone || null;
@@ -184,7 +184,21 @@ export async function renderCalendar(panel) {
         <div class="cal-right">
           ${selectedDate && markedDays.has(selectedDate) ? `<h3 class="cal-day-title">${selLabel}</h3>` : ''}`;
 
-    if (!selectedDate || !markedDays.has(selectedDate)) {
+    // Mes sin ningún día con clases: en vez de un calendario muerto, se ofrece
+    // avisar al cliente cuando se publiquen fechas (lo enciende Ajustes).
+    let waitlistCtx = null;
+    if (!markedDays.size) {
+      const { html: wlHtml, profile } = await waitlistBoxIfEnabled({ classType: filterType || null });
+      if (wlHtml) {
+        html += wlHtml;
+        waitlistCtx = { classType: filterType || null, profile };
+      } else {
+        html += `<div class="cal-pick-hint">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <p>No hay clases publicadas este mes.</p>
+        </div>`;
+      }
+    } else if (!selectedDate || !markedDays.has(selectedDate)) {
       html += `<div class="cal-pick-hint">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         <p>Elige un día con clases (marcados en el calendario).</p>
@@ -296,6 +310,10 @@ export async function renderCalendar(panel) {
     </div>`;
 
     panel.innerHTML = html;
+
+    if (waitlistCtx) {
+      bindWaitlistBox(panel, { ...waitlistCtx, source: 'mi-cuenta' });
+    }
 
     // Events — type filter
     panel.querySelectorAll('.cal-type-btn').forEach(btn => {

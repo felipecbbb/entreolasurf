@@ -23,6 +23,8 @@ import { renderCupones } from './sections/cupones.js';
 import { renderEquipo } from './sections/equipo.js';
 import { renderControlHorario } from './sections/control-horario.js';
 import { renderPapelera } from './sections/papelera.js';
+import { renderListaEspera } from './sections/lista-espera.js';
+import { renderAjustes } from './sections/ajustes.js';
 
 /* ---- Errores no capturados → a la vista ------------------------------------
    En tablet/móvil no hay consola: un fallo de JS dejaba botones muertos sin
@@ -90,6 +92,8 @@ register('cupones', renderCupones);
 register('equipo', renderEquipo);
 register('control-horario', renderControlHorario);
 register('papelera', renderPapelera);
+register('lista-espera', renderListaEspera);
+register('ajustes', renderAjustes);
 
 // ---- Login form ----
 loginForm.addEventListener('submit', async (e) => {
