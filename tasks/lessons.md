@@ -33,3 +33,16 @@
 - **Pattern**: Two separate detail panels (`openEnrollmentDetail` and `openReservationDetail`) caused inconsistency
 - **Fix**: Delete the duplicate, use only one
 - **Rule**: Before creating a new UI component, check if one already exists that can be reused.
+
+## Rewrites de Vercel con cleanUrls
+- **Pattern**: el rewrite `/surf-camp-:slug+` → `/camp-template/index.html` daba 502 `ROUTER_CANNOT_MATCH` (el cliente lo reportó como "error 505") en cuanto un camp no tenía carpeta propia. Con `cleanUrls: true` la ruta `.html` no existe.
+- **Fix**: destino `/camp-template/` (PR #56).
+- **Rule**: nunca `.html` en el destino de un rewrite con cleanUrls. Si el usuario da un código de error raro, comprobar la respuesta real (`curl -sI`, cabecera `x-vercel-error`) antes de buscar en el código.
+
+## Contenido nuevo desde el panel que no llega a la web
+- **Pattern**: las tarjetas de camps eran HTML fijo; `camp-overview.js` solo actualizaba las existentes, así que un camp creado desde el panel no salía en ningún listado.
+- **Rule**: al auditar "crear X desde el panel", seguir el registro hasta la web pública (página propia + listados), no quedarse en que el INSERT funciona.
+
+## vercel --yes
+- **Pattern**: `vercel curl --yes` en un repo sin `.vercel` creó y conectó al repo un proyecto nuevo `entreolasur` que desplegaba en cada push.
+- **Rule**: nunca `--yes` del CLI de Vercel aquí. Preview protegido → que Felipe lo abra logueado o verificar en prod.
