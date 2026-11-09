@@ -5,6 +5,7 @@ const SMTP_PORT = Number(Deno.env.get("SMTP_PORT") || "465");
 const SMTP_USER = Deno.env.get("SMTP_USER") || "noreply@entreolasurf.com";
 const SMTP_PASS = Deno.env.get("SMTP_PASS") || "";
 const FROM = `Entre Olas Surf <${SMTP_USER}>`;
+const REPLY_TO = Deno.env.get("ADMIN_EMAIL") || "entreolasurf@gmail.com";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -223,6 +224,32 @@ function buildEmail(type: string, data: any): { subject: string; html: string } 
         itemsTable(d.items),
         totalBar(d.total || 0),
         btnYellow("RESERVAR MIS CLASES", "https://entreolasurf.com/mi-cuenta/"),
+      ].join(""), false),
+    };
+
+    /* Avisos automáticos de bono (los manda la función bono-reminders) */
+    case "bono_expiring": {
+      const days = Number(d.daysLeft);
+      const urgent = days <= 7;
+      const cuando = days <= 1 ? "mañana" : `en ${days} días`;
+      return {
+        subject: urgent ? `Tu bono caduca ${cuando}` : `Tu bono caduca el ${d.expiresDate || ""}`,
+        html: emailWrap(logoDefault(), [
+          heading(urgent ? `Tu bono caduca ${cuando}` : "Tu bono caduca pronto"),
+          sub(`${name ? esc(name) + ", te" : "Te"} ${d.remaining == 1 ? "queda <strong>1 clase</strong>" : `quedan <strong>${d.remaining} clases</strong>`} de ${esc(d.classLabel || "surf")} sin usar en tu bono.`),
+          sandBox(`Tu bono caduca el <strong>${esc(d.expiresDate || "")}</strong>. Pasada esa fecha ya no podrás usar las clases que te queden, así que resérvalas antes.<br><br>¿Ningún día te cuadra? Respóndenos a este correo y lo vemos.`),
+          btnYellow("RESERVAR MIS CLASES", "https://entreolasurf.com/mi-cuenta/"),
+        ].join(""), false),
+      };
+    }
+
+    case "bono_pending": return {
+      subject: `Te ${d.remaining == 1 ? "queda 1 clase" : `quedan ${d.remaining} clases`} por reservar`,
+      html: emailWrap(logoDefault(), [
+        heading(`¡Te esperamos${name ? ", " + esc(name) : ""}!`),
+        sub(`Tienes ${d.remaining == 1 ? "<strong>1 clase</strong>" : `<strong>${d.remaining} clases</strong>`} de ${esc(d.classLabel || "surf")} en tu bono sin reservar.`),
+        sandBox(`Elige día y hora desde tu cuenta en un minuto. Tu bono es válido hasta el <strong>${esc(d.expiresDate || "")}</strong>.<br><br>Si lo prefieres, respóndenos a este correo y te la reservamos nosotros.`),
+        btnYellow("RESERVAR CLASE", "https://entreolasurf.com/mi-cuenta/"),
       ].join(""), false),
     };
 
@@ -471,7 +498,13 @@ Deno.serve(async (req) => {
       },
     });
 
-    await client.send({ from: FROM, to, subject: asuntoSeguro(subject), html: htmlSoloAscii(html) });
+    // Los avisos de bono invitan a responder: que la respuesta llegue a la
+    // escuela y no al buzón noreply.
+    const replyTo = type.startsWith("bono_") ? REPLY_TO : undefined;
+    await client.send({
+      from: FROM, to, subject: asuntoSeguro(subject), html: htmlSoloAscii(html),
+      ...(replyTo ? { replyTo } : {}),
+    });
     await client.close();
 
     return new Response(JSON.stringify({ success: true }), {
