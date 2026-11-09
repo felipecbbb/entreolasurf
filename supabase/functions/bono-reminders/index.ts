@@ -35,10 +35,10 @@ const CLASS_LABEL: Record<string, string> = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-// Fecha legible en hora de Madrid: "12 de diciembre"
+// Fecha legible en hora de Madrid: "12 de diciembre de 2027"
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("es-ES", {
-    day: "numeric", month: "long", timeZone: "Europe/Madrid",
+    day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Madrid",
   });
 }
 // Día natural (YYYY-MM-DD) en Madrid, para claves anti-duplicado
