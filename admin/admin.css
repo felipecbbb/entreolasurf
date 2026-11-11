@@ -9288,3 +9288,84 @@ select.inv-cell { cursor: pointer; }
   .le-tools .act-form-input { flex: 1 1 140px; min-width: 0; }
   .aj-card-head { flex-direction: column; }
 }
+
+/* ============================================================
+   Correos (email marketing) — prefijo co-
+   ============================================================ */
+.co-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.co-bar-right { display: flex; gap: 8px; flex-wrap: wrap; }
+.co-lead { margin: 0; max-width: 620px; font-size: .88rem; color: var(--color-muted, #64757d); }
+.co-hint { font-size: .8rem; color: var(--color-muted, #64757d); margin: 6px 0; }
+.co-err { color: #b91c1c; font-size: .78rem; }
+.co-card { background: #fff; border: 1px solid var(--color-line, #d7d0c2); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
+.co-card-title { margin: 0 0 12px; font-size: 1rem; color: var(--color-navy, #0f2f39); }
+.co-table { width: 100%; border-collapse: collapse; }
+.co-table th { text-align: left; font-family: 'Space Grotesk', sans-serif; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--color-muted, #64757d); padding: 8px 10px; border-bottom: 1px solid var(--color-line, #d7d0c2); }
+.co-table td { padding: 10px; border-bottom: 1px solid #eee8db; font-size: .86rem; vertical-align: top; }
+.co-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.co-sm { font-size: .74rem !important; padding: 5px 11px !important; }
+.co-del { border: none; background: none; color: #b91c1c; font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+.co-del:hover { background: #fef2f2; }
+.co-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+.co-row > * { flex: 1 1 160px; }
+
+/* Editor: columna de edición + vista previa fija */
+.co-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 18px; align-items: start; }
+.co-editor-main { min-width: 0; }
+.co-editor-side { position: sticky; top: 12px; min-width: 0; }
+.co-preview { background: #fff; border: 1px solid var(--color-line, #d7d0c2); border-radius: 14px; overflow: hidden; }
+.co-preview-subject { padding: 10px 14px; font-size: .84rem; border-bottom: 1px solid #eee8db; color: var(--color-navy, #0f2f39); font-weight: 700; }
+.co-preview-subject span { color: var(--color-muted, #64757d); font-weight: 400; }
+.co-preview-frame { display: block; width: 100%; height: 640px; border: 0; background: #fffdf7; }
+.co-preview-state { padding: 8px 14px; font-size: .78rem; color: var(--color-muted, #64757d); }
+
+.co-blocks { display: grid; gap: 10px; margin: 12px 0; }
+.co-block { border: 1px solid #eee8db; border-radius: 10px; padding: 10px 12px; background: #fffdf7; display: grid; gap: 6px; }
+.co-block-head { display: flex; justify-content: space-between; align-items: center; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--color-muted, #64757d); }
+.co-block-tools button { border: 1px solid var(--color-line, #d7d0c2); background: #fff; border-radius: 6px; min-width: 28px; height: 26px; cursor: pointer; color: var(--color-navy, #0f2f39); }
+.co-block-tools button:disabled { opacity: .35; cursor: default; }
+.co-block-tools [data-rm] { color: #b91c1c; }
+.co-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: .8rem; color: var(--color-muted, #64757d); }
+.co-add-btn { font-size: .74rem !important; padding: 5px 10px !important; }
+.co-vars { margin-top: 12px; font-size: .82rem; }
+.co-vars summary { cursor: pointer; font-weight: 700; color: var(--color-navy, #0f2f39); }
+.co-vars ul { margin: 6px 0; padding-left: 18px; }
+.co-vars code { background: #f3ecdd; padding: 1px 5px; border-radius: 4px; }
+
+/* Destinatarios */
+.co-seg-mode { display: flex; gap: 16px; margin-bottom: 10px; font-size: .88rem; }
+.co-seg-grid { display: grid; gap: 6px; margin: 8px 0 12px; }
+.co-check { display: flex; gap: 8px; align-items: center; font-size: .88rem; }
+.co-seg-line { margin-bottom: 12px; }
+.co-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.co-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--color-line, #d7d0c2); border-radius: 999px; padding: 5px 12px; font-size: .8rem; background: #fff; }
+.co-chip.is-on { background: #fff6cc; border-color: #FFCC01; }
+.co-chip button { border: none; background: none; cursor: pointer; color: #b91c1c; font-size: 1rem; line-height: 1; padding: 0; }
+.co-suggest { display: grid; gap: 4px; margin: 6px 0; }
+.co-suggest button { text-align: left; border: 1px solid #eee8db; background: #fff; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: .86rem; }
+.co-suggest button:hover { background: #fffdf7; }
+.co-suggest small { color: var(--color-muted, #64757d); }
+.co-count { margin-top: 12px; padding: 10px 12px; background: #f3ecdd; border-radius: 10px; font-size: .88rem; }
+.co-count strong { font-size: 1.1rem; color: var(--color-navy, #0f2f39); }
+.co-count ul { max-height: 220px; overflow: auto; margin: 6px 0 0; padding-left: 18px; font-size: .8rem; }
+
+/* Plantillas */
+.co-tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.co-tpl { display: flex; flex-direction: column; margin: 0; }
+.co-tpl .co-actions { margin-top: auto; justify-content: flex-start; padding-top: 10px; }
+.co-tpl-subject { margin: 0 0 4px; font-size: .86rem; }
+
+/* Envío */
+.co-sending { max-width: 560px; }
+.co-progress { height: 10px; background: #eee8db; border-radius: 999px; overflow: hidden; margin: 10px 0; }
+.co-progress-bar { height: 100%; width: 0; background: #FFCC01; transition: width .4s; }
+
+.co-subtabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.co-subtab { border: 1px solid var(--color-line, #d7d0c2); background: #fff; border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: .82rem; }
+.co-subtab.is-active { background: var(--color-navy, #0f2f39); color: #fff; border-color: var(--color-navy, #0f2f39); }
+
+@media (max-width: 1100px) {
+  .co-editor { grid-template-columns: 1fr; }
+  .co-editor-side { position: static; }
+  .co-preview-frame { height: 520px; }
+}

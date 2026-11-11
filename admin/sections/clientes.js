@@ -1065,6 +1065,7 @@ export async function renderClientes(container) {
           <div class="act-form-field">
             <label class="act-form-label">EMAIL</label>
             <input type="email" class="act-form-input" value="${esc(c._email || '')}" readonly style="background:#f9fafb;cursor:default" placeholder="${c._email ? '' : 'No disponible'}" />
+            ${c.email_unsubscribed_at ? `<small style="color:#b91c1c">De baja de los correos de novedades desde ${formatDate(c.email_unsubscribed_at)}</small>` : ''}
           </div>
         </div>
         <div class="cli-form-row">

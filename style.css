@@ -4142,6 +4142,8 @@ td a {
   font-size: .82rem;
   color: var(--color-navy);
 }
+.cp-auth-check { display: flex; gap: 8px; align-items: flex-start; font-size: .82rem; color: #64757d; line-height: 1.4; }
+.cp-auth-check input { margin-top: 2px; }
 .cp-auth-field input {
   padding: 9px 11px;
   border: 1px solid var(--color-line);
