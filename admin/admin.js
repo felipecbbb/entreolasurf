@@ -24,6 +24,7 @@ import { renderEquipo } from './sections/equipo.js';
 import { renderControlHorario } from './sections/control-horario.js';
 import { renderPapelera } from './sections/papelera.js';
 import { renderListaEspera } from './sections/lista-espera.js';
+import { renderCorreos } from './sections/correos.js';
 import { renderAjustes } from './sections/ajustes.js';
 
 /* ---- Errores no capturados → a la vista ------------------------------------
@@ -93,6 +94,7 @@ register('equipo', renderEquipo);
 register('control-horario', renderControlHorario);
 register('papelera', renderPapelera);
 register('lista-espera', renderListaEspera);
+register('correos', renderCorreos);
 register('ajustes', renderAjustes);
 
 // ---- Login form ----

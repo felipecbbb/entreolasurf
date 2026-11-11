@@ -140,6 +140,12 @@ function renderAuth() {
                   Acepto la <a href="#" id="open-waiver-modal">Exención de Responsabilidad</a> *
                 </label>
               </div>
+              <div class="auth-field">
+                <label class="auth-checkbox-label">
+                  <input type="checkbox" id="reg-marketing-optout" name="marketing_optout">
+                  No quiero recibir novedades ni ofertas por email
+                </label>
+              </div>
               <p class="auth-error" id="register-error-step1"></p>
               <button type="submit" class="auth-submit-btn">Siguiente →</button>
             </form>
@@ -264,6 +270,7 @@ function renderAuth() {
       can_swim: e.target.can_swim.value === 'true',
       has_injury: e.target.has_injury.value === 'true',
       injury_detail: e.target.injury_detail?.value?.trim() || null,
+      marketing_optout: !!e.target.marketing_optout?.checked,
     };
 
     document.getElementById('register-step1').style.display = 'none';
@@ -311,6 +318,7 @@ function renderAuth() {
         has_injury: regStep1Data.has_injury,
         injury_detail: regStep1Data.injury_detail,
         terms_accepted: true,
+        marketing_optout: regStep1Data.marketing_optout,
       });
       if (result?.session || result?.user) {
         renderDashboard();
