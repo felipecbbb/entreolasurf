@@ -46,3 +46,19 @@
 ## vercel --yes
 - **Pattern**: `vercel curl --yes` en un repo sin `.vercel` creó y conectó al repo un proyecto nuevo `entreolasur` que desplegaba en cada push.
 - **Rule**: nunca `--yes` del CLI de Vercel aquí. Preview protegido → que Felipe lo abra logueado o verificar en prod.
+
+## Desplegar Edge Functions con `_shared` por MCP
+- **Pattern**: el deploy por MCP recibe el contenido de los ficheros; con imports relativos a `../_shared/` hay riesgo de rutas mal resueltas y de errores al copiar a mano.
+- **Fix**: empaquetar con `npx esbuild <fn>/index.ts --bundle --format=esm --platform=neutral --external:'https://*'` y desplegar el bundle como un único `index.ts`.
+- **Rule**: antes de tocar una función en producción, comparar la versión desplegada con `main` (`get_edge_function`). Si se refactoriza, guardar una foto del HTML/salida antes y después y exigir que sean idénticas.
+
+## Helpers compartidos con límites ocultos
+- **Pattern**: el `esc()` de send-email recorta a 2000 caracteres (pensado para el formulario de contacto). Reutilizado en campañas, habría cortado párrafos largos sin avisar.
+- **Rule**: al reutilizar un helper en un contexto nuevo, leer su cuerpo entero, no solo su nombre.
+
+## querySelector vs querySelectorAll en toggles
+- **Pattern**: `lib/class-picker.js` mostraba solo el primer `.cp-reg-only`, y el teléfono obligatorio quedaba oculto: era imposible registrarse desde el selector de clases.
+- **Rule**: si una clase marca VARIOS elementos para mostrar/ocultar, usar `querySelectorAll` + `forEach`.
+
+## Falsos positivos del SQL Editor de Supabase
+- `execute format('alter table ... enable row level security')` dentro de un `do $$` no lo detecta el aviso de «tablas sin RLS». Se ejecuta con «Run without RLS» y se verifica después con `pg_class.relrowsecurity`.
