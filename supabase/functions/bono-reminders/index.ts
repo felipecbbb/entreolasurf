@@ -8,8 +8,8 @@
   Qué manda (solo bonos 'active', no caducados, con clases sin asignar):
     · expira_30  → caduca en ≤30 días. Una vez por fecha de caducidad.
     · expira_7   → caduca en ≤7 días. Una vez por fecha de caducidad.
-    · pendiente  → sin ninguna clase futura reservada, comprado hace ≥14 días
-                   y sin caducar en el próximo mes. Como mucho cada 30 días.
+    (El aviso "pendiente" —clases sin reservar— se quitó el 2026-11-11 a
+     petición del cliente; la plantilla bono_pending sigue en send-email.)
   Cada envío queda en public.bono_reminders (sirve de anti-duplicados e
   histórico). Body {"dry_run": true} → devuelve la lista sin enviar nada.
 */
@@ -20,8 +20,6 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
 
 const MAX_EMAILS_PER_RUN = 60;      // el resto sale al día siguiente (límite SMTP / tiempo)
-const PENDING_MIN_AGE_DAYS = 14;
-const PENDING_EVERY_DAYS = 30;
 const DAY = 86_400_000;
 
 const CLASS_LABEL: Record<string, string> = {
@@ -57,7 +55,6 @@ Deno.serve(async (req) => {
   const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
-  const today = madridDay(nowIso);
 
   // 1) Bonos vivos con clases sin asignar
   const { data: bonos, error: e1 } = await sb
@@ -72,22 +69,16 @@ Deno.serve(async (req) => {
   const bonoIds = live.map((b) => b.id);
   const userIds = [...new Set(live.map((b) => b.user_id))];
 
-  // 2) Datos de contacto, clases futuras reservadas e historial de avisos
-  const [profilesRes, enrollRes, sentRes] = await Promise.all([
+  // 2) Datos de contacto e historial de avisos
+  const [profilesRes, sentRes] = await Promise.all([
     sb.from("profiles").select("id, full_name, email").in("id", userIds),
-    sb.from("class_enrollments")
-      .select("bono_id, surf_classes!inner(date)")
-      .in("bono_id", bonoIds)
-      .neq("status", "cancelled")
-      .gte("surf_classes.date", today),
     sb.from("bono_reminders").select("bono_id, kind, ref_date, sent_at").in("bono_id", bonoIds),
   ]);
-  for (const r of [profilesRes, enrollRes, sentRes]) {
+  for (const r of [profilesRes, sentRes]) {
     if (r.error) return json({ error: r.error.message }, 500);
   }
 
   const profile = new Map((profilesRes.data || []).map((p) => [p.id, p]));
-  const hasFutureClass = new Set((enrollRes.data || []).map((e) => e.bono_id));
   const sent = sentRes.data || [];
 
   // 3) Decidir qué aviso toca a cada bono (como mucho uno por bono y día)
@@ -102,7 +93,6 @@ Deno.serve(async (req) => {
     const remaining = b.total_credits - b.used_credits;
     const daysLeft = Math.ceil((new Date(b.expires_at).getTime() - now) / DAY);
     const expDay = madridDay(b.expires_at);
-    const ageDays = (now - new Date(b.created_at).getTime()) / DAY;
     const already = (kind: string, ref: string | null) =>
       sent.some((s) => s.bono_id === b.id && s.kind === kind && (ref === null || s.ref_date === ref));
 
@@ -112,11 +102,6 @@ Deno.serve(async (req) => {
       if (!already("expira_7", expDay)) { kind = "expira_7"; ref = expDay; }
     } else if (daysLeft <= 30) {
       if (!already("expira_30", expDay)) { kind = "expira_30"; ref = expDay; }
-    } else if (!hasFutureClass.has(b.id) && ageDays >= PENDING_MIN_AGE_DAYS) {
-      const lastPending = sent
-        .filter((s) => s.bono_id === b.id && s.kind === "pendiente")
-        .reduce((m, s) => Math.max(m, new Date(s.sent_at).getTime()), 0);
-      if (now - lastPending >= PENDING_EVERY_DAYS * DAY) kind = "pendiente";
     }
     if (!kind) continue;
 
@@ -134,7 +119,7 @@ Deno.serve(async (req) => {
   }
 
   // Lo más urgente primero, por si se corta en MAX_EMAILS_PER_RUN
-  const prio: Record<string, number> = { expira_7: 0, expira_30: 1, pendiente: 2 };
+  const prio: Record<string, number> = { expira_7: 0, expira_30: 1 };
   jobs.sort((a, b) => prio[a.kind] - prio[b.kind]);
   const batch = jobs.slice(0, MAX_EMAILS_PER_RUN);
 
@@ -156,7 +141,7 @@ Deno.serve(async (req) => {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
         body: JSON.stringify({
           to: j.email,
-          type: j.kind === "pendiente" ? "bono_pending" : "bono_expiring",
+          type: "bono_expiring",
           data: j.data,
         }),
       });
