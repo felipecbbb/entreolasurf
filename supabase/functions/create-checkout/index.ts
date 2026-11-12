@@ -95,7 +95,12 @@ Deno.serve(async (req) => {
         // todas, o se vende por encima del máximo.
         const spots = Math.max(1, parseInt(it.quantity, 10) || 1);
         const libres = Math.max(Number(c.max_spots || 0) - Number(c.spots_taken || 0), 0);
-        if (c.sold_out || c.status === "closed" || libres < spots) {
+        if (c.status === "coming_soon") {
+          return new Response(JSON.stringify({
+            error: `Este surf camp aún no está a la venta: ${it.name}`,
+          }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        if (c.sold_out || c.status === "closed" || c.status === "full" || libres < spots) {
           return new Response(JSON.stringify({
             error: libres > 0
               ? `Solo quedan ${libres} plaza(s) en ${it.name}`
