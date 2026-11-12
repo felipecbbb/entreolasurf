@@ -751,6 +751,7 @@ body.internal-page.no-hero .dropdown a {
 /* La oferta sí lleva el amarillo de marca: es la única señal cromática */
 .camp-badge-offer { background: #FFCC01; }
 .camp-badge-soldout { background: #0f2f39; color: #fff; }
+.camp-badge-soon { background: #0f2f39; color: #FFCC01; }
 
 /* La ficha (fecha, sitio, precio) baja de la foto al cuerpo de la tarjeta */
 .camp-overlay {
