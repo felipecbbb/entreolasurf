@@ -9386,7 +9386,7 @@ select.inv-cell { cursor: pointer; }
 .rf-kpis span { font-family:'Space Grotesk',sans-serif; font-size:.68rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); }
 .rf-kpis strong { font-family:'Bebas Neue',sans-serif; font-size:1.7rem; color:var(--color-navy); line-height:1; }
 .rf-table { background:#fff; border:1px solid #ece7da; border-radius:12px; overflow:hidden; }
-.rf-row { display:grid; grid-template-columns:minmax(0,2.4fr) repeat(4, minmax(0,.8fr)) auto; gap:12px; align-items:center; padding:12px 16px; border-top:1px solid #f3efe4; font-size:.86rem; color:var(--color-navy); cursor:pointer; }
+.rf-row { display:grid; grid-template-columns:minmax(0,2.4fr) repeat(4, minmax(0,.8fr)) 200px; gap:12px; align-items:center; padding:12px 16px; border-top:1px solid #f3efe4; font-size:.86rem; color:var(--color-navy); cursor:pointer; }
 .rf-row-sales { grid-template-columns:minmax(0,1.8fr) minmax(0,1.6fr) repeat(4, minmax(0,.7fr)); cursor:default; }
 .rf-row:hover:not(.rf-row-head):not(.rf-row-sales) { background:#fffbea; }
 .rf-row-head { border-top:0; background:#faf8f2; cursor:default; font-family:'Space Grotesk',sans-serif; font-size:.68rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--color-muted); }
