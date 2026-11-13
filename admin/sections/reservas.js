@@ -1,7 +1,7 @@
 /* ============================================================
    Reservas Section — Camp bookings grouped by camp
    ============================================================ */
-import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully, createBooking, sendBookingConfirmationEmail, searchProfiles, moveToTrash } from '../modules/api.js';
+import { fetchBookings, fetchCamps, updateBookingStatus, createPayment, fetchPayments, deletePayment, deleteReservationFully, createBooking, sendBookingConfirmationEmail, searchProfiles, moveToTrash, fetchReferrers, setBookingReferrer } from '../modules/api.js';
 import { statusBadge, formatDate, formatCurrency, openModal, closeModal, showToast } from '../modules/ui.js';
 import { openPaymentEditModal } from '../modules/payment-edit.js';
 import { recalcPaidState } from '/lib/domain/payments.js';
@@ -13,6 +13,18 @@ const STATUS_LABELS = {
   pending: 'Pendiente', deposit_paid: 'Señal pagada', fully_paid: 'Pagado',
   cancelled: 'Cancelado', refunded: 'Reembolsado'
 };
+
+// Vendedores para "Vendido por". Si falla (migración sin aplicar, sin permiso)
+// el selector simplemente no aparece: nunca bloquea crear o ver reservas.
+async function loadReferrers() {
+  try { return await fetchReferrers(); } catch { return []; }
+}
+function referrerSelect(id, refs, selected) {
+  if (!refs.length) return '';
+  const opts = refs.filter(r => r.active || r.id === selected)
+    .map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${String(r.name).replace(/</g, '&lt;')}${r.active ? '' : ' (desactivado)'}</option>`).join('');
+  return `<select id="${id}"><option value="">— Nadie (venta directa) —</option>${opts}</select>`;
+}
 
 const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
 
@@ -350,6 +362,9 @@ export async function renderReservas(container) {
             </div>
           </div>
 
+          <!-- Vendido por (referidos) — se rellena async -->
+          <div id="rv-referrer-block"></div>
+
           <!-- Payment -->
           <div style="padding:18px 20px;border-radius:12px;background:${isFullyPaid ? '#f0fdf4' : '#fef2f2'};border:1px solid ${isFullyPaid ? '#bbf7d0' : '#fecaca'}">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -454,6 +469,31 @@ export async function renderReservas(container) {
 
     // Cargar pagos asociados al booking y renderizar
     renderBookingPayments(overlay, booking);
+    renderReferrerBlock(overlay, booking);
+  }
+
+  async function renderReferrerBlock(overlay, booking) {
+    const block = overlay.querySelector('#rv-referrer-block');
+    if (!block) return;
+    const refs = await loadReferrers();
+    const sel = referrerSelect('rv-referrer', refs, booking.referrer_id || '');
+    if (!sel) return;
+    block.innerHTML = `
+      <span class="rv-field-label" style="display:block;margin-bottom:6px">Vendido por</span>
+      <div class="rv-referrer-pick">${sel}</div>`;
+    const select = block.querySelector('#rv-referrer');
+    select.style.cssText = 'width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-family:Space Grotesk,sans-serif;font-size:.9rem;color:#0f2f39';
+    select.addEventListener('change', async () => {
+      const prev = booking.referrer_id || '';
+      try {
+        await setBookingReferrer(booking.id, select.value || null);
+        booking.referrer_id = select.value || null;
+        showToast('Vendedor actualizado', 'success');
+      } catch (err) {
+        select.value = prev;
+        showToast('Error: ' + err.message, 'error');
+      }
+    });
   }
 
   async function renderBookingPayments(overlay, booking) {
@@ -712,7 +752,8 @@ export async function renderReservas(container) {
   }
 
   // ---- Alta manual de una reserva de camp (+ email de confirmación) ----
-  function openNewBookingModal(camps) {
+  async function openNewBookingModal(camps) {
+    const refs = await loadReferrers();
     const campOpts = camps.map(c => `<option value="${c.id}" data-deposit="${c.deposit || 0}" data-price="${c.price || 0}">${esc(c.title)}</option>`).join('');
     const statusOpts = STATUSES.map(s => `<option value="${s}" ${s === 'deposit_paid' ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`).join('');
     openModal('Nueva reserva de camp', `
@@ -750,6 +791,8 @@ export async function renderReservas(container) {
         <p style="font-size:.76rem;color:#64748b;margin:6px 0 0">La señal se registra como un pago real, así queda descontada del total.</p>
         <label style="margin-top:8px">Estado</label>
         <select id="nb-status">${statusOpts}</select>
+        ${refs.length ? `<label style="margin-top:8px">Vendido por <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
+        ${referrerSelect('nb-referrer', refs, '')}` : ''}
         <label style="margin-top:8px">Notas <span style="font-weight:400;color:#94a3b8">(opcional)</span></label>
         <textarea id="nb-notes" rows="2" placeholder="Observaciones internas"></textarea>
 
@@ -844,6 +887,7 @@ export async function renderReservas(container) {
           total_amount: Number($('nb-total').value) || 0,
           status: $('nb-status').value,
           notes: $('nb-notes').value.trim() || null,
+          referrer_id: $('nb-referrer')?.value || null,
         });
         // La señal debe quedar registrada en `payments` (única verdad del dinero):
         // si solo se guardaba en bookings.deposit_amount, la ficha —que calcula lo

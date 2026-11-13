@@ -135,9 +135,29 @@ Deno.serve(async (req) => {
           const { data: priced } = await supabase.rpc("camp_price_for", {
             p_camp_id: campId, p_spots: spots,
           });
-          const totalAmount = Number(priced) > 0
+          let totalAmount = Number(priced) > 0
             ? Number(priced)
             : Number(camp.metadata?.totalAmount) || depositPaid;
+
+          // Vendedor (referido): lo puso create-checkout tras validar el código,
+          // y este carrito es el guardado en servidor, no el del navegador.
+          // Su descuento opcional rebaja el TOTAL, nunca por debajo de la señal.
+          let referrerId: string | null = null;
+          let referrerNote = "";
+          if (camp.metadata?.referrerId) {
+            const { data: ref } = await supabase.from("referrers")
+              .select("id, name, discount_type, discount_value")
+              .eq("id", camp.metadata.referrerId).maybeSingle();
+            if (ref?.id) {
+              referrerId = ref.id;
+              const v = Number(ref.discount_value) || 0;
+              let dto = 0;
+              if (ref.discount_type === "percent" && v > 0) dto = totalAmount * Math.min(v, 100) / 100;
+              else if (ref.discount_type === "per_spot" && v > 0) dto = v * spots;
+              if (dto > 0) totalAmount = Math.max(depositPaid, Math.round((totalAmount - dto) * 100) / 100);
+              referrerNote = ` | Vendedor: ${ref.name}${dto > 0 ? ` (dto. ${dto.toFixed(2)}€)` : ""}`;
+            }
+          }
 
           const { data: bk } = await supabase.from("bookings").insert({
             user_id: userId,
@@ -146,7 +166,8 @@ Deno.serve(async (req) => {
             deposit_amount: depositPaid,
             total_amount: totalAmount,
             status: "deposit_paid",
-            notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}${spots > 1 ? ` | ${spots} plazas` : ""}`,
+            referrer_id: referrerId,
+            notes: `Pedido #${orderId.slice(0, 8)} | Stripe: ${session.id}${spots > 1 ? ` | ${spots} plazas` : ""}${referrerNote}`,
           }).select("id").single();
           if (bk?.id) {
             paymentRows.push({

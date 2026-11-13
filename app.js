@@ -3,6 +3,10 @@ import '/lib/cookie-banner.js';
 import { initHeader } from '/lib/header.js';
 import { initFooter } from '/lib/footer.js';
 import { initI18n } from '/lib/i18n.js';
+import { captureReferral } from '/lib/referral.js';
+
+// Enlace de vendedor (?ref=codigo): se guarda antes que nada, en cualquier página
+captureReferral();
 
 // Header y footer únicos (sin duplicar markup) — ver lib/header.js / lib/footer.js
 initHeader();

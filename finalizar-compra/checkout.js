@@ -2,6 +2,7 @@ import { getCart, getCartTotal, clearCart, updateCartPill } from '/lib/cart.js';
 import { getSession, getProfile } from '/lib/auth-client.js';
 import { supabase } from '/lib/supabase.js';
 import { phonePrefixSelectHtml, wirePhonePrefix } from '/lib/shared-constants.js';
+import { getReferralCode, getReferralInfo, referralDiscountLabel } from '/lib/referral.js';
 
 const formWrap = document.getElementById('checkout-form-wrap');
 const summaryWrap = document.getElementById('checkout-summary');
@@ -75,6 +76,12 @@ async function init() {
   let appliedCoupon = null;
   let discount = 0;
 
+  // Enlace de vendedor: solo afecta a Surf Camps. El descuento (si el vendedor
+  // lo tiene) rebaja el total del camp, no la señal que se paga ahora.
+  const hasCamp = cart.some(i => i.type === 'camp_reservation');
+  const referral = hasCamp ? await getReferralInfo() : null;
+  const referralNote = referralDiscountLabel(referral);
+
   // Render summary
   function renderSummary() {
     const summaryItems = cart.map(i => {
@@ -96,6 +103,10 @@ async function init() {
           <span>-${formatPrice(discount)}</span>
         </div>` : ''}
       <div class="summary-total summary-final"><span>Total a pagar</span><span>${formatPrice(finalTotal)}</span></div>
+      ${referralNote ? `
+        <div class="summary-item" style="color:#166534;font-weight:600;display:block;margin-top:8px">
+          Código de ${esc(referral.name)}: ${esc(referralNote)}. Se descuenta del resto a pagar, no de la señal.
+        </div>` : ''}
 
       <div class="coupon-form" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--color-line)">
         <label style="font-family:'Space Grotesk',sans-serif;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--color-muted);display:block;margin-bottom:6px">Codigo de descuento</label>
@@ -264,6 +275,7 @@ async function init() {
             invoiceAddress: f.factura_direccion?.value || null,
           },
           couponCode: appliedCoupon?.code || null,
+          referralCode: hasCamp ? getReferralCode() : null,
         },
       });
 

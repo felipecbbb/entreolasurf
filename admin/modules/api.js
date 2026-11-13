@@ -1003,6 +1003,49 @@ export async function deleteCoupon(id) {
   invalidateCache('coupons');
 }
 
+// ---- Referidos (vendedores de Surf Camp) ----
+export const fetchReferrers = cached('referrers', 30000, async () => {
+  const { data, error } = await supabase.from('referrers').select('*').order('name');
+  if (error) throw error;
+  return data || [];
+});
+
+export async function upsertReferrer(ref) {
+  const row = { ...ref, updated_at: new Date().toISOString() };
+  const id = row.id; delete row.id;
+  const { error } = id
+    ? await supabase.from('referrers').update(row).eq('id', id)
+    : await supabase.from('referrers').insert(row);
+  if (error) throw error;
+  invalidateCache('referrers');
+}
+
+export async function deleteReferrer(id) {
+  // on delete set null: sus reservas se quedan, solo pierden el vendedor
+  const { error } = await supabase.from('referrers').delete().eq('id', id);
+  if (error) throw error;
+  invalidateCache('referrers');
+  invalidateCache('bookings');
+}
+
+export async function setBookingReferrer(bookingId, referrerId) {
+  const { error } = await supabase.from('bookings')
+    .update({ referrer_id: referrerId || null, updated_at: new Date().toISOString() })
+    .eq('id', bookingId);
+  if (error) throw error;
+  invalidateCache('bookings');
+}
+
+// Reservas de camp con vendedor, para la sección Referidos
+export async function fetchReferredBookings() {
+  const { data, error } = await supabase.from('bookings')
+    .select('id, referrer_id, camp_id, user_id, guest_name, num_spots, total_amount, deposit_amount, status, created_at, profiles:user_id(full_name, last_name), surf_camps:camp_id(id, title, date_start)')
+    .not('referrer_id', 'is', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 // ---- Surf Classes ----
 export async function upsertClass(cls) {
   const { error } = await supabase.from('surf_classes').upsert(cls);
