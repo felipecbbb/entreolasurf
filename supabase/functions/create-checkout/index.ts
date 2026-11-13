@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
       userEmail = user?.email || null;
     }
 
-    const { items, customer, couponCode, successUrl, cancelUrl } = await req.json();
+    const { items, customer, couponCode, referralCode, successUrl, cancelUrl } = await req.json();
 
     if (!items?.length) {
       return new Response(JSON.stringify({ error: "Carrito vacío" }), {
@@ -108,6 +108,21 @@ Deno.serve(async (req) => {
           }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
         it.price = dep; // señal real, por plaza
+      }
+    }
+
+    // Referidos (vendedores): la atribución solo la decide el servidor. Se borra
+    // cualquier referrerId que venga del navegador y se pone el del código
+    // validado, únicamente en las plazas de Surf Camp.
+    for (const it of items) {
+      if (it.metadata && typeof it.metadata === "object") delete it.metadata.referrerId;
+    }
+    const refCode = typeof referralCode === "string" ? referralCode.trim().toLowerCase() : "";
+    if (refCode && /^[a-z0-9-]{2,40}$/.test(refCode) && campItems.length) {
+      const { data: ref } = await supabase.from("referrers")
+        .select("id").eq("code", refCode).eq("active", true).maybeSingle();
+      if (ref?.id) {
+        for (const it of campItems) it.metadata = { ...(it.metadata || {}), referrerId: ref.id };
       }
     }
 
